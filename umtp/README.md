@@ -126,4 +126,4 @@ python src/run_title_parse_umtp.py
 
 상태: 제목 파싱 후 DB 공정가 비교/저장까지 구현됨 (실제 중고나라 크롤링은 아직 미포함).
 
-0.4 진행 현황: `src/run_batch_umtp.py`에 테스트 매물 순회 실행 스켈레톤 추가.
+0.4 진행 현황: 배치 루프에 `parse_listing_title`을 연결했고, 스펙 추출 실패 매물은 DB 저장 없이 실패 처리합니다.
