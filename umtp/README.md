@@ -108,3 +108,11 @@ python src/run_manual_umtp.py
 결과: 알림 대상
 DB 저장 완료
 ```
+
+---
+
+## UMTP MVP Progress
+
+- 0.1: 고정 가짜 매물 분석
+- 0.2: 터미널 입력 매물 분석
+- 0.3: 매물 제목 스펙 자동 추출 후 분석 (진행 중: `src/spec_parser.py` 추가)
