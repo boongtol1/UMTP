@@ -101,6 +101,9 @@ def main():
     try:
         connection = get_connection()
         cursor = connection.cursor()
+        total_count = len(TEST_LISTINGS)
+        db_saved_count = 0
+        alert_target_count = 0
 
         for index, listing in enumerate(TEST_LISTINGS, start=1):
             print(f"[{index}] {listing['title']}")
@@ -133,6 +136,9 @@ def main():
                 is_alert_target,
             )
             connection.commit()
+            db_saved_count += 1
+            if is_alert_target:
+                alert_target_count += 1
 
             print(f"공정가: {fair_price_krw}원")
             print(f"매물가: {listing_price_krw}원")
@@ -141,6 +147,11 @@ def main():
             print(f"결과: {'알림 대상' if is_alert_target else '알림 대상 아님'}")
             print("DB 저장 완료")
             print()
+
+        print("요약:")
+        print(f"전체 매물: {total_count}개")
+        print(f"DB 저장 성공: {db_saved_count}개")
+        print(f"알림 대상: {alert_target_count}개")
     except Exception as exc:
         print(f"오류: {exc}")
     finally:
