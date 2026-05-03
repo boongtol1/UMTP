@@ -111,23 +111,6 @@ DB 저장 완료
 
 ---
 
-<<<<<<< HEAD
-## UMTP MVP Progress
-
-- 0.1: 고정 가짜 매물 분석
-- 0.2: 터미널 입력 매물 분석
-- 0.3: 매물 제목 스펙 자동 추출 후 분석
-- 0.4: 여러 테스트 매물 일괄 분석
-
-실행 명령:
-
-```bash
-python src/run_title_parse_umtp.py
-python src/run_batch_umtp.py
-```
-
-비고: 0.4는 테스트 매물 배치 분석 기준이며, 실제 중고나라 크롤링은 아직 미포함입니다.
-=======
 # UMTP 3차 MVP
 
 3차 MVP에서는 사용자가 입력한 매물 제목에서 제품 스펙을 자동 추출한 뒤,  
@@ -245,4 +228,3 @@ DB 저장 완료
 DB 저장 성공: 3개
 알림 대상: 1개
 ```
->>>>>>> docs/readme-mvp-structure
