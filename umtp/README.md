@@ -11,10 +11,10 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 0.2 | 터미널 입력 매물 분석 | `python src/run_manual_umtp.py` |
 | 0.3 | 매물 제목 스펙 자동 추출 후 분석 | `python src/run_title_parse_umtp.py` |
 | 0.4 | 여러 테스트 매물 일괄 분석 | `python src/run_batch_umtp.py` |
-| 0.5 (draft) | CSV 매물 목록 일괄 분석 | `python src/run_csv_umtp.py` |
+| 0.5 | CSV 매물 목록 일괄 분석 | `python src/run_csv_umtp.py` |
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
-- 0.5 초안 처리 흐름: CSV 행 읽기 → `parse_listing_title(title)`로 스펙 추출 → 추출 실패 시 실패 사유 출력 후 DB 저장 안 함
+- 0.5는 아직 실제 중고나라 크롤링을 하지 않고 CSV 샘플 데이터 기반으로만 분석합니다.
 
 ## 1) 설치 방법
 
@@ -269,3 +269,30 @@ python src/run_csv_umtp.py
 - 차이비율: `(차이금액 / 공정가) * 100`
 - 알림 기준: 차이비율이 `20` 이상이면 알림 대상
 - 분석 결과 저장: `listing_analysis_results`
+- 마지막 요약 출력:
+  - 전체 CSV 행 개수
+  - DB 저장 성공 개수
+  - 알림 대상 개수
+  - 실패 개수
+
+## 3) 예상 출력
+
+```text
+[1] 맥북에어 M1 8GB 256GB 급처
+공정가: 550000원
+매물가: 430000원
+차이금액: 120000원
+차이비율: 21.8%
+결과: 알림 대상
+DB 저장 완료
+
+[4] 맥북프로 M2 16GB 512GB 판매
+분석 실패: 제목 스펙 추출 실패 (제품, 칩, RAM, SSD 누락)
+DB 저장 안 함
+
+요약:
+전체 CSV 행: 4개
+DB 저장 성공: 3개
+알림 대상: 1개
+실패: 1개
+```
