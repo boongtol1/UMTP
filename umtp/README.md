@@ -14,6 +14,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 0.5 (draft) | CSV 매물 목록 일괄 분석 | `python src/run_csv_umtp.py` |
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
+- 0.5 초안 처리 흐름: CSV 행 읽기 → `parse_listing_title(title)`로 스펙 추출 → 추출 실패 시 실패 사유 출력 후 DB 저장 안 함
 
 ## 1) 설치 방법
 
