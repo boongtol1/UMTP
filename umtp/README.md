@@ -13,6 +13,8 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 0.4 | 여러 테스트 매물 일괄 분석 | `python src/run_batch_umtp.py` |
 | 0.5 (draft) | CSV 매물 목록 일괄 분석 | `python src/run_csv_umtp.py` |
 
+- `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
+
 ## 1) 설치 방법
 
 ```bash
