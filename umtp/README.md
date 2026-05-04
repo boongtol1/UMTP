@@ -3,6 +3,16 @@
 UMTP 프로젝트의 가장 간단한 1차 MVP입니다.  
 MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 결과를 DB에 저장합니다.
 
+## UMTP MVP Progress
+
+| Version | Summary | Run |
+|---|---|---|
+| 0.1 | 고정 가짜 매물 분석 | `python src/run_fake_umtp.py` |
+| 0.2 | 터미널 입력 매물 분석 | `python src/run_manual_umtp.py` |
+| 0.3 | 매물 제목 스펙 자동 추출 후 분석 | `python src/run_title_parse_umtp.py` |
+| 0.4 | 여러 테스트 매물 일괄 분석 | `python src/run_batch_umtp.py` |
+| 0.5 (draft) | CSV 매물 목록 일괄 분석 | `python src/run_csv_umtp.py` |
+
 ## 1) 설치 방법
 
 ```bash
