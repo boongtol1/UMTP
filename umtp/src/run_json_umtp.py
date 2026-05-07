@@ -123,6 +123,11 @@ def main():
     cursor = None
     try:
         listings = load_crawled_listings(JSON_FILE_PATH)
+        total_json_listings = len(listings)
+        db_saved_count = 0
+        alert_target_count = 0
+        failed_count = 0
+
         connection = get_connection()
         cursor = connection.cursor()
 
@@ -132,6 +137,7 @@ def main():
                 print(f"[{index}] 분석 실패: JSON 필드 누락 ({', '.join(missing_json_fields)})")
                 print("DB 저장 안 함")
                 print()
+                failed_count += 1
                 continue
 
             title = str(listing["title"]).strip()
@@ -148,6 +154,7 @@ def main():
                 print(f"분석 실패: {exc}")
                 print("DB 저장 안 함")
                 print()
+                failed_count += 1
                 continue
 
             parsed_spec = parse_listing_title(title)
@@ -157,6 +164,7 @@ def main():
                 print(f"분석 실패: 제목 스펙 추출 실패 ({', '.join(missing_labels)} 누락)")
                 print("DB 저장 안 함")
                 print()
+                failed_count += 1
                 continue
 
             analyzed_listing = {
@@ -169,6 +177,7 @@ def main():
                 print("분석 실패: 현재 지원하지 않는 제품이거나 공정가가 없습니다.")
                 print("DB 저장 안 함")
                 print()
+                failed_count += 1
                 continue
 
             diff_amount_krw = fair_price_krw - listing_price_krw
@@ -184,6 +193,9 @@ def main():
                 is_alert_target,
             )
             connection.commit()
+            db_saved_count += 1
+            if is_alert_target:
+                alert_target_count += 1
 
             print(f"공정가: {fair_price_krw}원")
             print(f"매물가: {listing_price_krw}원")
@@ -192,6 +204,12 @@ def main():
             print(f"결과: {'알림 대상' if is_alert_target else '알림 대상 아님'}")
             print("DB 저장 완료")
             print()
+
+        print("요약:")
+        print(f"전체 JSON 매물: {total_json_listings}개")
+        print(f"DB 저장 성공: {db_saved_count}개")
+        print(f"알림 대상: {alert_target_count}개")
+        print(f"실패: {failed_count}개")
     except Exception as exc:
         print(f"오류: {exc}")
     finally:
