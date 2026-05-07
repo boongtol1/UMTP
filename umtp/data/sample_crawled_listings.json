@@ -1,0 +1,26 @@
+[
+  {
+    "title": "맥북에어 M1 8GB 256GB 급처",
+    "listing_price_krw": 430000,
+    "source": "joongna",
+    "url": "https://example.com/listing/1"
+  },
+  {
+    "title": "맥북에어 M1 8GB 256GB 상태좋음",
+    "listing_price_krw": 520000,
+    "source": "joongna",
+    "url": "https://example.com/listing/2"
+  },
+  {
+    "title": "맥북에어 M1 8기가 256기가 판매",
+    "listing_price_krw": 450000,
+    "source": "joongna",
+    "url": "https://example.com/listing/3"
+  },
+  {
+    "title": "맥북프로 M2 16GB 512GB 판매",
+    "listing_price_krw": 900000,
+    "source": "joongna",
+    "url": "https://example.com/listing/4"
+  }
+]

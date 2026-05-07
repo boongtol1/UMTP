@@ -12,9 +12,12 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 0.3 | 매물 제목 스펙 자동 추출 후 분석 | `python src/run_title_parse_umtp.py` |
 | 0.4 | 여러 테스트 매물 일괄 분석 | `python src/run_batch_umtp.py` |
 | 0.5 | CSV 매물 목록 일괄 분석 | `python src/run_csv_umtp.py` |
+| 0.6 | 크롤링 결과 형태의 JSON 매물 일괄 분석 | `python src/run_json_umtp.py` |
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
+- `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.
 - 0.5는 아직 실제 중고나라 크롤링을 하지 않고 CSV 샘플 데이터 기반으로만 분석합니다.
+- 0.6은 아직 실제 중고나라 크롤링을 하지 않고 JSON 샘플 데이터 기반으로만 분석합니다.
 
 ## 1) 설치 방법
 
