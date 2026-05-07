@@ -339,4 +339,11 @@ python src/run_json_umtp.py
 - 제목 파싱: `parse_listing_title(title)` 재사용
 - 스펙 추출 대상: `product_type`, `chip`, `screen_inch`, `ram_gb`, `ssd_gb`
 - 스펙 추출 실패 시: 실패 사유 출력 후 DB 저장하지 않음
+- 공정가 조회 실패 시: 실패 사유 출력 후 DB 저장하지 않음
+- 공정가 조회: `mac_fair_prices`
+- 차이금액: `공정가 - 매물가`
+- 차이비율: `(차이금액 / 공정가) * 100`
+- 알림 기준: 차이비율이 `20` 이상이면 알림 대상
+- 분석 결과 저장: `listing_analysis_results`
+- 현재 `listing_analysis_results`에 `source`, `url` 컬럼이 없어 DB에는 저장하지 않음
 - 각 매물마다 `source`, `url`을 함께 출력
