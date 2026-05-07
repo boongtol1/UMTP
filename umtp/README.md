@@ -315,3 +315,25 @@ DB 저장 성공: 3개
 알림 대상: 1개
 실패: 1개
 ```
+
+---
+
+# UMTP 6차 MVP
+
+6차 MVP에서는 크롤링 결과 형태의 JSON 파일에서 여러 매물 목록을 읽어 일괄 분석합니다.
+
+1차와 동일하게 설치/환경변수 설정/테이블 생성/주의사항을 적용합니다.
+
+## 1) 실행 방법
+
+```bash
+python src/run_json_umtp.py
+```
+
+## 2) 동작 규칙
+
+- 입력 데이터: `data/sample_crawled_listings.json`
+- JSON 파싱: Python 표준 라이브러리 `json` 모듈 사용
+- JSON 루트 형식: 매물 dict들의 list
+- 각 매물 필수 필드: `title`, `listing_price_krw`, `source`, `url`
+- 현재 단계에서는 각 매물의 제목/가격/출처/URL 출력까지 수행
