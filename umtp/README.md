@@ -336,4 +336,7 @@ python src/run_json_umtp.py
 - JSON 파싱: Python 표준 라이브러리 `json` 모듈 사용
 - JSON 루트 형식: 매물 dict들의 list
 - 각 매물 필수 필드: `title`, `listing_price_krw`, `source`, `url`
-- 현재 단계에서는 각 매물의 제목/가격/출처/URL 출력까지 수행
+- 제목 파싱: `parse_listing_title(title)` 재사용
+- 스펙 추출 대상: `product_type`, `chip`, `screen_inch`, `ram_gb`, `ssd_gb`
+- 스펙 추출 실패 시: 실패 사유 출력 후 DB 저장하지 않음
+- 각 매물마다 `source`, `url`을 함께 출력
