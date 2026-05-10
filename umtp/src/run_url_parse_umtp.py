@@ -13,7 +13,6 @@ FIELD_LABELS = {
 REQUIRED_SPEC_FIELDS = ("product_type", "chip", "screen_inch", "ram_gb", "ssd_gb")
 SOURCE_NAME = "joongna"
 ALERT_THRESHOLD_RATIO = 20.0
-DESCRIPTION_PREVIEW_LIMIT = 120
 
 
 def read_listing_url():
@@ -21,13 +20,6 @@ def read_listing_url():
     if not url:
         raise ValueError("URL 입력값이 비어 있습니다.")
     return url
-
-
-def build_description_preview(description, max_length=DESCRIPTION_PREVIEW_LIMIT):
-    compact = " ".join(description.split())
-    if len(compact) <= max_length:
-        return compact
-    return f"{compact[:max_length].rstrip()} ..."
 
 
 def find_missing_spec_fields(parsed_spec):
@@ -125,7 +117,6 @@ def main():
 
         title = parsed_page["title"]
         description = parsed_page["description"]
-        description_preview = build_description_preview(description)
         listing_price_krw = parsed_page["listing_price_krw"]
 
         print()
@@ -133,7 +124,7 @@ def main():
         print(title)
         print()
         print("추출된 본문:")
-        print(description_preview)
+        print(description)
         print()
         print("추출된 가격:")
         print(f"{listing_price_krw}원")
