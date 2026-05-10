@@ -433,6 +433,7 @@ python src/run_url_parse_umtp.py
 - 0.7은 아직 중고나라 전체 검색 크롤링을 하지 않음
 - HTML 요청: `requests.get(url)` + `User-Agent` + `timeout`
 - HTML 파싱: `BeautifulSoup`
+- 0.7 구현을 위해 의존성 `requests`, `beautifulsoup4`를 requirements에 추가
 - 제목 추출: `meta name="twitter:title"`의 `content`
 - 본문 추출: `meta name="twitter:description"`의 `content`
 - 가격 추출: `whitespace-pre-line`, `text-32`, `font-bold`, `max-md:text-24` class 토큰을 모두 포함한 `span`

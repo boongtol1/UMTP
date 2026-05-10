@@ -81,7 +81,10 @@ def parse_joongna_listing_page(html):
     if not price_text:
         raise ValueError("가격 추출 실패: 지정 span 태그를 찾지 못했습니다.")
 
-    listing_price_krw = parse_price_to_int(price_text)
+    try:
+        listing_price_krw = parse_price_to_int(price_text)
+    except ValueError as exc:
+        raise ValueError(f"가격 추출 실패: {exc}") from exc
 
     return {
         "title": title,
