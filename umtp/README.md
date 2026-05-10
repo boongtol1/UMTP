@@ -19,7 +19,10 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.
 - 0.5는 아직 실제 중고나라 크롤링을 하지 않고 CSV 샘플 데이터 기반으로만 분석합니다.
 - 0.6은 아직 실제 중고나라 크롤링을 하지 않고 JSON 샘플 데이터 기반으로만 분석합니다.
-- 0.7 초안에서는 실제 중고나라 URL 1개를 입력받아 HTML 파싱 기반 분석으로 확장합니다.
+- 0.7은 아직 중고나라 전체 검색 크롤링을 하지 않고, 사용자가 입력한 실제 URL 1개만 `requests + BeautifulSoup`로 파싱합니다.
+- 0.7 제목 추출: `twitter:title` meta 태그
+- 0.7 본문 추출: `twitter:description` meta 태그
+- 0.7 가격 추출: 지정된 class 토큰을 포함한 `span` 태그
 
 ## 1) 설치 방법
 
