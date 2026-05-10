@@ -23,6 +23,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 0.7 제목 추출: `twitter:title` meta 태그
 - 0.7 본문 추출: `twitter:description` meta 태그
 - 0.7 가격 추출: 지정된 class 토큰을 포함한 `span` 태그
+- 향후에는 중고장터 키워드 알림에서 전달된 URL을 자동 분석하는 구조로 확장할 예정입니다.
 
 ## 1) 설치 방법
 
@@ -424,4 +425,54 @@ python src/run_url_parse_umtp.py
 
 ```text
 매물 URL 입력: https://web.joongna.com/product/228451872
+```
+
+## 2) 동작 규칙
+
+- 사용자 입력: URL 1개만 입력
+- 0.7은 아직 중고나라 전체 검색 크롤링을 하지 않음
+- HTML 요청: `requests.get(url)` + `User-Agent` + `timeout`
+- HTML 파싱: `BeautifulSoup`
+- 제목 추출: `meta name="twitter:title"`의 `content`
+- 본문 추출: `meta name="twitter:description"`의 `content`
+- 가격 추출: `whitespace-pre-line`, `text-32`, `font-bold`, `max-md:text-24` class 토큰을 모두 포함한 `span`
+- 가격 변환: 숫자만 추출해 `int`로 변환 (`550,000원` -> `550000`)
+- 가격 추출 실패 시: `가격 추출 실패` 메시지를 출력하고 DB 저장하지 않음
+- 스펙 추출: `parse_listing_title(title + " " + description)` 재사용
+- 공정가 조회: `mac_fair_prices`
+- 차이금액: `공정가 - 매물가`
+- 차이비율: `(차이금액 / 공정가) * 100`
+- 알림 기준: 차이비율 `20` 이상
+- 분석 결과 저장: `listing_analysis_results`
+- 출력 항목: 제목, 본문 일부, 가격, 스펙, 분석 결과, `source`, `url`
+
+## 3) 예상 출력
+
+```text
+추출된 제목:
+맥북 에어 M1 2020 8GB 실버
+
+추출된 본문:
+Apple Macbook Air M1 2020 8GB 램 256GB SSD 33.7cm 레티나 디스플레이 배터리 84% ...
+
+추출된 가격:
+550000원
+
+추출된 스펙:
+제품: MacBook Air
+칩: M1
+화면: 13인치
+RAM: 8GB
+SSD: 256GB
+
+공정가: 550000원
+매물가: 550000원
+차이금액: 0원
+차이비율: 0.0%
+결과: 알림 대상 아님
+
+출처: joongna
+URL: https://web.joongna.com/product/228451872
+
+DB 저장 완료
 ```
