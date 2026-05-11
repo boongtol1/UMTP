@@ -1,4 +1,4 @@
-def _insert_url_analysis_log(
+def _insert_url_analysis_log_v1(
     cursor,
     *,
     user_id,
@@ -58,6 +58,101 @@ def _insert_url_analysis_log(
     )
 
 
+def _insert_url_analysis_log(
+    cursor,
+    *,
+    user_id,
+    url,
+    source=None,
+    title=None,
+    listing_price_krw=None,
+    product_type=None,
+    chip=None,
+    screen_inch=None,
+    ram_gb=None,
+    ssd_gb=None,
+    fair_price_krw=None,
+    diff_ratio=None,
+    is_alert_target=None,
+    status,
+    reason=None,
+    confidence_score=None,
+    screen_inch_defaulted=None,
+    unit_valid=None,
+    unit_validation_reason=None,
+):
+    try:
+        cursor.execute(
+            """
+            INSERT INTO url_analysis_logs (
+                user_id,
+                url,
+                source,
+                title,
+                listing_price_krw,
+                product_type,
+                chip,
+                screen_inch,
+                ram_gb,
+                ssd_gb,
+                fair_price_krw,
+                diff_ratio,
+                is_alert_target,
+                status,
+                reason,
+                confidence_score,
+                screen_inch_defaulted,
+                unit_valid,
+                unit_validation_reason
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                user_id,
+                url,
+                source,
+                title,
+                listing_price_krw,
+                product_type,
+                chip,
+                screen_inch,
+                ram_gb,
+                ssd_gb,
+                fair_price_krw,
+                diff_ratio,
+                is_alert_target,
+                status,
+                reason,
+                confidence_score,
+                screen_inch_defaulted,
+                unit_valid,
+                unit_validation_reason,
+            ),
+        )
+    except Exception as exc:
+        if "Unknown column" not in str(exc):
+            raise
+
+        _insert_url_analysis_log_v1(
+            cursor,
+            user_id=user_id,
+            url=url,
+            source=source,
+            title=title,
+            listing_price_krw=listing_price_krw,
+            product_type=product_type,
+            chip=chip,
+            screen_inch=screen_inch,
+            ram_gb=ram_gb,
+            ssd_gb=ssd_gb,
+            fair_price_krw=fair_price_krw,
+            diff_ratio=diff_ratio,
+            is_alert_target=is_alert_target,
+            status=status,
+            reason=reason,
+        )
+
+
 def save_success_log(
     cursor,
     *,
@@ -88,6 +183,10 @@ def save_success_log(
         is_alert_target=is_alert_target,
         status="success",
         reason=None,
+        confidence_score=parsed_spec.get("confidence_score"),
+        screen_inch_defaulted=parsed_spec.get("screen_inch_defaulted"),
+        unit_valid=parsed_spec.get("unit_valid"),
+        unit_validation_reason=parsed_spec.get("unit_validation_reason"),
     )
 
 
@@ -120,6 +219,10 @@ def save_failed_log(
         is_alert_target=None,
         status="failed",
         reason=reason,
+        confidence_score=parsed_spec.get("confidence_score"),
+        screen_inch_defaulted=parsed_spec.get("screen_inch_defaulted"),
+        unit_valid=parsed_spec.get("unit_valid"),
+        unit_validation_reason=parsed_spec.get("unit_validation_reason"),
     )
 
 

@@ -52,6 +52,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.1 초안: 셀프검수 key-value를 우선 적용하고 부족한 값만 제목/본문 숫자 후보로 보완합니다.
 - 1.1 초안: `numeric_candidate_extractor.py`에서 RAM/SSD/화면 후보, `TB->GB`, `16/512` 축약표현을 파싱합니다.
 - 1.1 초안: `spec_parser.py`는 `confidence_score`, `detected_patterns`, `detected_conflicts`를 반환하고 화면 크기 미검출 시 13인치 기본값을 사용합니다.
+- 1.1 초안: `/analyze-url` 응답/로그에 `confidence_score`, `screen_inch_defaulted`, `unit_valid`, `unit_validation_reason`를 포함합니다.
 
 ## 1) 설치 방법
 
