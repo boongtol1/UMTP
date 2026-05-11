@@ -14,6 +14,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 0.5 | CSV 매물 목록 일괄 분석 | `python src/run_csv_umtp.py` |
 | 0.6 | 크롤링 결과 형태의 JSON 매물 일괄 분석 | `python src/run_json_umtp.py` |
 | 0.7 | URL만 입력하는 실제 중고나라 매물 HTML 파싱 분석 | `python src/run_url_parse_umtp.py` |
+| 0.8 | Android 알림 URL 수신 + 사용자 공정가 기준 분석 API | `uvicorn src.api_server:app --reload` |
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
 - `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.
@@ -24,6 +25,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 0.7 본문 추출: `twitter:description` meta 태그
 - 0.7 가격 추출: 지정된 class 토큰을 포함한 `span` 태그
 - 향후에는 중고장터 키워드 알림에서 전달된 URL을 자동 분석하는 구조로 확장할 예정입니다.
+- 0.8 초안: `sql/add_user_fair_prices.sql`로 사용자별 공정가 테이블을 추가합니다.
 
 ## 1) 설치 방법
 
