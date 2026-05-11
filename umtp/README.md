@@ -17,6 +17,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 0.8 | Android 알림 URL 수신 + 사용자 공정가 기준 분석 API | `uvicorn src.api_server:app --reload` |
 | 0.9 | Telegram 알림 + 중복 URL 방지 + 분석 기록 안정화 | `uvicorn src.api_server:app --reload` |
 | 1.0 | 전체 MacBook Air 단위 제품 DB화 + rule-based 공정가 자동 생성 | `python src/seed_user_fair_prices.py` |
+| 1.1 | 셀프검수 구조화 데이터 우선 파싱 + 숫자 기반 보조 파싱 | `uvicorn src.api_server:app --reload` |
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
 - `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.
@@ -47,6 +48,8 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.0 SQL seed: `sql/seed_macbook_air_units.sql`로도 동일 기준값을 upsert할 수 있습니다.
 - 1.0 파서 검증: MacBook Air 스펙 조합이 유효하지 않으면 `invalid_macbook_air_unit`으로 실패 처리합니다.
 - 1.0 API 확장: `/analyze-url` 응답에 `unit_valid`, `unit_validation_reason`를 포함합니다.
+- 1.1 초안: HTML 전체 텍스트 대신 제목/본문/가격/셀프검수(`dl/dt/dd`) 구조화 영역만 파싱합니다.
+- 1.1 초안: 셀프검수 key-value를 우선 적용하고 부족한 값만 제목/본문 숫자 후보로 보완합니다.
 
 ## 1) 설치 방법
 

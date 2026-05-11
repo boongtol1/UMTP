@@ -88,10 +88,10 @@ def _clean_self_check_dd_text(dd_tag):
     return _normalize_text(text)
 
 
-def extract_self_check_text(soup):
-    # 셀프검수 영역은 선택 정보이므로 실패 시 빈 문자열을 반환한다.
+def extract_self_check_fields(soup):
+    # 셀프검수 영역은 선택 정보이므로 실패 시 빈 dict를 반환한다.
     try:
-        key_value_map = {}
+        extracted = {}
         for dl_tag in soup.find_all("dl"):
             local_map = {}
             for dt_tag in dl_tag.find_all("dt"):
@@ -115,24 +115,12 @@ def extract_self_check_text(soup):
                 continue
 
             for key, value in local_map.items():
-                if key not in key_value_map:
-                    key_value_map[key] = value
+                if key not in extracted:
+                    extracted[key] = value
 
-        if not key_value_map:
-            return ""
-
-        sections = []
-        for key in SELF_CHECK_PRIORITY_KEYS:
-            if key in key_value_map:
-                sections.append(f"{key} {key_value_map[key]}")
-
-        for key, value in key_value_map.items():
-            if key not in SELF_CHECK_PRIORITY_KEYS:
-                sections.append(f"{key} {value}")
-
-        return _normalize_text(" ".join(sections))
+        return extracted
     except Exception:
-        return ""
+        return {}
 
 
 def parse_joongna_listing_page(html):
@@ -160,11 +148,11 @@ def parse_joongna_listing_page(html):
     except ValueError as exc:
         raise ValueError(f"가격 추출 실패: {exc}") from exc
 
-    self_check_text = extract_self_check_text(soup)
+    self_check_fields = extract_self_check_fields(soup)
 
     return {
         "title": title,
         "description": description,
         "listing_price_krw": listing_price_krw,
-        "self_check_text": self_check_text,
+        "self_check_fields": self_check_fields,
     }
