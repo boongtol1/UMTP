@@ -19,7 +19,15 @@ def health():
 
 @app.post("/analyze-url")
 def analyze_url(request: AnalyzeUrlRequest):
-    return analyze_url_for_user(
-        user_id=request.user_id,
-        url=request.url,
-    )
+    try:
+        return analyze_url_for_user(
+            user_id=request.user_id,
+            url=request.url,
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "status": "failed",
+            "url": request.url,
+            "reason": f"API 처리 실패: {exc}",
+        }

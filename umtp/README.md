@@ -37,6 +37,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 0.9 분석 로그: `analysis_log.py`에서 `success/failed/duplicate`를 공통 저장합니다.
 - 0.9 텔레그램 알림: `.env`의 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`를 사용하며 미설정 시 서버는 종료되지 않습니다.
 - 0.9 통합 응답: `status(success/duplicate/failed)`와 `telegram_sent`를 API 응답에 포함합니다.
+- 텔레그램 실제 토큰/채팅 ID는 `.env`에만 넣고 Git에는 올리지 않습니다.
 
 ## 1) 설치 방법
 
@@ -531,4 +532,55 @@ curl -X POST http://127.0.0.1:8000/analyze-url \
 - 알림 대상이면 `notifier.py`의 `send_alert(message)` 호출 (`print()` 기반)
 - 실패 응답 형식: `{"ok": false, "reason": "..."}`
 - 0.8 구현을 위해 `requirements.txt`에 `fastapi`, `uvicorn`을 추가
+
+---
+
+# UMTP 9차 MVP
+
+9차 MVP에서는 Telegram 알림, 중복 URL 재분석 방지, 분석 로그 안정 저장을 추가합니다.
+
+## 1) 추가 SQL 실행
+
+```bash
+mysql -u <DB_USER> -p < sql/add_url_analysis_logs.sql
+```
+
+## 2) 실행 방법
+
+```bash
+uvicorn src.api_server:app --reload
+```
+
+## 3) .env 설정
+
+`.env`에 아래 값을 설정합니다.
+
+```env
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+```
+
+실제 비밀값은 `.env`에만 저장하고 Git에는 올리지 않습니다.
+
+## 4) 테스트(curl)
+
+테스트 URL:
+`https://web.joongna.com/product/228436846`
+
+```bash
+curl -X POST http://127.0.0.1:8000/analyze-url \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "test_user",
+    "url": "https://web.joongna.com/product/228436846"
+  }'
+```
+
+## 5) 동작 규칙
+
+- 같은 `user_id + url`이 `success/failed/duplicate`로 이미 기록되면 재분석하지 않습니다.
+- 중복 요청은 `ok=true`, `status="duplicate"`, `message="이미 분석된 URL"`로 응답합니다.
+- `url_analysis_logs`에 `success/failed/duplicate`를 모두 저장합니다.
+- 알림 대상일 때만 Telegram Bot API `sendMessage`를 호출합니다.
+- 텔레그램 설정이 없으면 서버는 죽지 않고 `텔레그램 설정 없음`을 출력합니다.
 
