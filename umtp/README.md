@@ -68,6 +68,8 @@ DB_PORT=3306
 DB_USER=your_db_user
 DB_PASSWORD=your_db_password
 DB_NAME=UMTP_RB
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
 ```
 
 ## 3) 테이블 생성 방법
@@ -590,4 +592,31 @@ curl -X POST http://127.0.0.1:8000/analyze-url \
 - `url_analysis_logs`에 `success/failed/duplicate`를 모두 저장합니다.
 - 알림 대상일 때만 Telegram Bot API `sendMessage`를 호출합니다.
 - 텔레그램 설정이 없으면 서버는 죽지 않고 `텔레그램 설정 없음`을 출력합니다.
+
+---
+
+# UMTP 1.0 MVP
+
+1.0 MVP에서는 전체 실리콘 MacBook Air 유효 조합을 정의하고,  
+rule-based 공정가를 `user_fair_prices`에 자동 반영하는 seed 흐름을 추가합니다.
+
+## 1) 실행 방법
+
+```bash
+python src/seed_user_fair_prices.py
+```
+
+## 2) SQL seed 방법
+
+```bash
+mysql -u <DB_USER> -p < sql/seed_macbook_air_units.sql
+```
+
+## 3) 동작 규칙
+
+- `macbook_air_units.py`에서 유효 조합과 rule-based 공정가 계산을 관리합니다.
+- 공정가는 실제 시세가 아닌 MVP용 임시 기준값입니다.
+- `spec_parser.py`는 MacBook Air 스펙 파싱 후 유효 조합을 검증합니다.
+- 유효하지 않은 조합은 `invalid_macbook_air_unit`으로 실패 처리됩니다.
+- `/analyze-url` 요청 형식은 그대로 유지되며, 응답에 `unit_valid`, `unit_validation_reason`이 포함됩니다.
 

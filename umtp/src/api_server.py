@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from src.analysis_service import analyze_url_for_user
 
 
-app = FastAPI(title="UMTP API", version="0.9")
+app = FastAPI(title="UMTP API", version="1.0")
 
 
 class AnalyzeUrlRequest(BaseModel):
