@@ -1,7 +1,9 @@
+from src.analysis_log import save_failed_log, save_success_log
 from src.db import get_connection
 from src.listing_page_parser import fetch_html, parse_joongna_listing_page
-from src.notifier import send_alert
 from src.spec_parser import parse_listing_title
+from src.telegram_notifier import send_telegram_alert
+from src.url_history import find_existing_url_record, save_duplicate_url_record
 from src.user_fair_price import fetch_user_fair_price
 
 
@@ -16,15 +18,11 @@ REQUIRED_SPEC_FIELDS = ("product_type", "chip", "screen_inch", "ram_gb", "ssd_gb
 SOURCE_NAME = "joongna"
 
 
-def _fail(reason):
-    return {"ok": False, "reason": reason}
-
-
 def _find_missing_spec_fields(parsed_spec):
     return [field for field in REQUIRED_SPEC_FIELDS if parsed_spec.get(field) is None]
 
 
-def _save_analysis_result(
+def _save_listing_analysis_result(
     cursor,
     listing,
     fair_price_krw,
@@ -65,68 +63,121 @@ def _save_analysis_result(
     )
 
 
-def _build_alert_message(user_id, url, title, listing_price_krw, fair_price_krw, diff_ratio):
+def _build_telegram_message(title, listing_price_krw, fair_price_krw, diff_ratio, url):
     return (
-        f"user={user_id} 알림 대상 매물 발견 | "
-        f"title={title} | listing_price={listing_price_krw}원 | "
-        f"fair_price={fair_price_krw}원 | diff_ratio={round(diff_ratio, 1)}% | url={url}"
+        "[UMTP 알림]\n"
+        f"{title}\n\n"
+        f"가격: {listing_price_krw:,}원\n"
+        f"공정가: {fair_price_krw:,}원\n"
+        f"저평가율: {round(diff_ratio, 1)}%\n\n"
+        "URL:\n"
+        f"{url}"
     )
+
+
+def _build_failed_response(url, reason):
+    return {
+        "ok": False,
+        "status": "failed",
+        "url": url,
+        "reason": reason,
+    }
 
 
 def analyze_url_for_user(user_id, url):
     if not isinstance(user_id, str) or not user_id.strip():
-        return _fail("user_id가 비어 있습니다.")
+        return _build_failed_response(url if isinstance(url, str) else "", "user_id가 비어 있습니다.")
     if not isinstance(url, str) or not url.strip():
-        return _fail("url이 비어 있습니다.")
+        return _build_failed_response("", "url이 비어 있습니다.")
 
     user_id = user_id.strip()
     url = url.strip()
 
-    try:
-        html = fetch_html(url)
-    except RuntimeError as exc:
-        return _fail(f"URL 요청 실패: {exc}")
-
-    try:
-        parsed_page = parse_joongna_listing_page(html)
-    except ValueError as exc:
-        return _fail(str(exc))
-
-    title = parsed_page["title"]
-    description = parsed_page["description"]
-    listing_price_krw = parsed_page["listing_price_krw"]
-
-    parsed_spec = parse_listing_title(f"{title} {description}")
-    missing_spec_fields = _find_missing_spec_fields(parsed_spec)
-    if missing_spec_fields:
-        missing_labels = [FIELD_LABELS[field] for field in missing_spec_fields]
-        return _fail(f"스펙 추출 실패: {', '.join(missing_labels)} 누락")
-
     connection = None
     cursor = None
+    title = None
+    listing_price_krw = None
+    parsed_spec = {}
+
+    def fail(reason, *, source=None):
+        if connection is not None and cursor is not None:
+            try:
+                save_failed_log(
+                    cursor,
+                    user_id=user_id,
+                    url=url,
+                    reason=reason,
+                    source=source,
+                    title=title,
+                    listing_price_krw=listing_price_krw,
+                    parsed_spec=parsed_spec,
+                )
+                connection.commit()
+            except Exception as log_exc:
+                print(f"실패 로그 저장 실패: {log_exc}")
+        return _build_failed_response(url, reason)
+
     try:
-        connection = get_connection()
-        cursor = connection.cursor()
+        try:
+            connection = get_connection()
+            cursor = connection.cursor()
+        except Exception as exc:
+            return _build_failed_response(url, f"DB 연결 실패: {exc}")
+
+        existing = find_existing_url_record(cursor, user_id, url)
+        if existing:
+            try:
+                save_duplicate_url_record(cursor, user_id, url, source=SOURCE_NAME, reason="이미 분석된 URL")
+                connection.commit()
+            except Exception as dup_exc:
+                print(f"중복 로그 저장 실패: {dup_exc}")
+
+            return {
+                "ok": True,
+                "status": "duplicate",
+                "url": url,
+                "telegram_sent": False,
+                "message": "이미 분석된 URL",
+            }
+
+        try:
+            html = fetch_html(url)
+        except RuntimeError as exc:
+            return fail(f"URL 요청 실패: {exc}", source=SOURCE_NAME)
+
+        try:
+            parsed_page = parse_joongna_listing_page(html)
+        except ValueError as exc:
+            return fail(str(exc), source=SOURCE_NAME)
+
+        title = parsed_page["title"]
+        description = parsed_page["description"]
+        listing_price_krw = parsed_page["listing_price_krw"]
+
+        parsed_spec = parse_listing_title(f"{title} {description}")
+        missing_spec_fields = _find_missing_spec_fields(parsed_spec)
+        if missing_spec_fields:
+            missing_labels = [FIELD_LABELS[field] for field in missing_spec_fields]
+            return fail(f"스펙 추출 실패: {', '.join(missing_labels)} 누락", source=SOURCE_NAME)
 
         user_fair_price = fetch_user_fair_price(cursor, user_id, parsed_spec)
         if user_fair_price is None:
-            return _fail("사용자 공정가 조회 실패: 해당 user_id/스펙 조합이 없습니다.")
+            return fail("사용자 공정가 조회 실패: 해당 user_id/스펙 조합이 없습니다.", source=SOURCE_NAME)
 
         fair_price_krw = user_fair_price["fair_price_krw"]
-        alert_drop_rate_percent = user_fair_price["alert_drop_rate_percent"]
         if fair_price_krw <= 0:
-            return _fail("사용자 공정가 조회 실패: 공정가가 0보다 커야 합니다.")
+            return fail("사용자 공정가 조회 실패: 공정가가 0보다 커야 합니다.", source=SOURCE_NAME)
 
         diff_amount_krw = fair_price_krw - listing_price_krw
         diff_ratio = (diff_amount_krw / fair_price_krw) * 100
-        is_alert_target = diff_ratio >= alert_drop_rate_percent
+        is_alert_target = diff_ratio >= user_fair_price["alert_drop_rate_percent"]
 
         listing = {
             "title": title,
             "listing_price_krw": listing_price_krw,
             **parsed_spec,
         }
-        _save_analysis_result(
+        _save_listing_analysis_result(
             cursor,
             listing,
             fair_price_krw,
@@ -134,37 +185,50 @@ def analyze_url_for_user(user_id, url):
             diff_ratio,
             is_alert_target,
         )
+        save_success_log(
+            cursor,
+            user_id=user_id,
+            url=url,
+            source=SOURCE_NAME,
+            title=title,
+            listing_price_krw=listing_price_krw,
+            parsed_spec=parsed_spec,
+            fair_price_krw=fair_price_krw,
+            diff_ratio=diff_ratio,
+            is_alert_target=is_alert_target,
+        )
         connection.commit()
 
-        message = "알림 대상" if is_alert_target else "알림 대상 아님"
+        telegram_sent = False
+        message = "알림 대상 아님"
         if is_alert_target:
-            send_alert(
-                _build_alert_message(
-                    user_id=user_id,
-                    url=url,
+            message = "알림 대상"
+            telegram_sent = send_telegram_alert(
+                _build_telegram_message(
                     title=title,
                     listing_price_krw=listing_price_krw,
                     fair_price_krw=fair_price_krw,
                     diff_ratio=diff_ratio,
+                    url=url,
                 )
             )
 
         return {
             "ok": True,
+            "status": "success",
             "user_id": user_id,
             "url": url,
-            "source": SOURCE_NAME,
             "title": title,
             "listing_price_krw": listing_price_krw,
             "fair_price_krw": fair_price_krw,
             "diff_amount_krw": diff_amount_krw,
             "diff_ratio": round(diff_ratio, 1),
-            "alert_drop_rate_percent": alert_drop_rate_percent,
             "is_alert_target": is_alert_target,
+            "telegram_sent": telegram_sent,
             "message": message,
         }
     except Exception as exc:
-        return _fail(f"분석 처리 실패: {exc}")
+        return fail(f"분석 처리 실패: {exc}", source=SOURCE_NAME)
     finally:
         if cursor is not None:
             cursor.close()
