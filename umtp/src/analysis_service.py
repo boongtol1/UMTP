@@ -167,8 +167,13 @@ def analyze_url_for_user(user_id, url):
         title = parsed_page["title"]
         description = parsed_page["description"]
         listing_price_krw = parsed_page["listing_price_krw"]
+        self_check_text = (parsed_page.get("self_check_text") or "").strip()
 
-        parsed_spec = parse_listing_title(f"{title} {description}")
+        parsing_source_text = f"{title} {description}"
+        if self_check_text:
+            parsing_source_text = f"{parsing_source_text} {self_check_text}"
+
+        parsed_spec = parse_listing_title(parsing_source_text)
         unit_valid = parsed_spec.get("unit_valid")
         unit_validation_reason = parsed_spec.get("unit_validation_reason")
 
@@ -244,6 +249,7 @@ def analyze_url_for_user(user_id, url):
             "user_id": user_id,
             "url": url,
             "title": title,
+            "self_check_text": self_check_text,
             "product_type": parsed_spec["product_type"],
             "chip": parsed_spec["chip"],
             "screen_inch": parsed_spec["screen_inch"],

@@ -12,6 +12,8 @@ DEFAULT_HEADERS = {
         "Chrome/124.0.0.0 Safari/537.36"
     )
 }
+SELF_CHECK_PRIORITY_KEYS = ("모델명", "램 용량", "SSD용량", "CPU종류", "컬러")
+SELF_CHECK_IGNORED_TOKENS = ("스펙보기",)
 
 
 def fetch_html(url):
@@ -61,6 +63,78 @@ def find_price_text(soup):
     return None
 
 
+def _normalize_text(text):
+    if not isinstance(text, str):
+        return ""
+    return " ".join(text.split()).strip()
+
+
+def _clean_self_check_dd_text(dd_tag):
+    if dd_tag is None:
+        return ""
+
+    # 원본 노드를 건드리지 않기 위해 복제본에서 버튼/부가 UI 텍스트를 제거한다.
+    dd_clone = BeautifulSoup(str(dd_tag), "html.parser").find("dd")
+    if dd_clone is None:
+        dd_clone = dd_tag
+
+    for button_tag in dd_clone.find_all("button"):
+        button_tag.decompose()
+
+    text = _normalize_text(dd_clone.get_text(" ", strip=True))
+    for ignored_token in SELF_CHECK_IGNORED_TOKENS:
+        text = text.replace(ignored_token, " ")
+
+    return _normalize_text(text)
+
+
+def extract_self_check_text(soup):
+    # 셀프검수 영역은 선택 정보이므로 실패 시 빈 문자열을 반환한다.
+    try:
+        key_value_map = {}
+        for dl_tag in soup.find_all("dl"):
+            local_map = {}
+            for dt_tag in dl_tag.find_all("dt"):
+                key = _normalize_text(dt_tag.get_text(" ", strip=True))
+                if not key:
+                    continue
+
+                dd_tag = dt_tag.find_next_sibling("dd")
+                if dd_tag is None:
+                    continue
+
+                value = _clean_self_check_dd_text(dd_tag)
+                if not value:
+                    continue
+
+                if key not in local_map:
+                    local_map[key] = value
+
+            has_priority_key = any(key in local_map for key in SELF_CHECK_PRIORITY_KEYS)
+            if not has_priority_key:
+                continue
+
+            for key, value in local_map.items():
+                if key not in key_value_map:
+                    key_value_map[key] = value
+
+        if not key_value_map:
+            return ""
+
+        sections = []
+        for key in SELF_CHECK_PRIORITY_KEYS:
+            if key in key_value_map:
+                sections.append(f"{key} {key_value_map[key]}")
+
+        for key, value in key_value_map.items():
+            if key not in SELF_CHECK_PRIORITY_KEYS:
+                sections.append(f"{key} {value}")
+
+        return _normalize_text(" ".join(sections))
+    except Exception:
+        return ""
+
+
 def parse_joongna_listing_page(html):
     if not isinstance(html, str) or not html.strip():
         raise ValueError("HTML 내용이 비어 있습니다.")
@@ -86,8 +160,11 @@ def parse_joongna_listing_page(html):
     except ValueError as exc:
         raise ValueError(f"가격 추출 실패: {exc}") from exc
 
+    self_check_text = extract_self_check_text(soup)
+
     return {
         "title": title,
         "description": description,
         "listing_price_krw": listing_price_krw,
+        "self_check_text": self_check_text,
     }

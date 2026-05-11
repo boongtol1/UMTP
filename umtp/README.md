@@ -26,6 +26,8 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 0.7 제목 추출: `twitter:title` meta 태그
 - 0.7 본문 추출: `twitter:description` meta 태그
 - 0.7 가격 추출: 지정된 class 토큰을 포함한 `span` 태그
+- 0.7 셀프검수(`dl/dt/dd`)가 있으면 모델명/램 용량/SSD용량/CPU종류/컬러를 스펙 파싱 재료로 추가합니다.
+- 셀프검수 영역이 없는 매물은 기존처럼 제목+본문 기준으로 분석합니다.
 - 향후에는 중고장터 키워드 알림에서 전달된 URL을 자동 분석하는 구조로 확장할 예정입니다.
 - 0.8 초안: `sql/add_user_fair_prices.sql`로 사용자별 공정가 테이블을 추가합니다.
 - `user_fair_prices`는 사용자별 공정가(`fair_price_krw`)와 알림 기준(`alert_drop_rate_percent`)을 관리합니다.
@@ -462,9 +464,11 @@ python src/run_url_parse_umtp.py
 - 제목 추출: `meta name="twitter:title"`의 `content`
 - 본문 추출: `meta name="twitter:description"`의 `content`
 - 가격 추출: `whitespace-pre-line`, `text-32`, `font-bold`, `max-md:text-24` class 토큰을 모두 포함한 `span`
+- 셀프검수 추출(선택): `dl` 내부 `dt/dd`에서 모델명/램 용량/SSD용량/CPU종류/컬러를 우선 추출
+- 셀프검수 영역이 없으면 기존처럼 `title + description`만으로 스펙 파싱
 - 가격 변환: 숫자만 추출해 `int`로 변환 (`550,000원` -> `550000`)
 - 가격 추출 실패 시: `가격 추출 실패` 메시지를 출력하고 DB 저장하지 않음
-- 스펙 추출: `parse_listing_title(title + " " + description)` 재사용
+- 스펙 추출: `parse_listing_title(title + " " + description + (셀프검수 텍스트))` 재사용
 - 공정가 조회: `mac_fair_prices`
 - 차이금액: `공정가 - 매물가`
 - 차이비율: `(차이금액 / 공정가) * 100`
@@ -535,7 +539,7 @@ curl -X POST http://127.0.0.1:8000/analyze-url \
 - 엔드포인트: `POST /analyze-url`
 - 입력: `user_id`, `url`
 - URL HTML 파싱: `listing_page_parser.py` 재사용
-- 스펙 추출: `parse_listing_title(title + " " + description)` 재사용
+- 스펙 추출: `parse_listing_title(title + " " + description + (셀프검수 텍스트))` 재사용
 - 사용자 공정가 조회: `user_fair_prices` (`fair_price_krw`, `alert_drop_rate_percent`)
 - 분석 결과 저장: `listing_analysis_results`
 - 알림 대상이면 `notifier.py`의 `send_alert(message)` 호출 (`print()` 기반)

@@ -118,6 +118,7 @@ def main():
         title = parsed_page["title"]
         description = parsed_page["description"]
         listing_price_krw = parsed_page["listing_price_krw"]
+        self_check_text = (parsed_page.get("self_check_text") or "").strip()
 
         print()
         print("추출된 제목:")
@@ -126,11 +127,19 @@ def main():
         print("추출된 본문:")
         print(description)
         print()
+        if self_check_text:
+            print("추출된 셀프검수:")
+            print(self_check_text)
+            print()
         print("추출된 가격:")
         print(f"{listing_price_krw}원")
         print()
 
-        parsed_spec = parse_listing_title(f"{title} {description}")
+        parsing_source_text = f"{title} {description}"
+        if self_check_text:
+            parsing_source_text = f"{parsing_source_text} {self_check_text}"
+
+        parsed_spec = parse_listing_title(parsing_source_text)
         missing_fields = find_missing_spec_fields(parsed_spec)
         if missing_fields:
             missing_labels = [FIELD_LABELS[field] for field in missing_fields]
