@@ -57,6 +57,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.1: `sql/add_parser_confidence_columns.sql`로 `url_analysis_logs` 파서 신뢰도 컬럼을 안전하게 추가합니다.
 - MySQL 환경에서 `ADD COLUMN IF NOT EXISTS` 사용이 제한되면 Workbench에서 컬럼 존재를 확인 후 수동 실행합니다.
 - 1.2 초안: `risk_keywords.py`로 위험/교환 키워드 그룹을 카테고리 단위로 관리합니다.
+- 1.2 초안: `risk_analyzer.py`에서 교환글/위험 키워드를 점수화(`none/low/medium/high/exclude`)합니다.
 
 ## 1) 설치 방법
 
