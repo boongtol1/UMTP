@@ -15,6 +15,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 0.6 | 크롤링 결과 형태의 JSON 매물 일괄 분석 | `python src/run_json_umtp.py` |
 | 0.7 | URL만 입력하는 실제 중고나라 매물 HTML 파싱 분석 | `python src/run_url_parse_umtp.py` |
 | 0.8 | Android 알림 URL 수신 + 사용자 공정가 기준 분석 API | `uvicorn src.api_server:app --reload` |
+| 0.9 | Telegram 알림 + 중복 URL 방지 + 분석 기록 안정화 | `uvicorn src.api_server:app --reload` |
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
 - `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.
@@ -31,6 +32,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 0.8 알림은 `notifier.py`의 `print()` 기반 가짜 알림으로 처리합니다.
 - 0.8은 Android Notification Listener 앱 자체를 구현하지 않고 `curl` 요청으로 URL 전달 상황을 흉내냅니다.
 - 0.8은 실제 텔레그램 전송 대신 `notifier.py`의 `print()` 알림을 사용합니다.
+- 0.9 초안: `sql/add_url_analysis_logs.sql`로 URL 분석 안정 로그 테이블을 추가합니다.
 
 ## 1) 설치 방법
 
