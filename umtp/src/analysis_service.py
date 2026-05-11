@@ -91,12 +91,32 @@ def _build_telegram_message(
     *,
     screen_inch_defaulted=False,
 ):
+    risk_level = risk_result.get("risk_level", "none")
+    is_exchange_post = bool(risk_result.get("is_exchange_post", False))
+
+    prefix_parts = ["[UMTP 알림]"]
+    if risk_level in {"medium", "high", "exclude"}:
+        prefix_parts.append("[주의 필요]")
+    if risk_level == "exclude":
+        prefix_parts.append("[제외급 위험]")
+    if is_exchange_post:
+        prefix_parts.append("[교환글]")
+    header = "".join(prefix_parts)
+
     defaulted_message = ""
     if screen_inch_defaulted:
         defaulted_message = "화면 크기: 13인치 기본값 사용\n"
 
+    exclude_notice = ""
+    if risk_level == "exclude":
+        exclude_notice = "정상 현금 판매 매물로 보기 어려울 수 있음\n"
+
+    exchange_notice = ""
+    if is_exchange_post:
+        exchange_notice = "현금 판매가 아닌 교환글일 수 있음\n"
+
     return (
-        "[UMTP 알림]\n"
+        f"{header}\n"
         f"{title}\n\n"
         f"가격: {listing_price_krw:,}원\n"
         f"공정가: {fair_price_krw:,}원\n"
@@ -106,6 +126,8 @@ def _build_telegram_message(
         f"위험 키워드: {', '.join(risk_result.get('risk_keywords', [])) or '-'}\n"
         f"교환 키워드: {', '.join(risk_result.get('exchange_keywords', [])) or '-'}\n"
         f"{defaulted_message}\n"
+        f"{exclude_notice}"
+        f"{exchange_notice}\n"
         "URL:\n"
         f"{url}"
     )
@@ -310,7 +332,15 @@ def analyze_url_for_user(user_id, url):
         telegram_sent = False
         message = "알림 대상 아님"
         if is_alert_target:
-            message = "알림 대상"
+            message_parts = ["알림 대상"]
+            risk_level = risk_result.get("risk_level")
+            if risk_level in {"medium", "high", "exclude"}:
+                message_parts.append("주의 필요")
+            if risk_level == "exclude":
+                message_parts.append("제외급 위험")
+            if risk_result.get("is_exchange_post"):
+                message_parts.append("교환글")
+            message = " - ".join(message_parts)
             telegram_sent = send_telegram_alert(
                 _build_telegram_message(
                     title=title,
