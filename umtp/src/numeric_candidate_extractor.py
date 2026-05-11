@@ -28,6 +28,17 @@ def _set_detected_pattern(detected_patterns, field_name, raw_value):
         detected_patterns[field_name] = raw_value
 
 
+def _add_candidate(result, field_name, value, raw_pattern):
+    key_by_field = {
+        "screen_inch": "screen_candidates",
+        "ram_gb": "ram_candidates",
+        "ssd_gb": "ssd_candidates",
+    }
+    target_key = key_by_field[field_name]
+    _append_unique(result[target_key], value)
+    _set_detected_pattern(result["detected_patterns"], field_name, raw_pattern)
+
+
 def _normalize_tb_token(token):
     return re.sub(r"\s+", "", token.lower())
 
@@ -71,32 +82,18 @@ def extract_numeric_candidates(text):
     for match in shorthand_pattern.finditer(lowered_text):
         ram_gb = int(match.group(1))
         ssd_gb = _parse_ssd_token(match.group(2))
-
-        _append_unique(result["ram_candidates"], ram_gb)
+        _add_candidate(result, "ram_gb", ram_gb, match.group(0))
         if ssd_gb is not None:
-            _append_unique(result["ssd_candidates"], ssd_gb)
-
-        raw = match.group(0)
-        _set_detected_pattern(result["detected_patterns"], "ram_gb", raw)
-        _set_detected_pattern(result["detected_patterns"], "ssd_gb", raw)
+            _add_candidate(result, "ssd_gb", ssd_gb, match.group(0))
 
     for match in re.finditer(r"(?<!\d)(13|15)\s*(?:인치|inch)(?!\d)", lowered_text, flags=re.IGNORECASE):
-        value = int(match.group(1))
-        _append_unique(result["screen_candidates"], value)
-        _set_detected_pattern(result["detected_patterns"], "screen_inch", match.group(0))
+        _add_candidate(result, "screen_inch", int(match.group(1)), match.group(0))
 
     for match in re.finditer(r"(?<!\d)(13|15)-inch(?!\d)", lowered_text, flags=re.IGNORECASE):
-        value = int(match.group(1))
-        _append_unique(result["screen_candidates"], value)
-        _set_detected_pattern(result["detected_patterns"], "screen_inch", match.group(0))
+        _add_candidate(result, "screen_inch", int(match.group(1)), match.group(0))
 
     for match in re.finditer(r"(?<!\d)(13|15)(?!\d)", lowered_text):
-        token = match.group(1)
-        if token in EXCLUDED_YEARS:
-            continue
-        value = int(token)
-        _append_unique(result["screen_candidates"], value)
-        _set_detected_pattern(result["detected_patterns"], "screen_inch", token)
+        _add_candidate(result, "screen_inch", int(match.group(1)), match.group(0))
 
     ram_patterns = (
         r"(?<!\d)(8|16|24|32)\s*gb(?!\d)",
@@ -106,9 +103,13 @@ def extract_numeric_candidates(text):
     )
     for pattern in ram_patterns:
         for match in re.finditer(pattern, lowered_text, flags=re.IGNORECASE):
-            ram_gb = int(match.group(1))
-            _append_unique(result["ram_candidates"], ram_gb)
-            _set_detected_pattern(result["detected_patterns"], "ram_gb", match.group(0))
+            _add_candidate(result, "ram_gb", int(match.group(1)), match.group(0))
+
+    for match in re.finditer(r"(?<!\d)(8|16|24|32)(?!\d)", lowered_text):
+        token = match.group(1)
+        if token in EXCLUDED_YEARS:
+            continue
+        _add_candidate(result, "ram_gb", int(token), match.group(0))
 
     ssd_patterns = (
         r"(?<!\d)(256|512|1024|2048|4096)\s*gb(?!\d)",
@@ -117,16 +118,19 @@ def extract_numeric_candidates(text):
     )
     for pattern in ssd_patterns:
         for match in re.finditer(pattern, lowered_text, flags=re.IGNORECASE):
-            ssd_gb = int(match.group(1))
-            _append_unique(result["ssd_candidates"], ssd_gb)
-            _set_detected_pattern(result["detected_patterns"], "ssd_gb", match.group(0))
+            _add_candidate(result, "ssd_gb", int(match.group(1)), match.group(0))
+
+    for match in re.finditer(r"(?<!\d)(256|512|1024|2048|4096)(?!\d)", lowered_text):
+        token = match.group(1)
+        if token in EXCLUDED_YEARS:
+            continue
+        _add_candidate(result, "ssd_gb", int(token), match.group(0))
 
     tb_pattern = re.compile(r"(?<!\d)(1|2|4)\s*(tb|t|테라)(?![a-zA-Z0-9가-힣])", flags=re.IGNORECASE)
     for match in tb_pattern.finditer(lowered_text):
         ssd_gb = _parse_ssd_token(match.group(0))
         if ssd_gb is None:
             continue
-        _append_unique(result["ssd_candidates"], ssd_gb)
-        _set_detected_pattern(result["detected_patterns"], "ssd_gb", match.group(0))
+        _add_candidate(result, "ssd_gb", ssd_gb, match.group(0))
 
     return result
