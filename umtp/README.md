@@ -50,6 +50,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.0 API 확장: `/analyze-url` 응답에 `unit_valid`, `unit_validation_reason`를 포함합니다.
 - 1.1 초안: HTML 전체 텍스트 대신 제목/본문/가격/셀프검수(`dl/dt/dd`) 구조화 영역만 파싱합니다.
 - 1.1 초안: 셀프검수 key-value를 우선 적용하고 부족한 값만 제목/본문 숫자 후보로 보완합니다.
+- 1.1 초안: `numeric_candidate_extractor.py`에서 RAM/SSD/화면 후보, `TB->GB`, `16/512` 축약표현을 파싱합니다.
 
 ## 1) 설치 방법
 
