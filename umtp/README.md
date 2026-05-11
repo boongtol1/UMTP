@@ -48,12 +48,12 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.0 SQL seed: `sql/seed_macbook_air_units.sql`로도 동일 기준값을 upsert할 수 있습니다.
 - 1.0 파서 검증: MacBook Air 스펙 조합이 유효하지 않으면 `invalid_macbook_air_unit`으로 실패 처리합니다.
 - 1.0 API 확장: `/analyze-url` 응답에 `unit_valid`, `unit_validation_reason`를 포함합니다.
-- 1.1 초안: HTML 전체 텍스트 대신 제목/본문/가격/셀프검수(`dl/dt/dd`) 구조화 영역만 파싱합니다.
-- 1.1 초안: 셀프검수 key-value를 우선 적용하고 부족한 값만 제목/본문 숫자 후보로 보완합니다.
-- 1.1 초안: `numeric_candidate_extractor.py`에서 RAM/SSD/화면 후보, `TB->GB`, `16/512` 축약표현을 파싱합니다.
-- 1.1 초안: `spec_parser.py`는 `confidence_score`, `detected_patterns`, `detected_conflicts`를 반환하고 화면 크기 미검출 시 13인치 기본값을 사용합니다.
-- 1.1 초안: `/analyze-url` 응답/로그에 `confidence_score`, `screen_inch_defaulted`, `unit_valid`, `unit_validation_reason`를 포함합니다.
-- 1.1 초안: `sql/add_parser_confidence_columns.sql`로 `url_analysis_logs` 파서 신뢰도 컬럼을 안전하게 추가합니다.
+- 1.1: HTML 전체 텍스트 대신 제목/본문/가격/셀프검수(`dl/dt/dd`) 구조화 영역만 파싱합니다.
+- 1.1: 셀프검수 key-value를 우선 적용하고 부족한 값만 제목/본문 숫자 후보로 보완합니다.
+- 1.1: `numeric_candidate_extractor.py`에서 RAM/SSD/화면 후보, `TB->GB`, `16/512` 축약표현을 파싱합니다.
+- 1.1: `spec_parser.py`는 `confidence_score`, `detected_patterns`, `detected_conflicts`를 반환하고 화면 크기 미검출 시 13인치 기본값을 사용합니다.
+- 1.1: `/analyze-url` 응답/로그에 `confidence_score`, `screen_inch_defaulted`, `unit_valid`, `unit_validation_reason`를 포함합니다.
+- 1.1: `sql/add_parser_confidence_columns.sql`로 `url_analysis_logs` 파서 신뢰도 컬럼을 안전하게 추가합니다.
 - MySQL 환경에서 `ADD COLUMN IF NOT EXISTS` 사용이 제한되면 Workbench에서 컬럼 존재를 확인 후 수동 실행합니다.
 
 ## 1) 설치 방법
@@ -476,7 +476,7 @@ python src/run_url_parse_umtp.py
 - 셀프검수 영역이 없으면 기존처럼 `title + description`만으로 스펙 파싱
 - 가격 변환: 숫자만 추출해 `int`로 변환 (`550,000원` -> `550000`)
 - 가격 추출 실패 시: `가격 추출 실패` 메시지를 출력하고 DB 저장하지 않음
-- 스펙 추출: `parse_listing_title(title + " " + description + (셀프검수 텍스트))` 재사용
+- 스펙 추출: `parse_listing_title(title + " " + description, self_check_fields=...)` 재사용
 - 공정가 조회: `mac_fair_prices`
 - 차이금액: `공정가 - 매물가`
 - 차이비율: `(차이금액 / 공정가) * 100`
@@ -547,7 +547,7 @@ curl -X POST http://127.0.0.1:8000/analyze-url \
 - 엔드포인트: `POST /analyze-url`
 - 입력: `user_id`, `url`
 - URL HTML 파싱: `listing_page_parser.py` 재사용
-- 스펙 추출: `parse_listing_title(title + " " + description + (셀프검수 텍스트))` 재사용
+- 스펙 추출: `parse_listing_title(title + " " + description, self_check_fields=...)` 재사용
 - 사용자 공정가 조회: `user_fair_prices` (`fair_price_krw`, `alert_drop_rate_percent`)
 - 분석 결과 저장: `listing_analysis_results`
 - 알림 대상이면 `notifier.py`의 `send_alert(message)` 호출 (`print()` 기반)
@@ -631,4 +631,44 @@ mysql -u <DB_USER> -p < sql/seed_macbook_air_units.sql
 - `spec_parser.py`는 MacBook Air 스펙 파싱 후 유효 조합을 검증합니다.
 - 유효하지 않은 조합은 `invalid_macbook_air_unit`으로 실패 처리됩니다.
 - `/analyze-url` 요청 형식은 그대로 유지되며, 응답에 `unit_valid`, `unit_validation_reason`이 포함됩니다.
+
+---
+
+# UMTP 1.1 MVP
+
+1.1 MVP에서는 HTML 전체 텍스트를 파싱하지 않고,  
+제목/본문/가격/셀프검수 영역만 사용해 스펙을 추출합니다.
+
+## 1) 실행 방법
+
+```bash
+uvicorn src.api_server:app --reload
+```
+
+## 2) 요청 예시(curl)
+
+```bash
+curl -X POST http://127.0.0.1:8000/analyze-url \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "test_user",
+    "url": "https://web.joongna.com/product/228436846"
+  }'
+```
+
+## 3) 추가 SQL 실행
+
+```bash
+mysql -u <DB_USER> -p < sql/add_parser_confidence_columns.sql
+```
+
+## 4) 동작 규칙
+
+- 셀프검수는 `dl/dt/dd` 구조를 key-value로 파싱해 `self_check_fields`로 저장합니다.
+- `self_check_fields` 값(모델명/CPU종류/램 용량/SSD용량)을 제목/본문 파싱보다 우선합니다.
+- 부족한 항목만 `numeric_candidate_extractor.py`로 제목+본문 숫자 후보를 보조 파싱합니다.
+- `screen_inch`를 찾지 못하면 13인치 기본값을 사용하고 `screen_inch_defaulted=true`로 반환합니다.
+- `confidence_score`는 product/chip/ram/ssd/screen 추출 확실도를 0~100 점수로 반환합니다.
+- `parse_success=false`이면 공정가 조회를 중단하고 `missing_fields`, `unit_validation_reason`를 응답에 포함합니다.
+- MySQL 환경에서 `ADD COLUMN IF NOT EXISTS`가 제한되면 Workbench에서 컬럼 존재 확인 후 수동 실행합니다.
 
