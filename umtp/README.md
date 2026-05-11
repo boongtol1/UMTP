@@ -41,6 +41,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 텔레그램 실제 토큰/채팅 ID는 `.env`에만 넣고 Git에는 올리지 않습니다.
 - 1.0 초안: `macbook_air_units.py`에 전체 실리콘 MacBook Air 유효 조합을 정의합니다.
 - 1.0 rule-based 공정가는 실제 시세가 아닌 MVP용 임시 기준값입니다.
+- 1.0 seed: `python src/seed_user_fair_prices.py`로 `user_fair_prices`를 일괄 생성/업데이트합니다.
 
 ## 1) 설치 방법
 
