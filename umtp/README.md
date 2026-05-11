@@ -678,3 +678,31 @@ mysql -u <DB_USER> -p < sql/add_parser_confidence_columns.sql
 - `parse_success=false`이면 공정가 조회를 중단하고 `missing_fields`, `unit_validation_reason`를 응답에 포함합니다.
 - MySQL 환경에서 `ADD COLUMN IF NOT EXISTS`가 제한되면 Workbench에서 컬럼 존재 확인 후 수동 실행합니다.
 
+---
+
+# UMTP 1.2 MVP
+
+1.2 MVP에서는 위험 키워드 점수화와 교환글 탐지를 추가해  
+API 응답/알림에 위험도를 함께 제공합니다.
+
+## 1) 실행 방법
+
+```bash
+uvicorn src.api_server:app --reload
+```
+
+## 2) 추가 SQL 실행
+
+```bash
+mysql -u <DB_USER> -p < sql/add_risk_exchange_columns.sql
+```
+
+## 3) 동작 규칙
+
+- 위험도는 `none / low / medium / high / exclude` 단계로 분류합니다.
+- 제목+본문+셀프검수 value를 함께 검사해 위험/교환 키워드를 탐지합니다.
+- 교환 강키워드(negation 없음) 또는 약키워드가 있으면 교환글로 판정합니다.
+- 위험/교환이 있어도 공정가 비교 분석은 계속 수행합니다.
+- Telegram 알림은 위험도에 따라 `[주의 필요]`, 교환글이면 `[교환글]`, 제외급이면 `[제외급 위험]` prefix를 붙입니다.
+- MySQL 환경에서 `ADD COLUMN IF NOT EXISTS`가 제한되면 Workbench에서 컬럼 존재를 확인한 뒤 수동 실행합니다.
+
