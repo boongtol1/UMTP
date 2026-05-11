@@ -1,3 +1,6 @@
+import json
+
+
 def _insert_url_analysis_log_v1(
     cursor,
     *,
@@ -58,6 +61,84 @@ def _insert_url_analysis_log_v1(
     )
 
 
+def _insert_url_analysis_log_with_parser_fields(
+    cursor,
+    *,
+    user_id,
+    url,
+    source=None,
+    title=None,
+    listing_price_krw=None,
+    product_type=None,
+    chip=None,
+    screen_inch=None,
+    ram_gb=None,
+    ssd_gb=None,
+    fair_price_krw=None,
+    diff_ratio=None,
+    is_alert_target=None,
+    status,
+    reason=None,
+    confidence_score=None,
+    screen_inch_defaulted=None,
+    unit_valid=None,
+    unit_validation_reason=None,
+):
+    cursor.execute(
+        """
+        INSERT INTO url_analysis_logs (
+            user_id,
+            url,
+            source,
+            title,
+            listing_price_krw,
+            product_type,
+            chip,
+            screen_inch,
+            ram_gb,
+            ssd_gb,
+            fair_price_krw,
+            diff_ratio,
+            is_alert_target,
+            status,
+            reason,
+            confidence_score,
+            screen_inch_defaulted,
+            unit_valid,
+            unit_validation_reason
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            user_id,
+            url,
+            source,
+            title,
+            listing_price_krw,
+            product_type,
+            chip,
+            screen_inch,
+            ram_gb,
+            ssd_gb,
+            fair_price_krw,
+            diff_ratio,
+            is_alert_target,
+            status,
+            reason,
+            confidence_score,
+            screen_inch_defaulted,
+            unit_valid,
+            unit_validation_reason,
+        ),
+    )
+
+
+def _safe_json_text(value):
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False)
+
+
 def _insert_url_analysis_log(
     cursor,
     *,
@@ -80,6 +161,15 @@ def _insert_url_analysis_log(
     screen_inch_defaulted=None,
     unit_valid=None,
     unit_validation_reason=None,
+    risk_detected=None,
+    risk_level=None,
+    risk_score=None,
+    risk_keywords=None,
+    risk_categories=None,
+    is_exchange_post=None,
+    exchange_strength=None,
+    exchange_keywords=None,
+    trade_type=None,
 ):
     try:
         cursor.execute(
@@ -103,9 +193,18 @@ def _insert_url_analysis_log(
                 confidence_score,
                 screen_inch_defaulted,
                 unit_valid,
-                unit_validation_reason
+                unit_validation_reason,
+                risk_detected,
+                risk_level,
+                risk_score,
+                risk_keywords,
+                risk_categories,
+                is_exchange_post,
+                exchange_strength,
+                exchange_keywords,
+                trade_type
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 user_id,
@@ -127,11 +226,48 @@ def _insert_url_analysis_log(
                 screen_inch_defaulted,
                 unit_valid,
                 unit_validation_reason,
+                risk_detected,
+                risk_level,
+                risk_score,
+                _safe_json_text(risk_keywords),
+                _safe_json_text(risk_categories),
+                is_exchange_post,
+                exchange_strength,
+                _safe_json_text(exchange_keywords),
+                trade_type,
             ),
         )
     except Exception as exc:
         if "Unknown column" not in str(exc):
             raise
+
+        try:
+            _insert_url_analysis_log_with_parser_fields(
+                cursor,
+                user_id=user_id,
+                url=url,
+                source=source,
+                title=title,
+                listing_price_krw=listing_price_krw,
+                product_type=product_type,
+                chip=chip,
+                screen_inch=screen_inch,
+                ram_gb=ram_gb,
+                ssd_gb=ssd_gb,
+                fair_price_krw=fair_price_krw,
+                diff_ratio=diff_ratio,
+                is_alert_target=is_alert_target,
+                status=status,
+                reason=reason,
+                confidence_score=confidence_score,
+                screen_inch_defaulted=screen_inch_defaulted,
+                unit_valid=unit_valid,
+                unit_validation_reason=unit_validation_reason,
+            )
+            return
+        except Exception as exc2:
+            if "Unknown column" not in str(exc2):
+                raise
 
         _insert_url_analysis_log_v1(
             cursor,
@@ -165,7 +301,9 @@ def save_success_log(
     fair_price_krw,
     diff_ratio,
     is_alert_target,
+    risk_result=None,
 ):
+    risk_result = risk_result or {}
     _insert_url_analysis_log(
         cursor,
         user_id=user_id,
@@ -187,6 +325,15 @@ def save_success_log(
         screen_inch_defaulted=parsed_spec.get("screen_inch_defaulted"),
         unit_valid=parsed_spec.get("unit_valid"),
         unit_validation_reason=parsed_spec.get("unit_validation_reason"),
+        risk_detected=risk_result.get("risk_detected"),
+        risk_level=risk_result.get("risk_level"),
+        risk_score=risk_result.get("risk_score"),
+        risk_keywords=risk_result.get("risk_keywords"),
+        risk_categories=risk_result.get("risk_categories"),
+        is_exchange_post=risk_result.get("is_exchange_post"),
+        exchange_strength=risk_result.get("exchange_strength"),
+        exchange_keywords=risk_result.get("exchange_keywords"),
+        trade_type=risk_result.get("trade_type"),
     )
 
 
@@ -200,8 +347,10 @@ def save_failed_log(
     title=None,
     listing_price_krw=None,
     parsed_spec=None,
+    risk_result=None,
 ):
     parsed_spec = parsed_spec or {}
+    risk_result = risk_result or {}
     _insert_url_analysis_log(
         cursor,
         user_id=user_id,
@@ -223,6 +372,15 @@ def save_failed_log(
         screen_inch_defaulted=parsed_spec.get("screen_inch_defaulted"),
         unit_valid=parsed_spec.get("unit_valid"),
         unit_validation_reason=parsed_spec.get("unit_validation_reason"),
+        risk_detected=risk_result.get("risk_detected"),
+        risk_level=risk_result.get("risk_level"),
+        risk_score=risk_result.get("risk_score"),
+        risk_keywords=risk_result.get("risk_keywords"),
+        risk_categories=risk_result.get("risk_categories"),
+        is_exchange_post=risk_result.get("is_exchange_post"),
+        exchange_strength=risk_result.get("exchange_strength"),
+        exchange_keywords=risk_result.get("exchange_keywords"),
+        trade_type=risk_result.get("trade_type"),
     )
 
 
@@ -234,4 +392,5 @@ def save_duplicate_log(cursor, *, user_id, url, source="joongna", reason="이미
         source=source,
         status="duplicate",
         reason=reason,
+        trade_type="sale",
     )

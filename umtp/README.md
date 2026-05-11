@@ -60,6 +60,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.2 초안: `risk_analyzer.py`에서 교환글/위험 키워드를 점수화(`none/low/medium/high/exclude`)합니다.
 - 1.2 초안: `/analyze-url` 응답에 `risk_level`, `risk_score`, `risk_categories`, `trade_type`를 포함합니다.
 - 1.2 초안: Telegram 알림 제목에 `[주의 필요]`, `[교환글]`, `[제외급 위험]` prefix를 조건부로 붙입니다.
+- 1.2 초안: `sql/add_risk_exchange_columns.sql`로 `url_analysis_logs`에 위험/교환 로그 컬럼을 추가합니다.
 
 ## 1) 설치 방법
 

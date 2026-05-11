@@ -213,6 +213,7 @@ def analyze_url_for_user(user_id, url):
                     title=title,
                     listing_price_krw=listing_price_krw,
                     parsed_spec=parsed_spec,
+                    risk_result=risk_result,
                 )
                 connection.commit()
             except Exception as log_exc:
@@ -326,6 +327,7 @@ def analyze_url_for_user(user_id, url):
             fair_price_krw=fair_price_krw,
             diff_ratio=diff_ratio,
             is_alert_target=is_alert_target,
+            risk_result=risk_result,
         )
         connection.commit()
 
