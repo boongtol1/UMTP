@@ -34,6 +34,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 0.8은 실제 텔레그램 전송 대신 `notifier.py`의 `print()` 알림을 사용합니다.
 - 0.9 초안: `sql/add_url_analysis_logs.sql`로 URL 분석 안정 로그 테이블을 추가합니다.
 - 0.9 중복 정책: 같은 `user_id + url`이 `success/failed/duplicate`로 기록되면 재분석하지 않습니다.
+- 0.9 분석 로그: `analysis_log.py`에서 `success/failed/duplicate`를 공통 저장합니다.
 
 ## 1) 설치 방법
 

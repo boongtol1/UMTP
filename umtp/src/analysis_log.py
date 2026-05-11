@@ -1,0 +1,134 @@
+def _insert_url_analysis_log(
+    cursor,
+    *,
+    user_id,
+    url,
+    source=None,
+    title=None,
+    listing_price_krw=None,
+    product_type=None,
+    chip=None,
+    screen_inch=None,
+    ram_gb=None,
+    ssd_gb=None,
+    fair_price_krw=None,
+    diff_ratio=None,
+    is_alert_target=None,
+    status,
+    reason=None,
+):
+    cursor.execute(
+        """
+        INSERT INTO url_analysis_logs (
+            user_id,
+            url,
+            source,
+            title,
+            listing_price_krw,
+            product_type,
+            chip,
+            screen_inch,
+            ram_gb,
+            ssd_gb,
+            fair_price_krw,
+            diff_ratio,
+            is_alert_target,
+            status,
+            reason
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            user_id,
+            url,
+            source,
+            title,
+            listing_price_krw,
+            product_type,
+            chip,
+            screen_inch,
+            ram_gb,
+            ssd_gb,
+            fair_price_krw,
+            diff_ratio,
+            is_alert_target,
+            status,
+            reason,
+        ),
+    )
+
+
+def save_success_log(
+    cursor,
+    *,
+    user_id,
+    url,
+    source,
+    title,
+    listing_price_krw,
+    parsed_spec,
+    fair_price_krw,
+    diff_ratio,
+    is_alert_target,
+):
+    _insert_url_analysis_log(
+        cursor,
+        user_id=user_id,
+        url=url,
+        source=source,
+        title=title,
+        listing_price_krw=listing_price_krw,
+        product_type=parsed_spec.get("product_type"),
+        chip=parsed_spec.get("chip"),
+        screen_inch=parsed_spec.get("screen_inch"),
+        ram_gb=parsed_spec.get("ram_gb"),
+        ssd_gb=parsed_spec.get("ssd_gb"),
+        fair_price_krw=fair_price_krw,
+        diff_ratio=round(diff_ratio, 2),
+        is_alert_target=is_alert_target,
+        status="success",
+        reason=None,
+    )
+
+
+def save_failed_log(
+    cursor,
+    *,
+    user_id,
+    url,
+    reason,
+    source=None,
+    title=None,
+    listing_price_krw=None,
+    parsed_spec=None,
+):
+    parsed_spec = parsed_spec or {}
+    _insert_url_analysis_log(
+        cursor,
+        user_id=user_id,
+        url=url,
+        source=source,
+        title=title,
+        listing_price_krw=listing_price_krw,
+        product_type=parsed_spec.get("product_type"),
+        chip=parsed_spec.get("chip"),
+        screen_inch=parsed_spec.get("screen_inch"),
+        ram_gb=parsed_spec.get("ram_gb"),
+        ssd_gb=parsed_spec.get("ssd_gb"),
+        fair_price_krw=None,
+        diff_ratio=None,
+        is_alert_target=None,
+        status="failed",
+        reason=reason,
+    )
+
+
+def save_duplicate_log(cursor, *, user_id, url, source="joongna", reason="이미 분석된 URL"):
+    _insert_url_analysis_log(
+        cursor,
+        user_id=user_id,
+        url=url,
+        source=source,
+        status="duplicate",
+        reason=reason,
+    )
