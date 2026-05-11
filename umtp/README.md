@@ -44,6 +44,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.0 seed: `python src/seed_user_fair_prices.py`로 `user_fair_prices`를 일괄 생성/업데이트합니다.
 - 1.0 SQL seed: `sql/seed_macbook_air_units.sql`로도 동일 기준값을 upsert할 수 있습니다.
 - 1.0 파서 검증: MacBook Air 스펙 조합이 유효하지 않으면 `invalid_macbook_air_unit`으로 실패 처리합니다.
+- 1.0 API 확장: `/analyze-url` 응답에 `unit_valid`, `unit_validation_reason`를 포함합니다.
 
 ## 1) 설치 방법
 

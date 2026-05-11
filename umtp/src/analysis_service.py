@@ -16,6 +16,7 @@ FIELD_LABELS = {
 }
 REQUIRED_SPEC_FIELDS = ("product_type", "chip", "screen_inch", "ram_gb", "ssd_gb")
 SOURCE_NAME = "joongna"
+INVALID_UNIT_REASON = "invalid_macbook_air_unit"
 
 
 def _find_missing_spec_fields(parsed_spec):
@@ -75,13 +76,16 @@ def _build_telegram_message(title, listing_price_krw, fair_price_krw, diff_ratio
     )
 
 
-def _build_failed_response(url, reason):
-    return {
+def _build_failed_response(url, reason, *, unit_valid=None, unit_validation_reason=None):
+    response = {
         "ok": False,
         "status": "failed",
         "url": url,
         "reason": reason,
     }
+    response["unit_valid"] = unit_valid
+    response["unit_validation_reason"] = unit_validation_reason
+    return response
 
 
 def analyze_url_for_user(user_id, url):
@@ -99,6 +103,9 @@ def analyze_url_for_user(user_id, url):
     listing_price_krw = None
     parsed_spec = {}
 
+    unit_valid = None
+    unit_validation_reason = None
+
     def fail(reason, *, source=None):
         if connection is not None and cursor is not None:
             try:
@@ -115,7 +122,12 @@ def analyze_url_for_user(user_id, url):
                 connection.commit()
             except Exception as log_exc:
                 print(f"실패 로그 저장 실패: {log_exc}")
-        return _build_failed_response(url, reason)
+        return _build_failed_response(
+            url,
+            reason,
+            unit_valid=unit_valid,
+            unit_validation_reason=unit_validation_reason,
+        )
 
     try:
         try:
@@ -136,6 +148,8 @@ def analyze_url_for_user(user_id, url):
                 "ok": True,
                 "status": "duplicate",
                 "url": url,
+                "unit_valid": None,
+                "unit_validation_reason": None,
                 "telegram_sent": False,
                 "message": "이미 분석된 URL",
             }
@@ -155,6 +169,17 @@ def analyze_url_for_user(user_id, url):
         listing_price_krw = parsed_page["listing_price_krw"]
 
         parsed_spec = parse_listing_title(f"{title} {description}")
+        unit_valid = parsed_spec.get("unit_valid")
+        unit_validation_reason = parsed_spec.get("unit_validation_reason")
+
+        if unit_validation_reason == INVALID_UNIT_REASON:
+            return fail("유효하지 않은 MacBook Air 조합", source=SOURCE_NAME)
+
+        if not parsed_spec.get("parse_success", False):
+            missing_spec_fields = _find_missing_spec_fields(parsed_spec)
+            missing_labels = [FIELD_LABELS[field] for field in missing_spec_fields]
+            return fail(f"스펙 추출 실패: {', '.join(missing_labels)} 누락", source=SOURCE_NAME)
+
         missing_spec_fields = _find_missing_spec_fields(parsed_spec)
         if missing_spec_fields:
             missing_labels = [FIELD_LABELS[field] for field in missing_spec_fields]
@@ -219,6 +244,13 @@ def analyze_url_for_user(user_id, url):
             "user_id": user_id,
             "url": url,
             "title": title,
+            "product_type": parsed_spec["product_type"],
+            "chip": parsed_spec["chip"],
+            "screen_inch": parsed_spec["screen_inch"],
+            "ram_gb": parsed_spec["ram_gb"],
+            "ssd_gb": parsed_spec["ssd_gb"],
+            "unit_valid": True,
+            "unit_validation_reason": None,
             "listing_price_krw": listing_price_krw,
             "fair_price_krw": fair_price_krw,
             "diff_amount_krw": diff_amount_krw,
