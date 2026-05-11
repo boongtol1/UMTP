@@ -10,7 +10,7 @@ FIELD_LABELS = {
     "ram_gb": "RAM",
     "ssd_gb": "SSD",
 }
-REQUIRED_SPEC_FIELDS = ("product_type", "chip", "screen_inch", "ram_gb", "ssd_gb")
+REQUIRED_SPEC_FIELDS = ("product_type", "chip", "ram_gb", "ssd_gb")
 SOURCE_NAME = "joongna"
 ALERT_THRESHOLD_RATIO = 20.0
 
@@ -118,7 +118,7 @@ def main():
         title = parsed_page["title"]
         description = parsed_page["description"]
         listing_price_krw = parsed_page["listing_price_krw"]
-        self_check_text = (parsed_page.get("self_check_text") or "").strip()
+        self_check_fields = parsed_page.get("self_check_fields") or {}
 
         print()
         print("추출된 제목:")
@@ -127,23 +127,21 @@ def main():
         print("추출된 본문:")
         print(description)
         print()
-        if self_check_text:
+        if self_check_fields:
             print("추출된 셀프검수:")
-            print(self_check_text)
+            for key, value in self_check_fields.items():
+                print(f"- {key}: {value}")
             print()
         print("추출된 가격:")
         print(f"{listing_price_krw}원")
         print()
 
         parsing_source_text = f"{title} {description}"
-        if self_check_text:
-            parsing_source_text = f"{parsing_source_text} {self_check_text}"
-
-        parsed_spec = parse_listing_title(parsing_source_text)
+        parsed_spec = parse_listing_title(parsing_source_text, self_check_fields=self_check_fields)
         missing_fields = find_missing_spec_fields(parsed_spec)
         if missing_fields:
             missing_labels = [FIELD_LABELS[field] for field in missing_fields]
-            print(f"분석 실패: 제목+본문 스펙 추출 실패 ({', '.join(missing_labels)} 누락)")
+            print(f"분석 실패: 스펙 추출 실패 ({', '.join(missing_labels)} 누락)")
             print(f"출처: {SOURCE_NAME}")
             print(f"URL: {url}")
             return
