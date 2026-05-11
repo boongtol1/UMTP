@@ -88,28 +88,6 @@ DB 저장 완료
 
 ---
 
-# UMTP 8차 MVP
-
-8차 MVP에서는 Android 알림 앱이 URL을 보낸다고 가정하고,  
-URL을 수신하는 API에서 사용자별 공정가 기준 분석을 수행합니다.
-
-## 1) 실행 방법
-
-```bash
-uvicorn src.api_server:app --reload
-```
-
-## 2) 테스트(curl)
-
-```bash
-curl -X POST http://127.0.0.1:8000/analyze-url \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "test_user",
-    "url": "https://web.joongna.com/product/228451872"
-  }'
-```
-
 ## 5) 주의사항
 
 `.env`에는 실제 DB 비밀번호 등 민감 정보가 들어갑니다.  
@@ -508,3 +486,43 @@ URL: https://web.joongna.com/product/228451872
 
 DB 저장 완료
 ```
+
+---
+
+# UMTP 8차 MVP
+
+8차 MVP에서는 Android Notification Listener 앱이 URL을 보낸다고 가정하고,  
+URL 수신 API에서 사용자별 공정가 기준 분석을 수행합니다.
+
+이번 단계는 Android 앱 자체를 구현하지 않고, `curl` 요청으로 URL 전달 상황을 흉내냅니다.  
+실제 텔레그램 전송은 하지 않으며 `notifier.py`의 `print()` 알림으로 대체합니다.
+
+## 1) 실행 방법
+
+```bash
+uvicorn src.api_server:app --reload
+```
+
+## 2) 요청 예시(curl)
+
+```bash
+curl -X POST http://127.0.0.1:8000/analyze-url \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "test_user",
+    "url": "https://web.joongna.com/product/228451872"
+  }'
+```
+
+## 3) 동작 규칙
+
+- 엔드포인트: `POST /analyze-url`
+- 입력: `user_id`, `url`
+- URL HTML 파싱: `listing_page_parser.py` 재사용
+- 스펙 추출: `parse_listing_title(title + " " + description)` 재사용
+- 사용자 공정가 조회: `user_fair_prices` (`fair_price_krw`, `alert_drop_rate_percent`)
+- 분석 결과 저장: `listing_analysis_results`
+- 알림 대상이면 `notifier.py`의 `send_alert(message)` 호출 (`print()` 기반)
+- 실패 응답 형식: `{"ok": false, "reason": "..."}`
+- 0.8 구현을 위해 `requirements.txt`에 `fastapi`, `uvicorn`을 추가
+
