@@ -16,6 +16,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 0.7 | URL만 입력하는 실제 중고나라 매물 HTML 파싱 분석 | `python src/run_url_parse_umtp.py` |
 | 0.8 | Android 알림 URL 수신 + 사용자 공정가 기준 분석 API | `uvicorn src.api_server:app --reload` |
 | 0.9 | Telegram 알림 + 중복 URL 방지 + 분석 기록 안정화 | `uvicorn src.api_server:app --reload` |
+| 1.0 | 전체 MacBook Air 단위 제품 DB화 + rule-based 공정가 자동 생성 | `python src/seed_user_fair_prices.py` |
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
 - `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.
@@ -38,6 +39,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 0.9 텔레그램 알림: `.env`의 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`를 사용하며 미설정 시 서버는 종료되지 않습니다.
 - 0.9 통합 응답: `status(success/duplicate/failed)`와 `telegram_sent`를 API 응답에 포함합니다.
 - 텔레그램 실제 토큰/채팅 ID는 `.env`에만 넣고 Git에는 올리지 않습니다.
+- 1.0 초안: `macbook_air_units.py`에 전체 실리콘 MacBook Air 유효 조합을 정의합니다.
 
 ## 1) 설치 방법
 
