@@ -18,6 +18,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 0.9 | Telegram 알림 + 중복 URL 방지 + 분석 기록 안정화 | `uvicorn src.api_server:app --reload` |
 | 1.0 | 전체 MacBook Air 단위 제품 DB화 + rule-based 공정가 자동 생성 | `python src/seed_user_fair_prices.py` |
 | 1.1 | 셀프검수 구조화 데이터 우선 파싱 + 숫자 기반 보조 파싱 | `uvicorn src.api_server:app --reload` |
+| 1.2 | 위험 키워드 점수화 + 교환글 탐지 + 주의 알림 | `uvicorn src.api_server:app --reload` |
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
 - `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.
@@ -55,6 +56,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.1: `/analyze-url` 응답/로그에 `confidence_score`, `screen_inch_defaulted`, `unit_valid`, `unit_validation_reason`를 포함합니다.
 - 1.1: `sql/add_parser_confidence_columns.sql`로 `url_analysis_logs` 파서 신뢰도 컬럼을 안전하게 추가합니다.
 - MySQL 환경에서 `ADD COLUMN IF NOT EXISTS` 사용이 제한되면 Workbench에서 컬럼 존재를 확인 후 수동 실행합니다.
+- 1.2 초안: `risk_keywords.py`로 위험/교환 키워드 그룹을 카테고리 단위로 관리합니다.
 
 ## 1) 설치 방법
 
