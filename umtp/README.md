@@ -29,6 +29,8 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - `user_fair_prices`는 사용자별 공정가(`fair_price_krw`)와 알림 기준(`alert_drop_rate_percent`)을 관리합니다.
 - 0.8 서비스 계층: `analysis_service.py`에서 URL 분석과 `ok/ reason` 실패 응답을 처리합니다.
 - 0.8 알림은 `notifier.py`의 `print()` 기반 가짜 알림으로 처리합니다.
+- 0.8은 Android Notification Listener 앱 자체를 구현하지 않고 `curl` 요청으로 URL 전달 상황을 흉내냅니다.
+- 0.8은 실제 텔레그램 전송 대신 `notifier.py`의 `print()` 알림을 사용합니다.
 
 ## 1) 설치 방법
 
@@ -82,6 +84,30 @@ python src/run_fake_umtp.py
 차이비율: 20.0%
 결과: 알림 대상
 DB 저장 완료
+```
+
+---
+
+# UMTP 8차 MVP
+
+8차 MVP에서는 Android 알림 앱이 URL을 보낸다고 가정하고,  
+URL을 수신하는 API에서 사용자별 공정가 기준 분석을 수행합니다.
+
+## 1) 실행 방법
+
+```bash
+uvicorn src.api_server:app --reload
+```
+
+## 2) 테스트(curl)
+
+```bash
+curl -X POST http://127.0.0.1:8000/analyze-url \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "test_user",
+    "url": "https://web.joongna.com/product/228451872"
+  }'
 ```
 
 ## 5) 주의사항
