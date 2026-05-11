@@ -111,12 +111,16 @@ def generate_macbook_air_units():
 
 def calculate_rule_based_fair_price(chip, screen_inch, ram_gb, ssd_gb):
     if not is_valid_macbook_air_unit(chip, screen_inch, ram_gb, ssd_gb):
-        raise ValueError("invalid_macbook_air_unit")
+        raise ValueError(
+            "invalid_macbook_air_unit: "
+            f"chip={chip}, screen_inch={screen_inch}, ram_gb={ram_gb}, ssd_gb={ssd_gb}"
+        )
 
-    return (
+    fair_price_krw = (
         BASE_FAIR_PRICE_KRW
         + CHIP_PRICE_OFFSETS[chip]
         + SCREEN_PRICE_OFFSETS[screen_inch]
         + RAM_PRICE_OFFSETS[ram_gb]
         + SSD_PRICE_OFFSETS[ssd_gb]
     )
+    return int(fair_price_krw)
