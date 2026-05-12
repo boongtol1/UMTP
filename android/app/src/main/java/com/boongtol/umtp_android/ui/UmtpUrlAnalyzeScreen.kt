@@ -15,38 +15,40 @@ import com.boongtol.umtp_android.network.AnalyzeUrlRequest
 import com.boongtol.umtp_android.network.UmtpApiClient
 import kotlinx.coroutines.launch
 
+import java.util.Locale
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UmtpUrlAnalyzeScreen() {
     var url by remember { mutableStateOf("") }
     var resultText by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(value = false) }
     val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("UMTP URL 분석 테스트") }
+                title = { Text(text = "UMTP URL 분석 테스트") }
             )
         }
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .padding(innerPadding)
-                .padding(16.dp)
+                .padding(all = 16.dp)
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(state = rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             OutlinedTextField(
                 value = url,
                 onValueChange = { url = it },
-                label = { Text("중고나라 매물 URL 입력") },
+                label = { Text(text = "중고나라 매물 URL 입력") },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("https://web.joongna.com/product/...") }
+                placeholder = { Text(text = "https://web.joongna.com/product/...") }
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(height = 16.dp))
 
             Button(
                 onClick = {
@@ -57,13 +59,13 @@ fun UmtpUrlAnalyzeScreen() {
                     scope.launch {
                         isLoading = true
                         resultText = "분석 요청 중..."
-                        try {
+                        resultText = try {
                             val response = UmtpApiClient.apiService.analyzeUrl(
                                 AnalyzeUrlRequest(user_id = "test_user", url = url)
                             )
-                            resultText = formatResponse(response)
+                            formatResponse(response)
                         } catch (e: Exception) {
-                            resultText = "에러 발생: ${e.localizedMessage}"
+                            "에러 발생: ${e.localizedMessage}"
                         } finally {
                             isLoading = false
                         }
@@ -74,27 +76,27 @@ fun UmtpUrlAnalyzeScreen() {
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
+                        modifier = Modifier.size(size = 24.dp),
                         color = Color.White,
                         strokeWidth = 2.dp
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("분석 중...")
+                    Spacer(modifier = Modifier.width(width = 8.dp))
+                    Text(text = "분석 중...")
                 } else {
-                    Text("분석 요청")
+                    Text(text = "분석 요청")
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(height = 24.dp))
 
             Text(
                 text = "분석 결과",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.align(Alignment.Start)
+                modifier = Modifier.align(alignment = Alignment.Start)
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(height = 8.dp))
 
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -103,7 +105,7 @@ fun UmtpUrlAnalyzeScreen() {
             ) {
                 Text(
                     text = resultText,
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(all = 16.dp),
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     fontSize = 14.sp
                 )
@@ -120,7 +122,7 @@ private fun formatResponse(response: com.boongtol.umtp_android.network.AnalyzeUr
     response.title?.let { sb.append("제목: $it\n") }
     response.listing_price_krw?.let { sb.append("등록 가격: $it 원\n") }
     response.fair_price_krw?.let { sb.append("적정 가격: $it 원\n") }
-    response.diff_ratio?.let { sb.append("가격 차이: ${String.format("%.1f", it * 100)}%\n") }
+    response.diff_ratio?.let { sb.append("가격 차이: ${String.format(Locale.getDefault(), "%.1f", it * 100)}%\n") }
     response.is_alert_target?.let { sb.append("알림 대상: $it\n") }
     response.risk_level?.let { sb.append("위험도: $it\n") }
     response.trade_type?.let { sb.append("거래 방식: $it\n") }
