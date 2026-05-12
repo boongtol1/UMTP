@@ -6,7 +6,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
 object UmtpApiClient {
-    private const val BASE_URL = "http://10.9.221.159:8000/"
+    private const val BASE_URL = "http://183.111.181.122:8000/"
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY

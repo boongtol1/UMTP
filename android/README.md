@@ -23,7 +23,7 @@ UMTP(Used Market Tracker Project)의 Android 클라이언트 앱입니다.
 - 로딩 상태 및 에러 처리
 
 #### 실행 및 테스트 방법
-1. UMTP FastAPI 서버를 실행합니다. (`http://10.9.221.159:8000`)
+1. UMTP FastAPI 서버를 실행합니다. (`http://183.111.181.122:8000`)
 2. Android 기기(또는 에뮬레이터)를 서버와 같은 네트워크에 연결합니다.
 3. 앱을 실행하고 URL 입력창에 중고나라 매물 URL을 입력합니다. (예: `https://web.joongna.com/product/228436846`)
 4. '분석 요청' 버튼을 누르고 결과를 확인합니다.
