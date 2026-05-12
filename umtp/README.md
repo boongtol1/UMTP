@@ -51,7 +51,8 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.0 API 확장: `/analyze-url` 응답에 `unit_valid`, `unit_validation_reason`를 포함합니다.
 - 1.1: HTML 전체 텍스트 대신 제목/본문/가격/셀프검수(`dl/dt/dd`) 구조화 영역만 파싱합니다.
 - 1.1: 셀프검수 key-value를 우선 적용하고 부족한 값만 제목/본문 숫자 후보로 보완합니다.
-- 1.1: `numeric_candidate_extractor.py`에서 RAM/SSD/화면 후보, `TB->GB`, `16/512` 축약표현을 파싱합니다.
+- 1.1: `numeric_candidate_extractor.py`에서 화면(13/15), RAM(8/16/24/32), SSD(256/512/1024/2048/4096) 후보를 분리하고 `TB->GB`, `16/512` 축약표현을 파싱합니다.
+- 1.1: `1/2/4` 단독 숫자는 SSD 후보로 보지 않고, `1TB/2TB/4TB`(또는 `t/테라`) 형태일 때만 SSD 후보로 변환합니다.
 - 1.1: `spec_parser.py`는 `confidence_score`, `detected_patterns`, `detected_conflicts`를 반환하고 화면 크기 미검출 시 13인치 기본값을 사용합니다.
 - 1.1: `/analyze-url` 응답/로그에 `confidence_score`, `screen_inch_defaulted`, `unit_valid`, `unit_validation_reason`를 포함합니다.
 - 1.1: `sql/add_parser_confidence_columns.sql`로 `url_analysis_logs` 파서 신뢰도 컬럼을 안전하게 추가합니다.
@@ -673,6 +674,8 @@ mysql -u <DB_USER> -p < sql/add_parser_confidence_columns.sql
 - 셀프검수는 `dl/dt/dd` 구조를 key-value로 파싱해 `self_check_fields`로 저장합니다.
 - `self_check_fields` 값(모델명/CPU종류/램 용량/SSD용량)을 제목/본문 파싱보다 우선합니다.
 - 부족한 항목만 `numeric_candidate_extractor.py`로 제목+본문 숫자 후보를 보조 파싱합니다.
+- 숫자 후보 분리 규칙: 화면 `13/15`, RAM `8/16/24/32`, SSD `256/512/1024/2048/4096`.
+- `1/2/4`는 단독 숫자로 SSD 후보에 넣지 않고 `1TB/2TB/4TB`(`t/테라`)일 때만 `1024/2048/4096`으로 변환합니다.
 - `screen_inch`를 찾지 못하면 13인치 기본값을 사용하고 `screen_inch_defaulted=true`로 반환합니다.
 - `confidence_score`는 product/chip/ram/ssd/screen 추출 확실도를 0~100 점수로 반환합니다.
 - `parse_success=false`이면 공정가 조회를 중단하고 `missing_fields`, `unit_validation_reason`를 응답에 포함합니다.
