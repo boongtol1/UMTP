@@ -66,4 +66,9 @@ UMTP(Used Market Tracker Project)의 Android 클라이언트 앱입니다.
   - 일부 기기에서는 **기기 재부팅**이 필요할 수 있습니다.
 - **Logcat 태그**:
   - `UMTP_PERMISSION`: 권한 판별 로직 및 시스템 설정값 확인 로그
-  - `UMTP_NOTIFICATION`: 서비스 연결 상태 및 수신된 알림 데이터 로그
+  - `UMTP_NOTIFICATION`: 서비스 연결 상태, 수신된 알림 데이터 및 **Notification Extras 전체 덤프** 로그
+
+#### 중고나라 URL 추출 디버깅 (v0.2 패치)
+중고나라 알림 텍스트에는 URL이 직접 노출되지 않는 경우가 많습니다. 이를 위해 `UmtpNotificationListenerService`에서는 모든 알림의 `extras`를 덤프하여 숨겨진 URL, Deep Link, Product ID 등을 추적합니다.
+- 대상 패키지: `com.elz.secondhandstore` (중고나라)
+- 확인 키워드: `https://`, `web.joongna.com`, `product`, `deeplink`, `intent`

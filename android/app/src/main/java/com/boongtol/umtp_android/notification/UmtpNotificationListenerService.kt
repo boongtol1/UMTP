@@ -35,6 +35,19 @@ class UmtpNotificationListenerService : NotificationListenerService() {
             if (bigText.isNotEmpty()) {
                 Log.d("UMTP_NOTIFICATION", "  bigText=$bigText")
             }
+
+            // Dump all extras for debugging and URL discovery
+            try {
+                Log.d("UMTP_NOTIFICATION", "========== notification extras dump start ==========")
+                Log.d("UMTP_NOTIFICATION", "packageName=$packageName")
+                for (key in extras.keySet()) {
+                    val value = extras.get(key)
+                    Log.d("UMTP_NOTIFICATION", "  extras[$key]=$value")
+                }
+                Log.d("UMTP_NOTIFICATION", "========== notification extras dump end ==========")
+            } catch (e: Exception) {
+                Log.e("UMTP_NOTIFICATION", "extras dump error", e)
+            }
         }
     }
 
