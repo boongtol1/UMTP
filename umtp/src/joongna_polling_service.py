@@ -1,8 +1,14 @@
-from src.analysis_service import analyze_url_for_user
-from src.db import get_connection
-from src.joongna_search_client import search_joongna_products
+try:
+    from src.analysis_service import analyze_url_for_user
+    from src.db import get_connection
+    from src.joongna_search_client import search_joongna_products
+except ModuleNotFoundError:
+    from analysis_service import analyze_url_for_user
+    from db import get_connection
+    from joongna_search_client import search_joongna_products
 
 
+MYSQL_DUPLICATE_ENTRY_ERRNO = 1062
 DEFAULT_SEARCH_WORDS = [
     "m1맥북에어",
     "m2맥북에어",
@@ -82,6 +88,13 @@ def _build_poll_stats(search_words):
     }
 
 
+def _is_duplicate_entry_error(exc):
+    errno = getattr(exc, "errno", None)
+    if errno == MYSQL_DUPLICATE_ENTRY_ERRNO:
+        return True
+    return "Duplicate entry" in str(exc)
+
+
 def poll_once(user_id=DEFAULT_USER_ID, search_words=None):
     words = _normalize_search_words(search_words)
     stats = _build_poll_stats(words)
@@ -90,6 +103,23 @@ def poll_once(user_id=DEFAULT_USER_ID, search_words=None):
     connection = None
     cursor = None
     seen_db_ready = False
+
+    def disable_seen_db(reason):
+        nonlocal connection, cursor, seen_db_ready
+        seen_db_ready = False
+        print(f"[polling] seen DB 비활성화: {reason}")
+        if cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+            cursor = None
+        if connection is not None and connection.is_connected():
+            try:
+                connection.close()
+            except Exception:
+                pass
+            connection = None
 
     try:
         try:
@@ -127,6 +157,7 @@ def poll_once(user_id=DEFAULT_USER_ID, search_words=None):
                     except Exception as exc:
                         stats["db_errors"] += 1
                         print(f"[{search_word}] seen 조회 실패 (seq={seq}): {exc}")
+                        disable_seen_db(str(exc))
                         already_seen = False
 
                 if already_seen:
@@ -141,12 +172,19 @@ def poll_once(user_id=DEFAULT_USER_ID, search_words=None):
                         _save_seen_seq(cursor, search_word, item)
                         connection.commit()
                     except Exception as exc:
-                        stats["db_errors"] += 1
                         try:
                             connection.rollback()
                         except Exception:
                             pass
+
+                        if _is_duplicate_entry_error(exc):
+                            stats["skipped_seen"] += 1
+                            print(f"[{search_word}] 이미 본 seq로 판정 (seq={seq})")
+                            continue
+
+                        stats["db_errors"] += 1
                         print(f"[{search_word}] seen 저장 실패 (seq={seq}): {exc}")
+                        disable_seen_db(str(exc))
 
                 print(f"[{search_word}] 새 매물 발견")
                 print(f"seq={seq}")

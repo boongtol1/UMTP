@@ -1,7 +1,17 @@
 import argparse
+import os
+import sys
 import time
 
-from src.joongna_polling_service import DEFAULT_USER_ID, poll_once
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+try:
+    from src.joongna_polling_service import DEFAULT_USER_ID, poll_once
+except ModuleNotFoundError:
+    from joongna_polling_service import DEFAULT_USER_ID, poll_once
 
 
 DEFAULT_INTERVAL_SECONDS = 60
