@@ -15,7 +15,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
 import com.boongtol.umtp_android.notification.UmtpNotificationListenerService
 
@@ -75,7 +74,7 @@ fun NotificationPermissionSection(modifier: Modifier = Modifier) {
                 Spacer(modifier = Modifier.height(8.dp))
                 
                 Text(
-                    text = "다른 앱(중고나라 등)의 알림을 자동으로 읽기 위해 필수적인 권한입니다.",
+                    text = "다른 앱(중고나라 등)의 알림을 자동으로 읽기 위해 필수적인 권한입니다. 앱 정보의 '허용된 권한'에는 표시되지 않을 수 있습니다.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer
                 )
@@ -93,7 +92,7 @@ fun NotificationPermissionSection(modifier: Modifier = Modifier) {
                 
                 if (!isListenerEnabled) {
                     Text(
-                        text = "※ 권한을 켰는데 로그가 안 나오면 권한을 껐다가 다시 켠 뒤 앱을 재실행하거나 재설치해보세요.",
+                        text = "※ 권한을 켰는데 로그가 안 나오면 권한을 껐다가 다시 켠 뒤 앱을 재실행하세요. 문제가 계속되면 앱 재설치도 시도해보세요.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(top = 8.dp)
@@ -182,6 +181,7 @@ fun isNotificationListenerEnabled(context: Context): Boolean {
     Log.d("UMTP_PERMISSION", "componentName flat=$flat")
     Log.d("UMTP_PERMISSION", "componentName shortFlat=$shortFlat")
 
+    // Check for package name or component name in the enabled listeners string
     return enabledListeners.contains(packageName) || 
            enabledListeners.contains(flat) || 
            enabledListeners.contains(shortFlat)

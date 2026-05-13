@@ -39,22 +39,31 @@ UMTP(Used Market Tracker Project)의 Android 클라이언트 앱입니다.
 - 현재 단계에서는 **URL 자동 추출을 하지 않습니다.**
 - `user_id`는 `"test_user"`로 고정되어 있습니다.
 
-### MVP-B: Notification Listener 권한 받기
+### MVP-B: Notification Listener 권한 받기 및 진단
 나중에 중고나라 키워드 알림을 자동으로 읽기 위해 Android 시스템의 알림 접근 권한을 받는 단계입니다.
 
 #### 주요 기능
-- Notification Listener Service 선언 및 등록
-- 앱 내 알림 접근 권한 상태 표시 (허용됨 / 필요함)
-- Android 알림 접근 권한 설정 화면으로 이동 버튼 추가
-- 앱 복귀 시 권한 상태 자동 갱신
+- **Notification Listener Service**: 타 앱의 알림을 읽기 위한 서비스 선언 (`UmtpNotificationListenerService`)
+- **권한 상태 UI 분리**: '알림 접근 권한(Listener)'과 '일반 앱 알림 권한'을 분리하여 표시
+- **진단 로그 강화**: 서비스 연결 및 알림 수신 시 상세 로그 출력
+- **설정 바로가기**: 알림 접근 권한 설정 및 앱 상세 알림 설정으로 바로가기 버튼 제공
+
+#### 알림 권한 관련 주의사항
+- **알림 접근 권한 (Notification Listener)**: 다른 앱(중고나라 등)의 알림을 읽기 위한 특수 권한입니다. **앱 상세 정보의 "허용된 권한" 목록에는 나타나지 않으며**, 전용 설정 화면(알림 접근 허용)에서 별도로 관리됩니다.
+- **앱 알림 표시 권한 (POST_NOTIFICATIONS)**: UMTP 앱이 사용자에게 알림을 표시하기 위한 권한입니다. MVP-B의 핵심 기능(알림 읽기)과는 별개입니다.
 
 #### 실행 및 테스트 방법
-1. 앱을 실행합니다.
-2. 하단의 'Notification Listener 권한' 섹션에서 '알림 접근 권한 열기' 버튼을 누릅니다.
-3. Android 설정 화면에서 'UMTP' 앱의 알림 접근 권한을 허용합니다.
-4. 앱으로 돌아오면 상태가 '허용됨'으로 변경된 것을 확인합니다.
-5. Logcat에서 `UMTP_NOTIFICATION: Notification Listener connected` 로그를 확인합니다.
+1. 앱을 실행하고 하단의 **'A. 알림 접근 권한'** 섹션에서 **'알림 접근 권한 설정 열기'**를 누릅니다.
+2. Android 설정에서 **'UMTP Notification Listener'** 항목을 찾아 활성화합니다.
+3. 앱으로 돌아와 상태가 **'허용됨'**으로 표시되는지 확인합니다.
+4. 다른 앱에서 알림이 발생하면 Logcat에서 `UMTP_NOTIFICATION` 태그로 알림 내용이 출력되는지 확인합니다.
 
-#### 주의사항
-- **MVP-B에서는 아직 알림 내용을 읽거나 로그를 출력하지 않습니다.** (MVP-C 예정)
-- **MVP-B에서는 아직 필터링이나 URL 추출을 하지 않습니다.** (MVP-D, E 예정)
+#### 디버깅 및 트러블슈팅
+- **권한을 켰는데 로그가 안 나오는 경우**:
+  - 권한 설정 화면에서 UMTP 권한을 **껐다가 다시 켜보세요**.
+  - 앱을 완전히 종료(Recent Apps에서 스와이프) 후 **재실행**하세요.
+  - 앱을 삭제 후 **재설치**해보세요.
+  - 일부 기기에서는 **기기 재부팅**이 필요할 수 있습니다.
+- **Logcat 태그**:
+  - `UMTP_PERMISSION`: 권한 판별 로직 및 시스템 설정값 확인 로그
+  - `UMTP_NOTIFICATION`: 서비스 연결 상태 및 수신된 알림 데이터 로그
