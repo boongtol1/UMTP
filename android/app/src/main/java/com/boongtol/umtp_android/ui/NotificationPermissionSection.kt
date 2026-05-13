@@ -15,7 +15,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
 import com.boongtol.umtp_android.notification.UmtpNotificationListenerService
 
@@ -50,7 +49,7 @@ fun NotificationPermissionSection(modifier: Modifier = Modifier) {
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
             )
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
