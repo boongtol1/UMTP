@@ -13,14 +13,28 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+
 @Composable
 fun NotificationPermissionSection(modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var isEnabled by remember { mutableStateOf(isNotificationListenerEnabled(context)) }
 
-    // This is a simple way to refresh when returning to the app, 
-    // but a more robust way would be using Lifecycle events or a StateFlow.
-    // For MVP-B, we'll keep it simple or use a DisposableEffect if needed.
+    // Refresh when returning to the app
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isEnabled = isNotificationListenerEnabled(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
     
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -69,10 +83,6 @@ fun NotificationPermissionSection(modifier: Modifier = Modifier) {
             }
         }
     }
-    
-    // Refresh status when this composable is recomposed. 
-    // In a real app, we might want to refresh onResume.
-    isEnabled = isNotificationListenerEnabled(context)
 }
 
 fun isNotificationListenerEnabled(context: Context): Boolean {

@@ -110,6 +110,12 @@ fun UmtpUrlAnalyzeScreen() {
                     fontSize = 14.sp
                 )
             }
+
+            Spacer(modifier = Modifier.height(height = 32.dp))
+
+            Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+            NotificationPermissionSection()
         }
     }
 }
