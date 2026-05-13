@@ -1,3 +1,4 @@
+from src.analysis_service import analyze_url_for_user
 from src.db import get_connection
 from src.joongna_search_client import search_joongna_products
 
@@ -75,12 +76,13 @@ def _build_poll_stats(search_words):
         "skipped_seen": 0,
         "search_errors": 0,
         "db_errors": 0,
+        "analysis_success": 0,
+        "analysis_duplicate": 0,
+        "analysis_failed": 0,
     }
 
 
 def poll_once(user_id=DEFAULT_USER_ID, search_words=None):
-    del user_id  # 분석 연동은 다음 단계에서 처리
-
     words = _normalize_search_words(search_words)
     stats = _build_poll_stats(words)
     seen_in_this_run = set()
@@ -152,6 +154,43 @@ def poll_once(user_id=DEFAULT_USER_ID, search_words=None):
                 print(f"price={item.get('price')}")
                 print(f"product_url={item.get('product_url') or '-'}")
                 stats["new_items"] += 1
+
+                product_url = item.get("product_url")
+                if not isinstance(product_url, str) or not product_url.strip():
+                    print(f"[{search_word}] 분석 스킵: product_url이 비어 있습니다.")
+                    stats["analysis_failed"] += 1
+                    continue
+
+                try:
+                    print("-> UMTP 분석 시작")
+                    analysis_result = analyze_url_for_user(
+                        user_id=user_id,
+                        url=product_url.strip(),
+                    )
+                except Exception as exc:
+                    print(f"-> UMTP 분석 예외: {exc}")
+                    stats["analysis_failed"] += 1
+                    continue
+
+                if analysis_result.get("ok"):
+                    status = analysis_result.get("status")
+                    if status == "success":
+                        stats["analysis_success"] += 1
+                    elif status == "duplicate":
+                        stats["analysis_duplicate"] += 1
+                    else:
+                        stats["analysis_failed"] += 1
+
+                    print(
+                        "-> UMTP 분석 완료 "
+                        f"(status={status}, "
+                        f"alert={analysis_result.get('is_alert_target')}, "
+                        f"telegram_sent={analysis_result.get('telegram_sent')})"
+                    )
+                    continue
+
+                stats["analysis_failed"] += 1
+                print(f"-> UMTP 분석 실패: {analysis_result.get('reason')}")
 
     finally:
         if cursor is not None:
