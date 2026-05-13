@@ -19,6 +19,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 1.0 | 전체 MacBook Air 단위 제품 DB화 + rule-based 공정가 자동 생성 | `python src/seed_user_fair_prices.py` |
 | 1.1 | 셀프검수 구조화 데이터 우선 파싱 + 숫자 기반 보조 파싱 | `uvicorn src.api_server:app --reload` |
 | 1.2 | 위험 키워드 점수화 + 교환글 탐지 + 주의 알림 | `uvicorn src.api_server:app --reload` |
+| 1.3 | 중고나라 Search API polling + seq 기반 새 매물 분석 | `python src/run_joongna_polling_umtp.py --once` |
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
 - `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.
@@ -62,6 +63,10 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.2 초안: `/analyze-url` 응답에 `risk_level`, `risk_score`, `risk_categories`, `trade_type`를 포함합니다.
 - 1.2 초안: Telegram 알림 제목에 `[주의 필요]`, `[교환글]`, `[제외급 위험]` prefix를 조건부로 붙입니다.
 - 1.2 초안: `sql/add_risk_exchange_columns.sql`로 `url_analysis_logs`에 위험/교환 로그 컬럼을 추가합니다.
+- 1.3 초안: Android Notification Listener 없이도 서버에서 중고나라 Search API polling만으로 동작할 수 있습니다.
+- 1.3 초안: `sql/create_joongna_seen_products.sql`로 `seq` 기준 중복 제거 테이블을 추가합니다.
+- 1.3 초안: Search API 응답의 `url`은 이미지 URL로 저장하고, 실제 매물 URL은 `https://web.joongna.com/product/{seq}`로 생성합니다.
+- 1.3 초안: 기본 검색어(`m1~m5맥북에어`) polling에서 새 `seq`만 기존 UMTP rule-based URL 분석 흐름으로 전달합니다.
 
 ## 1) 설치 방법
 
@@ -708,4 +713,38 @@ mysql -u <DB_USER> -p < sql/add_risk_exchange_columns.sql
 - 위험/교환이 있어도 공정가 비교 분석은 계속 수행합니다.
 - Telegram 알림은 위험도에 따라 `[주의 필요]`, 교환글이면 `[교환글]`, 제외급이면 `[제외급 위험]` prefix를 붙입니다.
 - MySQL 환경에서 `ADD COLUMN IF NOT EXISTS`가 제한되면 Workbench에서 컬럼 존재를 확인한 뒤 수동 실행합니다.
+
+---
+
+# UMTP 1.3 MVP
+
+1.3 MVP에서는 Android Notification Listener 없이,  
+중고나라 Search API polling으로 새 매물을 감지해 기존 URL 분석 흐름으로 연결합니다.
+
+## 1) 추가 SQL 실행
+
+```bash
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_joongna_seen_products.sql
+```
+
+## 2) 실행 방법
+
+```bash
+python src/run_joongna_polling_umtp.py --once
+python src/run_joongna_polling_umtp.py --interval 60
+```
+
+특정 검색어만 실행:
+
+```bash
+python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
+```
+
+## 3) 동작 규칙
+
+- 중고나라 Search API polling 기반으로 `m1~m5맥북에어` 검색 결과를 조회합니다.
+- `seq`를 매물 고유번호로 사용해 중복을 제거하고, 새 매물만 분석합니다.
+- Search API 응답의 `url` 필드는 이미지 URL로 저장하며, 실제 매물 URL은 `https://web.joongna.com/product/{seq}`로 생성합니다.
+- 새 매물 URL은 기존 UMTP rule-based 분석(`analyze_url_for_user`)으로 재사용합니다.
+- 개별 API 실패/JSON 구조 변경/개별 매물 분석 실패가 있어도 polling 루프는 계속 동작합니다.
 
