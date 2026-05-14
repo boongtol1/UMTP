@@ -120,22 +120,36 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
     }
 
-    fun registerUser(id: String) {
-        val trimmedId = id.trim()
-        if (trimmedId.length < 2) {
-            _toastMessage.value = "User ID는 2자 이상이어야 합니다."
+    fun registerUser(nickname: String, deviceId: String) {
+        val trimmedNickname = nickname.trim()
+        val trimmedDeviceId = deviceId.trim()
+        if (trimmedNickname.length < 2) {
+            _toastMessage.value = "닉네임은 2자 이상이어야 합니다."
+            return
+        }
+        if (trimmedDeviceId.isEmpty()) {
+            _toastMessage.value = "기기 ID를 읽지 못했습니다."
             return
         }
 
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val response = UmtpApiClient.apiService.registerUser(UserRegisterRequest(user_id = trimmedId))
+                val response = UmtpApiClient.apiService.registerUser(
+                    UserRegisterRequest(
+                        nickname = trimmedNickname,
+                        device_id = trimmedDeviceId
+                    )
+                )
                 if (response.ok) {
-                    userPreferences.setUserId(trimmedId)
-                    _userId.value = trimmedId
-                    loadInitialData(trimmedId)
-                    startAlertPolling(trimmedId)
+                    val effectiveUserId = response.user_id?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: trimmedNickname
+                    userPreferences.setUserId(effectiveUserId)
+                    _userId.value = effectiveUserId
+                    loadInitialData(effectiveUserId)
+                    startAlertPolling(effectiveUserId)
+                    _toastMessage.value = response.message ?: "등록 완료"
                 } else {
                     _toastMessage.value = "등록 실패: ${response.message ?: response.reason}"
                 }

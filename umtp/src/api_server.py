@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
@@ -21,7 +21,9 @@ class AnalyzeUrlRequest(BaseModel):
 
 
 class UserRegisterRequest(BaseModel):
-    user_id: str = Field(..., min_length=1, max_length=100)
+    user_id: Optional[str] = Field(default=None, max_length=100)
+    nickname: Optional[str] = Field(default=None, max_length=100)
+    device_id: Optional[str] = Field(default=None, max_length=200)
 
 
 class UserFairPriceUpsertRequest(BaseModel):
@@ -75,14 +77,24 @@ def user_fair_prices(user_id: str):
 @app.post("/users/register")
 def users_register(request: UserRegisterRequest):
     user_id = request.user_id.strip() if isinstance(request.user_id, str) else ""
+    nickname = request.nickname.strip() if isinstance(request.nickname, str) else ""
+    device_id = request.device_id.strip() if isinstance(request.device_id, str) else ""
+    effective_user_id = nickname or user_id
 
-    if not user_id:
-        return {"ok": False, "reason": "invalid_user_id"}
+    if not effective_user_id:
+        return {"ok": False, "reason": "invalid_user_id_or_nickname"}
 
     try:
-        return register_user(user_id=user_id)
+        return register_user(
+            user_id=effective_user_id,
+            device_id=device_id if device_id else None,
+        )
     except Exception as exc:
-        return {"ok": False, "reason": f"사용자 등록 실패: {exc}", "user_id": user_id}
+        return {
+            "ok": False,
+            "reason": f"사용자 등록 실패: {exc}",
+            "user_id": effective_user_id,
+        }
 
 
 @app.post("/user-fair-prices/upsert")

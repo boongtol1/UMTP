@@ -1,6 +1,7 @@
 package com.boongtol.umtp_android
 
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -47,7 +48,13 @@ class MainActivity : ComponentActivity() {
                 if (userId == null) {
                     UserSetupScreen(
                         isLoading = isLoading,
-                        onRegister = { viewModel.registerUser(it) }
+                        onRegister = {
+                            val androidId = Settings.Secure.getString(
+                                contentResolver,
+                                Settings.Secure.ANDROID_ID
+                            )
+                            viewModel.registerUser(it, androidId ?: "")
+                        }
                     )
                 } else {
                     MainTabScreen(viewModel, userId!!)

@@ -1,13 +1,15 @@
 package com.boongtol.umtp_android.network
 
 data class UserRegisterRequest(
-    val user_id: String,
-    val nickname: String? = null
+    val nickname: String,
+    val device_id: String,
+    val user_id: String? = null
 )
 
 data class UserRegisterResponse(
     val ok: Boolean,
     val user_id: String? = null,
+    val nickname: String? = null,
     val message: String? = null,
     val reason: String? = null
 )
