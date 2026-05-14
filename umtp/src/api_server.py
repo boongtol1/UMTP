@@ -1,6 +1,7 @@
 from typing import Literal, Optional
 
 from fastapi import FastAPI
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from src.analysis_service import analyze_url_for_user
@@ -40,6 +41,16 @@ class UserFairPriceUpsertRequest(BaseModel):
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+@app.get("/.well-known/security.txt", response_class=PlainTextResponse)
+def security_txt():
+    # Basic security.txt to avoid crawler 404 noise.
+    return (
+        "Contact: mailto:security@localhost\n"
+        "Preferred-Languages: ko, en\n"
+        "Expires: 2027-12-31T23:59:59Z\n"
+    )
 
 
 @app.get("/macbook-air-units")
