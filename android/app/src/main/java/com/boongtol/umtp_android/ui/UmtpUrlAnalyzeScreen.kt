@@ -19,7 +19,10 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UmtpUrlAnalyzeScreen() {
+fun UmtpUrlAnalyzeScreen(
+    userId: String,
+    onNavigateToSettings: () -> Unit
+) {
     var url by remember { mutableStateOf("") }
     var resultText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(value = false) }
@@ -28,18 +31,26 @@ fun UmtpUrlAnalyzeScreen() {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(text = "UMTP URL 분석 테스트") }
+                title = { Text(text = "UMTP URL 분석 테스트") },
+                actions = {
+                    Button(onClick = onNavigateToSettings) {
+                        Text(text = "MacBook Air 설정")
+                    }
+                }
             )
         }
     ) { innerPadding ->
         Column(
             modifier = Modifier
-                .padding(innerPadding)
+                .padding(paddingValues = innerPadding)
                 .padding(all = 16.dp)
                 .fillMaxSize()
                 .verticalScroll(state = rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            Text(text = "User ID: $userId", style = MaterialTheme.typography.bodySmall)
+            Spacer(modifier = Modifier.height(height = 8.dp))
+
             OutlinedTextField(
                 value = url,
                 onValueChange = { url = it },
@@ -61,7 +72,7 @@ fun UmtpUrlAnalyzeScreen() {
                         resultText = "분석 요청 중..."
                         resultText = try {
                             val response = UmtpApiClient.apiService.analyzeUrl(
-                                AnalyzeUrlRequest(user_id = "test_user", url = url)
+                                AnalyzeUrlRequest(user_id = userId, url = url)
                             )
                             formatResponse(response)
                         } catch (e: Exception) {
