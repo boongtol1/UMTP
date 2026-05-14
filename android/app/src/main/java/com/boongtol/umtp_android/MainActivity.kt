@@ -5,7 +5,13 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.boongtol.umtp_android.ui.*
@@ -27,10 +33,7 @@ class MainActivity : ComponentActivity() {
                 
                 val userId by viewModel.userId.collectAsState()
                 val isLoading by viewModel.isLoading.collectAsState()
-                val units by viewModel.units.collectAsState()
-                val userSettings by viewModel.userSettings.collectAsState()
                 val toastMessage by viewModel.toastMessage.collectAsState()
-                val savingItemKey by viewModel.savingItemKey.collectAsState()
                 
                 val context = LocalContext.current
                 
@@ -47,47 +50,103 @@ class MainActivity : ComponentActivity() {
                         onRegister = { viewModel.registerUser(it) }
                     )
                 } else {
-                    var currentScreen by remember { mutableStateOf<Screen>(Screen.ChipList) }
-
-                    when (val screen = currentScreen) {
-                        is Screen.ChipList -> {
-                            val chips = units.map { it.chip }.distinct().sorted()
-                            ChipListScreen(
-                                userId = userId!!,
-                                chips = chips,
-                                onChipClick = { currentScreen = Screen.ScreenSizeList(it) },
-                                onLogout = { viewModel.logout() }
-                            )
-                        }
-                        is Screen.ScreenSizeList -> {
-                            val sizes = units.filter { it.chip == screen.chip }
-                                .map { it.screen_inch }.distinct().sorted()
-                            ScreenSizeListScreen(
-                                chip = screen.chip,
-                                screenSizes = sizes,
-                                onScreenSizeClick = { currentScreen = Screen.RamSsdSettings(screen.chip, it) },
-                                onBack = { currentScreen = Screen.ChipList }
-                            )
-                        }
-                        is Screen.RamSsdSettings -> {
-                            val filteredUnits = units.filter { 
-                                it.chip == screen.chip && it.screen_inch == screen.screenSize 
-                            }
-                            RamSsdSettingsScreen(
-                                chip = screen.chip,
-                                screenSize = screen.screenSize,
-                                units = filteredUnits,
-                                userSettings = userSettings,
-                                savingItemKey = savingItemKey,
-                                onSave = { unit, price, rate, enabled ->
-                                    viewModel.upsertItem(unit, price, rate, enabled)
-                                },
-                                onBack = { currentScreen = Screen.ScreenSizeList(screen.chip) }
-                            )
-                        }
-                    }
+                    MainTabScreen(viewModel, userId!!)
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun MainTabScreen(viewModel: MacBookAirSettingsViewModel, userId: String) {
+    var selectedTab by remember { mutableIntStateOf(0) }
+    
+    val alerts by viewModel.alerts.collectAsState()
+    val units by viewModel.units.collectAsState()
+    val userSettings by viewModel.userSettings.collectAsState()
+    val savingItemKey by viewModel.savingItemKey.collectAsState()
+
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Alerts") },
+                    label = { Text("알림") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
+                    label = { Text("설정") }
+                )
+            }
+        }
+    ) { innerPadding ->
+        Surface(modifier = Modifier.padding(innerPadding)) {
+            when (selectedTab) {
+                0 -> AlertFeedScreen(
+                    alerts = alerts,
+                    onRefresh = { viewModel.fetchAlerts(userId) }
+                )
+                1 -> SettingsNavigator(
+                    userId = userId,
+                    units = units,
+                    userSettings = userSettings,
+                    savingItemKey = savingItemKey,
+                    onUpsert = { unit, price, rate, enabled ->
+                        viewModel.upsertItem(unit, price, rate, enabled)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsNavigator(
+    userId: String,
+    units: List<com.boongtol.umtp_android.network.MacBookAirUnit>,
+    userSettings: List<com.boongtol.umtp_android.network.UserFairPriceItem>,
+    savingItemKey: String?,
+    onUpsert: (com.boongtol.umtp_android.network.MacBookAirUnit, Int, Int, Boolean) -> Unit
+) {
+    var currentScreen by remember { mutableStateOf<Screen>(Screen.ChipList) }
+
+    when (val screen = currentScreen) {
+        is Screen.ChipList -> {
+            val chips = units.map { it.chip }.distinct().sorted()
+            ChipListScreen(
+                userId = userId,
+                chips = chips,
+                onChipClick = { currentScreen = Screen.ScreenSizeList(it) },
+                onLogout = { /* Registration is locked, logout removed */ }
+            )
+        }
+        is Screen.ScreenSizeList -> {
+            val sizes = units.filter { it.chip == screen.chip }
+                .map { it.screen_inch }.distinct().sorted()
+            ScreenSizeListScreen(
+                chip = screen.chip,
+                screenSizes = sizes,
+                onScreenSizeClick = { currentScreen = Screen.RamSsdSettings(screen.chip, it) },
+                onBack = { currentScreen = Screen.ChipList }
+            )
+        }
+        is Screen.RamSsdSettings -> {
+            val filteredUnits = units.filter { 
+                it.chip == screen.chip && it.screen_inch == screen.screenSize 
+            }
+            RamSsdSettingsScreen(
+                chip = screen.chip,
+                screenSize = screen.screenSize,
+                units = filteredUnits,
+                userSettings = userSettings,
+                savingItemKey = savingItemKey,
+                onSave = onUpsert,
+                onBack = { currentScreen = Screen.ScreenSizeList(screen.chip) }
+            )
         }
     }
 }
