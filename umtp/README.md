@@ -1,7 +1,13 @@
-# UMTP 1차 MVP
+# UMTP
 
 UMTP 프로젝트의 가장 간단한 1차 MVP입니다.  
 MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 결과를 DB에 저장합니다.
+
+## 문서 안내
+
+- 처음 세팅은 `빠른 시작`부터 진행하세요.
+- 현재 운영 기준(1.8 파이프라인)은 `UMTP 1.3~1.8 운영 MVP` 섹션의 SQL/실행/동작 규칙을 확인하세요.
+- 과거 단계별 동작은 `버전별 상세 이력`에서 확인할 수 있습니다.
 
 ## UMTP MVP Progress
 
@@ -25,6 +31,8 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 1.6 | 감시 조건 저장 즉시 polling 요청(force_poll) | `python src/run_joongna_polling_umtp.py --once --user-id boongtol` |
 | 1.7 | Android 사용자 지정 검색어 감시 조건 설정 | `uvicorn src.api_server:app --reload` |
 | 1.8 | analysis_jobs + notification worker 기반 파이프라인 | `python src/run_analysis_worker_umtp.py --once` |
+
+## 주요 변경 요약
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
 - `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.
@@ -92,13 +100,15 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.8 알림 구조: notification worker가 `alert_events` pending을 읽어 Telegram 전송(`sent`) 또는 앱 피드 전용 상태(`app_only`)로 처리합니다.
 - 1.8 운영 구조: MVP에서는 polling 직후 inline analysis 처리도 가능하지만, `run_analysis_worker_umtp.py`와 `run_notification_worker_umtp.py`를 별도 프로세스로 분리할 수 있습니다.
 
-## 1) 설치 방법
+## 빠른 시작
+
+### 1) 설치 방법
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 2) 환경변수 설정
+### 2) 환경변수 설정
 
 `.env.example` 파일을 `.env`로 복사한 뒤, 실제 DB 접속 정보를 입력하세요.
 
@@ -118,7 +128,7 @@ TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 ```
 
-## 3) 테이블 생성 방법
+### 3) 테이블 생성 방법
 
 아래 SQL을 실행해서 DB/테이블을 생성하세요.
 
@@ -131,7 +141,7 @@ mysql -u <DB_USER> -p < sql/init_mvp_tables.sql
 - `listing_analysis_results` 테이블 생성
 - MacBook Air M1 13인치 8GB RAM 256GB SSD 공정가 550000원 upsert(중복 방지)
 
-## 4) 실행 방법
+### 4) 실행 방법
 
 ```bash
 python src/run_fake_umtp.py
@@ -150,21 +160,23 @@ DB 저장 완료
 
 ---
 
-## 5) 주의사항
+### 5) 주의사항
 
 `.env`에는 실제 DB 비밀번호 등 민감 정보가 들어갑니다.  
 `.env` 파일은 절대 git에 올리지 마세요.
 
 ---
 
-# UMTP 2차 MVP
+## 버전별 상세 이력
+
+### UMTP 2차 MVP
 
 2차 MVP에서는 가짜 매물 고정값 대신, 사용자가 터미널에서 매물 제목/가격을 직접 입력합니다.  
 입력값을 바탕으로 DB에 저장된 공정가와 비교 분석하고, 결과를 `listing_analysis_results`에 저장합니다.
 
 1차와 동일하게 설치/환경변수 설정/테이블 생성/주의사항을 적용합니다.
 
-## 1) 실행 방법
+#### 1) 실행 방법
 
 ```bash
 python src/run_manual_umtp.py
@@ -177,7 +189,7 @@ python src/run_manual_umtp.py
 매물 가격 입력: 430000
 ```
 
-## 2) 동작 규칙
+#### 2) 동작 규칙
 
 고정 제품 정보:
 - `product_type`: `MacBook Air`
@@ -191,7 +203,7 @@ python src/run_manual_umtp.py
 - 알림 기준: 차이비율이 `20` 이상이면 알림 대상
 - 분석 결과 저장: `listing_analysis_results`
 
-## 3) 예상 출력
+#### 3) 예상 출력
 
 ```text
 공정가: 550000원
@@ -204,14 +216,14 @@ DB 저장 완료
 
 ---
 
-# UMTP 3차 MVP
+### UMTP 3차 MVP
 
 3차 MVP에서는 사용자가 입력한 매물 제목에서 제품 스펙을 자동 추출한 뒤,  
 DB 공정가와 비교 분석하고 결과를 `listing_analysis_results`에 저장합니다.
 
 1차와 동일하게 설치/환경변수 설정/테이블 생성/주의사항을 적용합니다.
 
-## 1) 실행 방법
+#### 1) 실행 방법
 
 ```bash
 python src/run_title_parse_umtp.py
@@ -224,7 +236,7 @@ python src/run_title_parse_umtp.py
 매물 가격 입력: 430000
 ```
 
-## 2) 동작 규칙
+#### 2) 동작 규칙
 
 - 제목 파싱: `parse_listing_title(title)` 사용
 - 지원 대상: `MacBook Air`, `M1`, `13인치`, `8GB/8기가`, `256GB/256기가`
@@ -235,7 +247,7 @@ python src/run_title_parse_umtp.py
 - 알림 기준: 차이비율이 `20` 이상이면 알림 대상
 - 분석 결과 저장: `listing_analysis_results`
 
-## 3) 예상 출력
+#### 3) 예상 출력
 
 ```text
 추출된 스펙:
@@ -255,7 +267,7 @@ DB 저장 완료
 
 ---
 
-# UMTP 4차 MVP
+### UMTP 4차 MVP
 
 4차 MVP에서는 여러 테스트 매물을 한 번에 분석합니다.  
 각 매물 제목에서 스펙을 추출하고 DB 공정가와 비교해 알림 대상 여부를 판단한 뒤,  
@@ -263,13 +275,13 @@ DB 저장 완료
 
 1차와 동일하게 설치/환경변수 설정/테이블 생성/주의사항을 적용합니다.
 
-## 1) 실행 방법
+#### 1) 실행 방법
 
 ```bash
 python src/run_batch_umtp.py
 ```
 
-## 2) 동작 규칙
+#### 2) 동작 규칙
 
 - 입력 데이터: `run_batch_umtp.py` 내부 테스트 매물 리스트(4건)
 - 제목 파싱: `parse_listing_title(title)` 재사용
@@ -286,7 +298,7 @@ python src/run_batch_umtp.py
   - DB 저장 성공 개수
   - 알림 대상 개수
 
-## 3) 예상 출력
+#### 3) 예상 출력
 
 ```text
 [1] 맥북에어 M1 8GB 256GB 급처
@@ -324,7 +336,7 @@ DB 저장 성공: 3개
 
 ---
 
-# UMTP 5차 MVP
+### UMTP 5차 MVP
 
 5차 MVP에서는 CSV 파일에서 여러 매물 목록을 읽어 일괄 분석합니다.  
 각 매물 제목에서 스펙을 추출하고 DB 공정가와 비교해 알림 대상 여부를 판단한 뒤,  
@@ -332,13 +344,13 @@ DB 저장 성공: 3개
 
 1차와 동일하게 설치/환경변수 설정/테이블 생성/주의사항을 적용합니다.
 
-## 1) 실행 방법
+#### 1) 실행 방법
 
 ```bash
 python src/run_csv_umtp.py
 ```
 
-## 2) 동작 규칙
+#### 2) 동작 규칙
 
 - 입력 데이터: `data/sample_listings.csv`
 - 제목 파싱: `parse_listing_title(title)` 재사용
@@ -355,7 +367,7 @@ python src/run_csv_umtp.py
   - 알림 대상 개수
   - 실패 개수
 
-## 3) 예상 출력
+#### 3) 예상 출력
 
 ```text
 [1] 맥북에어 M1 8GB 256GB 급처
@@ -395,20 +407,20 @@ DB 저장 성공: 3개
 
 ---
 
-# UMTP 6차 MVP
+### UMTP 6차 MVP
 
 6차 MVP에서는 크롤링 결과 형태의 JSON 파일에서 여러 매물 목록을 읽어 일괄 분석합니다.  
 아직 실제 중고나라 크롤링은 하지 않고, JSON 샘플 데이터 기반으로만 분석합니다.
 
 1차와 동일하게 설치/환경변수 설정/테이블 생성/주의사항을 적용합니다.
 
-## 1) 실행 방법
+#### 1) 실행 방법
 
 ```bash
 python src/run_json_umtp.py
 ```
 
-## 2) 동작 규칙
+#### 2) 동작 규칙
 
 - 입력 데이터: `data/sample_crawled_listings.json`
 - JSON 파싱: Python 표준 라이브러리 `json` 모듈 사용
@@ -431,7 +443,7 @@ python src/run_json_umtp.py
   - 알림 대상 개수
   - 실패 개수
 
-## 3) 예상 출력
+#### 3) 예상 출력
 
 ```text
 [1] 맥북에어 M1 8GB 256GB 급처
@@ -479,14 +491,14 @@ DB 저장 성공: 3개
 
 ---
 
-# UMTP 7차 MVP
+### UMTP 7차 MVP
 
 7차 MVP에서는 사용자가 입력한 실제 중고나라 URL 1개에서 HTML을 읽고,  
 제목/본문/가격을 자동 추출한 뒤 스펙 파싱까지 연결합니다.
 
 1차와 동일하게 설치/환경변수 설정/테이블 생성/주의사항을 적용합니다.
 
-## 1) 실행 방법
+#### 1) 실행 방법
 
 ```bash
 python src/run_url_parse_umtp.py
@@ -498,7 +510,7 @@ python src/run_url_parse_umtp.py
 매물 URL 입력: https://web.joongna.com/product/228451872
 ```
 
-## 2) 동작 규칙
+#### 2) 동작 규칙
 
 - 사용자 입력: URL 1개만 입력
 - 0.7은 아직 중고나라 전체 검색 크롤링을 하지 않음
@@ -520,7 +532,7 @@ python src/run_url_parse_umtp.py
 - 분석 결과 저장: `listing_analysis_results`
 - 출력 항목: 제목, 본문 일부, 가격, 스펙, 분석 결과, `source`, `url`
 
-## 3) 예상 출력
+#### 3) 예상 출력
 
 ```text
 추출된 제목:
@@ -553,7 +565,7 @@ DB 저장 완료
 
 ---
 
-# UMTP 8차 MVP
+### UMTP 8차 MVP
 
 8차 MVP에서는 Android Notification Listener 앱이 URL을 보낸다고 가정하고,  
 URL 수신 API에서 사용자별 공정가 기준 분석을 수행합니다.
@@ -561,13 +573,13 @@ URL 수신 API에서 사용자별 공정가 기준 분석을 수행합니다.
 이번 단계는 Android 앱 자체를 구현하지 않고, `curl` 요청으로 URL 전달 상황을 흉내냅니다.  
 실제 텔레그램 전송은 하지 않으며 `notifier.py`의 `print()` 알림으로 대체합니다.
 
-## 1) 실행 방법
+#### 1) 실행 방법
 
 ```bash
 uvicorn src.api_server:app --reload
 ```
 
-## 2) 요청 예시(curl)
+#### 2) 요청 예시(curl)
 
 ```bash
 curl -X POST http://127.0.0.1:8000/analyze-url \
@@ -578,7 +590,7 @@ curl -X POST http://127.0.0.1:8000/analyze-url \
   }'
 ```
 
-## 3) 동작 규칙
+#### 3) 동작 규칙
 
 - 엔드포인트: `POST /analyze-url`
 - 입력: `user_id`, `url`
@@ -592,23 +604,23 @@ curl -X POST http://127.0.0.1:8000/analyze-url \
 
 ---
 
-# UMTP 9차 MVP
+### UMTP 9차 MVP
 
 9차 MVP에서는 Telegram 알림, 중복 URL 재분석 방지, 분석 로그 안정 저장을 추가합니다.
 
-## 1) 추가 SQL 실행
+#### 1) 추가 SQL 실행
 
 ```bash
 mysql -u <DB_USER> -p < sql/add_url_analysis_logs.sql
 ```
 
-## 2) 실행 방법
+#### 2) 실행 방법
 
 ```bash
 uvicorn src.api_server:app --reload
 ```
 
-## 3) .env 설정
+#### 3) .env 설정
 
 `.env`에 아래 값을 설정합니다.
 
@@ -619,7 +631,7 @@ TELEGRAM_CHAT_ID=...
 
 실제 비밀값은 `.env`에만 저장하고 Git에는 올리지 않습니다.
 
-## 4) 테스트(curl)
+#### 4) 테스트(curl)
 
 테스트 URL:
 `https://web.joongna.com/product/228436846`
@@ -633,7 +645,7 @@ curl -X POST http://127.0.0.1:8000/analyze-url \
   }'
 ```
 
-## 5) 동작 규칙
+#### 5) 동작 규칙
 
 - 같은 `user_id + url`이 `success/failed/duplicate`로 이미 기록되면 재분석하지 않습니다.
 - 중복 요청은 `ok=true`, `status="duplicate"`, `message="이미 분석된 URL"`로 응답합니다.
@@ -643,24 +655,24 @@ curl -X POST http://127.0.0.1:8000/analyze-url \
 
 ---
 
-# UMTP 1.0 MVP
+### UMTP 1.0 MVP
 
 1.0 MVP에서는 전체 실리콘 MacBook Air 유효 조합을 정의하고,  
 rule-based 공정가를 `user_fair_prices`에 자동 반영하는 seed 흐름을 추가합니다.
 
-## 1) 실행 방법
+#### 1) 실행 방법
 
 ```bash
 python src/seed_user_fair_prices.py
 ```
 
-## 2) SQL seed 방법
+#### 2) SQL seed 방법
 
 ```bash
 mysql -u <DB_USER> -p < sql/seed_macbook_air_units.sql
 ```
 
-## 3) 동작 규칙
+#### 3) 동작 규칙
 
 - `macbook_air_units.py`에서 유효 조합과 rule-based 공정가 계산을 관리합니다.
 - 공정가는 실제 시세가 아닌 MVP용 임시 기준값입니다.
@@ -670,18 +682,18 @@ mysql -u <DB_USER> -p < sql/seed_macbook_air_units.sql
 
 ---
 
-# UMTP 1.1 MVP
+### UMTP 1.1 MVP
 
 1.1 MVP에서는 HTML 전체 텍스트를 파싱하지 않고,  
 제목/본문/가격/셀프검수 영역만 사용해 스펙을 추출합니다.
 
-## 1) 실행 방법
+#### 1) 실행 방법
 
 ```bash
 uvicorn src.api_server:app --reload
 ```
 
-## 2) 요청 예시(curl)
+#### 2) 요청 예시(curl)
 
 ```bash
 curl -X POST http://127.0.0.1:8000/analyze-url \
@@ -692,13 +704,13 @@ curl -X POST http://127.0.0.1:8000/analyze-url \
   }'
 ```
 
-## 3) 추가 SQL 실행
+#### 3) 추가 SQL 실행
 
 ```bash
 mysql -u <DB_USER> -p < sql/add_parser_confidence_columns.sql
 ```
 
-## 4) 동작 규칙
+#### 4) 동작 규칙
 
 - 셀프검수는 `dl/dt/dd` 구조를 key-value로 파싱해 `self_check_fields`로 저장합니다.
 - `self_check_fields` 값(모델명/CPU종류/램 용량/SSD용량)을 제목/본문 파싱보다 우선합니다.
@@ -712,24 +724,24 @@ mysql -u <DB_USER> -p < sql/add_parser_confidence_columns.sql
 
 ---
 
-# UMTP 1.2 MVP
+### UMTP 1.2 MVP
 
 1.2 MVP에서는 위험 키워드 점수화와 교환글 탐지를 추가해  
 API 응답/알림에 위험도를 함께 제공합니다.
 
-## 1) 실행 방법
+#### 1) 실행 방법
 
 ```bash
 uvicorn src.api_server:app --reload
 ```
 
-## 2) 추가 SQL 실행
+#### 2) 추가 SQL 실행
 
 ```bash
 mysql -u <DB_USER> -p < sql/add_risk_exchange_columns.sql
 ```
 
-## 3) 동작 규칙
+#### 3) 동작 규칙
 
 - 위험도는 `none / low / medium / high / exclude` 단계로 분류합니다.
 - 제목+본문+셀프검수 value를 함께 검사해 위험/교환 키워드를 탐지합니다.
@@ -740,12 +752,12 @@ mysql -u <DB_USER> -p < sql/add_risk_exchange_columns.sql
 
 ---
 
-# UMTP 1.3 MVP
+### UMTP 1.3~1.8 운영 MVP
 
 1.3 MVP에서는 Android Notification Listener 없이,  
 중고나라 Search API polling으로 새 매물을 감지해 기존 URL 분석 흐름으로 연결합니다.
 
-## 1) 추가 SQL 실행
+#### 1) 추가 SQL 실행
 
 ```bash
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_joongna_seen_products.sql
@@ -757,7 +769,7 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_or_alter_alert_events.sq
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_listing_analysis_results_pipeline.sql
 ```
 
-## 2) 실행 방법
+#### 2) 실행 방법
 
 ```bash
 python src/run_joongna_polling_umtp.py --once
@@ -774,7 +786,7 @@ python src/run_notification_worker_umtp.py --interval 3
 python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 ```
 
-## 3) 동작 규칙
+#### 3) 동작 규칙
 
 - 중고나라 Search API polling 기반으로 `m1~m5맥북에어` 검색 결과를 조회합니다.
 - `user_fair_prices`는 사용자별 공정가 저장용으로 유지하고, polling 대상 선정은 `user_watch_rules`를 사용합니다.
@@ -796,7 +808,7 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - 개별 API 실패/JSON 구조 변경/개별 매물 분석 실패가 있어도 polling 루프는 계속 동작합니다.
 - `/alerts?user_id=...` API는 `alert_events`를 최신순(`created_at DESC`)으로 반환하며 Android 알림 피드에서 사용할 수 있습니다.
 
-## 4) Docker 분리 실행 예시
+#### 4) Docker 분리 실행 예시
 
 ```bash
 docker build -t umtp .
@@ -822,12 +834,12 @@ docker logs -f umtp-notification
 
 ---
 
-# UMTP 1.4 MVP
+### UMTP 1.4 MVP (설정 API 상세 참고)
 
 1.4 MVP에서는 Android 앱이 사용자별 MacBook Air 설정을 서버 API로 저장/조회할 수 있도록,
 `users` 등록 API와 `user_fair_prices` 기반 설정 API를 추가합니다.
 
-## 1) 추가 SQL 실행
+#### 1) 추가 SQL 실행
 
 ```bash
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_users_table.sql
@@ -841,13 +853,13 @@ MySQL 환경에서 `ADD COLUMN IF NOT EXISTS`가 제한되면, 컬럼 존재 여
 `sql/add_users_device_id_column.sql`은 `users.device_id` 컬럼과 unique index를 안전하게 추가합니다.
 `sql/drop_users_nickname_column.sql`은 users 테이블의 `nickname` 컬럼이 남아 있을 때만 삭제합니다.
 
-## 2) 실행 방법
+#### 2) 실행 방법
 
 ```bash
 uvicorn src.api_server:app --reload
 ```
 
-## 3) API 테스트(curl)
+#### 3) API 테스트(curl)
 
 MacBook Air unit 목록 조회:
 
@@ -890,7 +902,7 @@ curl -X POST http://127.0.0.1:8000/user-fair-prices/upsert \
   }'
 ```
 
-## 4) 동작 규칙
+#### 4) 동작 규칙
 
 - `GET /macbook-air-units`: 104개 MacBook Air 단위 조합을 `chip -> screen_inch -> ram_gb -> ssd_gb` 순으로 반환합니다.
 - `GET /user-fair-prices`: 전체 단위 목록 기준으로 system/user/effective 값을 함께 반환합니다.
