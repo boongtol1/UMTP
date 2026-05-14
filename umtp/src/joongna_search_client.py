@@ -14,6 +14,24 @@ DEFAULT_HEADERS = {
 DEFAULT_FIRST_QUANTITY = 50
 DEFAULT_CATEGORY_FILTER = [{"categoryDepth": 0, "categorySeq": 0}]
 DEFAULT_PRICE_FILTER = {"minPrice": 0, "maxPrice": 100000000}
+REFRESH_KEY_FIELDS = (
+    "sortDate",
+    "updateDate",
+    "updatedAt",
+    "refreshedAt",
+    "regDate",
+    "createdAt",
+    "publishDate",
+    "productUpdatedAt",
+    "sort_date",
+    "update_date",
+    "updated_at",
+    "refreshed_at",
+    "reg_date",
+    "created_at",
+    "publish_date",
+    "product_updated_at",
+)
 
 
 def _coerce_int(value):
@@ -96,6 +114,18 @@ def _extract_location_names(item):
     return ""
 
 
+def _extract_refresh_key(item):
+    for key in REFRESH_KEY_FIELDS:
+        if key not in item:
+            continue
+
+        value = _coerce_text(item.get(key))
+        if value:
+            return value
+
+    return None
+
+
 def _looks_like_items_list(candidate):
     if not isinstance(candidate, list) or not candidate:
         return False
@@ -172,6 +202,7 @@ def _normalize_item(item):
     title = _coerce_text(item.get("title") or item.get("productName") or item.get("name"))
     price = _coerce_int(item.get("price") or item.get("salePrice") or item.get("priceText"))
     sort_date = _coerce_text(item.get("sortDate") or item.get("sort_date") or item.get("createdAt"))
+    refresh_key = _extract_refresh_key(item)
     location_names = _extract_location_names(item)
     wish_count = _coerce_int(item.get("wishCount") or item.get("wish_count"))
     chat_count = _coerce_int(item.get("chatCount") or item.get("chat_count"))
@@ -181,9 +212,11 @@ def _normalize_item(item):
 
     return {
         "seq": seq,
+        "product_id": seq,
         "title": title,
         "price": price,
         "sort_date": sort_date,
+        "refresh_key": refresh_key,
         "location_names": location_names,
         "wish_count": wish_count,
         "chat_count": chat_count,

@@ -2,13 +2,24 @@ try:
     from src.analysis_service import analyze_url_for_user
     from src.db import get_connection
     from src.joongna_search_client import search_joongna_products
+    from src.joongna_seen_products import (
+        get_seen_product,
+        mark_seen_product_analyzed,
+        should_analyze_seen_product,
+        upsert_seen_product_observation,
+    )
 except ModuleNotFoundError:
     from analysis_service import analyze_url_for_user
     from db import get_connection
     from joongna_search_client import search_joongna_products
+    from joongna_seen_products import (
+        get_seen_product,
+        mark_seen_product_analyzed,
+        should_analyze_seen_product,
+        upsert_seen_product_observation,
+    )
 
 
-MYSQL_DUPLICATE_ENTRY_ERRNO = 1062
 DEFAULT_SEARCH_WORDS = [
     "m1맥북에어",
     "m2맥북에어",
@@ -34,45 +45,6 @@ def _normalize_search_words(search_words):
     return normalized or DEFAULT_SEARCH_WORDS
 
 
-def _is_seen_seq(cursor, seq):
-    cursor.execute(
-        """
-        SELECT 1
-        FROM joongna_seen_products
-        WHERE seq = %s
-        LIMIT 1
-        """,
-        (seq,),
-    )
-    return cursor.fetchone() is not None
-
-
-def _save_seen_seq(cursor, search_word, item):
-    cursor.execute(
-        """
-        INSERT INTO joongna_seen_products (
-            seq,
-            search_word,
-            title,
-            price,
-            product_url,
-            image_url,
-            sort_date
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            item.get("seq"),
-            search_word,
-            item.get("title"),
-            item.get("price"),
-            item.get("product_url"),
-            item.get("image_url"),
-            item.get("sort_date"),
-        ),
-    )
-
-
 def _build_poll_stats(search_words):
     return {
         "search_words": search_words,
@@ -88,11 +60,18 @@ def _build_poll_stats(search_words):
     }
 
 
-def _is_duplicate_entry_error(exc):
-    errno = getattr(exc, "errno", None)
-    if errno == MYSQL_DUPLICATE_ENTRY_ERRNO:
-        return True
-    return "Duplicate entry" in str(exc)
+def _build_observed_product(search_word, item):
+    return {
+        "product_id": item.get("product_id") or item.get("seq"),
+        "seq": item.get("seq"),
+        "search_word": search_word,
+        "title": item.get("title"),
+        "price": item.get("price"),
+        "product_url": item.get("product_url"),
+        "image_url": item.get("image_url"),
+        "sort_date": item.get("sort_date"),
+        "refresh_key": item.get("refresh_key"),
+    }
 
 
 def poll_once(user_id=DEFAULT_USER_ID, search_words=None):
@@ -141,55 +120,58 @@ def poll_once(user_id=DEFAULT_USER_ID, search_words=None):
                 continue
 
             for item in items:
-                seq = item.get("seq")
-                if seq is None:
+                observed_product = _build_observed_product(search_word, item)
+                product_id = observed_product.get("product_id")
+                if product_id is None:
                     stats["skipped_no_seq"] += 1
                     continue
 
-                if seq in seen_in_this_run:
+                if product_id in seen_in_this_run:
                     stats["skipped_seen"] += 1
                     continue
+                seen_in_this_run.add(product_id)
 
-                already_seen = False
+                should_analyze = True
+                change_reason = "new_product"
+
                 if seen_db_ready and cursor is not None:
                     try:
-                        already_seen = _is_seen_seq(cursor, seq)
+                        existing = get_seen_product(cursor, product_id)
+                        should_analyze, change_reason = should_analyze_seen_product(existing, observed_product)
                     except Exception as exc:
                         stats["db_errors"] += 1
-                        print(f"[{search_word}] seen 조회 실패 (seq={seq}): {exc}")
+                        print(f"[{search_word}] seen 조회 실패 (seq={product_id}): {exc}")
                         disable_seen_db(str(exc))
-                        already_seen = False
-
-                if already_seen:
-                    stats["skipped_seen"] += 1
-                    seen_in_this_run.add(seq)
-                    continue
-
-                seen_in_this_run.add(seq)
+                        should_analyze = True
+                        change_reason = "new_product"
 
                 if seen_db_ready and cursor is not None:
                     try:
-                        _save_seen_seq(cursor, search_word, item)
+                        upsert_seen_product_observation(
+                            cursor,
+                            observed_product,
+                            change_reason=change_reason,
+                            status="analyze_pending" if should_analyze else "unchanged",
+                        )
                         connection.commit()
                     except Exception as exc:
+                        stats["db_errors"] += 1
                         try:
                             connection.rollback()
                         except Exception:
                             pass
-
-                        if _is_duplicate_entry_error(exc):
-                            stats["skipped_seen"] += 1
-                            print(f"[{search_word}] 이미 본 seq로 판정 (seq={seq})")
-                            continue
-
-                        stats["db_errors"] += 1
-                        print(f"[{search_word}] seen 저장 실패 (seq={seq}): {exc}")
+                        print(f"[{search_word}] seen 관측 저장 실패 (seq={product_id}): {exc}")
                         disable_seen_db(str(exc))
 
-                print(f"[{search_word}] 새 매물 발견")
-                print(f"seq={seq}")
+                if not should_analyze:
+                    stats["skipped_seen"] += 1
+                    print(f"[{search_word}] 상태 동일하여 스킵 (seq={product_id}, reason={change_reason})")
+                    continue
+
+                print(f"[{search_word}] 분석 대상 감지 (seq={product_id}, reason={change_reason})")
                 print(f"title={item.get('title') or '-'}")
                 print(f"price={item.get('price')}")
+                print(f"refresh_key={item.get('refresh_key') or '-'}")
                 print(f"product_url={item.get('product_url') or '-'}")
                 stats["new_items"] += 1
 
@@ -199,15 +181,29 @@ def poll_once(user_id=DEFAULT_USER_ID, search_words=None):
                     stats["analysis_failed"] += 1
                     continue
 
+                analysis_result = None
                 try:
                     print("-> UMTP 분석 시작")
                     analysis_result = analyze_url_for_user(
                         user_id=user_id,
                         url=product_url.strip(),
+                        force_reanalyze=True,
                     )
                 except Exception as exc:
                     print(f"-> UMTP 분석 예외: {exc}")
                     stats["analysis_failed"] += 1
+                    if seen_db_ready and cursor is not None:
+                        try:
+                            mark_seen_product_analyzed(cursor, product_id, status="analysis_exception")
+                            connection.commit()
+                        except Exception as mark_exc:
+                            stats["db_errors"] += 1
+                            try:
+                                connection.rollback()
+                            except Exception:
+                                pass
+                            print(f"[{search_word}] analyzed_at 갱신 실패 (seq={product_id}): {mark_exc}")
+                            disable_seen_db(str(mark_exc))
                     continue
 
                 if analysis_result.get("ok"):
@@ -225,10 +221,23 @@ def poll_once(user_id=DEFAULT_USER_ID, search_words=None):
                         f"alert={analysis_result.get('is_alert_target')}, "
                         f"telegram_sent={analysis_result.get('telegram_sent')})"
                     )
-                    continue
+                else:
+                    stats["analysis_failed"] += 1
+                    print(f"-> UMTP 분석 실패: {analysis_result.get('reason')}")
 
-                stats["analysis_failed"] += 1
-                print(f"-> UMTP 분석 실패: {analysis_result.get('reason')}")
+                if seen_db_ready and cursor is not None:
+                    try:
+                        analyzed_status = analysis_result.get("status") if analysis_result else "failed"
+                        mark_seen_product_analyzed(cursor, product_id, status=analyzed_status)
+                        connection.commit()
+                    except Exception as exc:
+                        stats["db_errors"] += 1
+                        try:
+                            connection.rollback()
+                        except Exception:
+                            pass
+                        print(f"[{search_word}] analyzed_at 갱신 실패 (seq={product_id}): {exc}")
+                        disable_seen_db(str(exc))
 
     finally:
         if cursor is not None:

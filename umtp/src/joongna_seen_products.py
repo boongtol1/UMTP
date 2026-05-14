@@ -273,10 +273,12 @@ def upsert_seen_product_observation(
     )
 
 
-def mark_seen_product_analyzed(cursor, product_id):
+def mark_seen_product_analyzed(cursor, product_id, *, status="analyzed"):
     normalized_id = _coerce_product_id(product_id)
     if normalized_id is None:
         raise ValueError("product_id/seq가 없습니다.")
+
+    normalized_status = _coerce_text(status) or "analyzed"
 
     try:
         cursor.execute(
@@ -287,7 +289,7 @@ def mark_seen_product_analyzed(cursor, product_id):
                 last_status = %s
             WHERE seq = %s
             """,
-            ("analyzed", normalized_id),
+            (normalized_status, normalized_id),
         )
         return
     except Exception as exc:

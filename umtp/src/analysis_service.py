@@ -184,7 +184,7 @@ def _build_failed_response(url, reason, *, parsed_spec=None, self_check_fields=N
     }
 
 
-def analyze_url_for_user(user_id, url):
+def analyze_url_for_user(user_id, url, *, force_reanalyze=False):
     if not isinstance(user_id, str) or not user_id.strip():
         return _build_failed_response(url if isinstance(url, str) else "", "user_id가 비어 있습니다.")
     if not isinstance(url, str) or not url.strip():
@@ -234,40 +234,41 @@ def analyze_url_for_user(user_id, url):
         except Exception as exc:
             return _build_failed_response(url, f"DB 연결 실패: {exc}", risk_result=risk_result)
 
-        existing = find_existing_url_record(cursor, user_id, url)
-        if existing:
-            try:
-                save_duplicate_url_record(cursor, user_id, url, source=SOURCE_NAME, reason="이미 분석된 URL")
-                connection.commit()
-            except Exception as dup_exc:
-                print(f"중복 로그 저장 실패: {dup_exc}")
+        if not force_reanalyze:
+            existing = find_existing_url_record(cursor, user_id, url)
+            if existing:
+                try:
+                    save_duplicate_url_record(cursor, user_id, url, source=SOURCE_NAME, reason="이미 분석된 URL")
+                    connection.commit()
+                except Exception as dup_exc:
+                    print(f"중복 로그 저장 실패: {dup_exc}")
 
-            return {
-                "ok": True,
-                "status": "duplicate",
-                "url": url,
-                "parse_success": None,
-                "missing_fields": [],
-                "screen_inch": None,
-                "screen_inch_defaulted": None,
-                "confidence_score": None,
-                "unit_valid": None,
-                "unit_validation_reason": None,
-                "self_check_fields": {},
-                "detected_patterns": {},
-                "detected_conflicts": [],
-                "risk_detected": False,
-                "risk_level": "none",
-                "risk_score": 0,
-                "risk_keywords": [],
-                "risk_categories": {},
-                "is_exchange_post": False,
-                "exchange_strength": "none",
-                "exchange_keywords": [],
-                "trade_type": "sale",
-                "telegram_sent": False,
-                "message": "이미 분석된 URL",
-            }
+                return {
+                    "ok": True,
+                    "status": "duplicate",
+                    "url": url,
+                    "parse_success": None,
+                    "missing_fields": [],
+                    "screen_inch": None,
+                    "screen_inch_defaulted": None,
+                    "confidence_score": None,
+                    "unit_valid": None,
+                    "unit_validation_reason": None,
+                    "self_check_fields": {},
+                    "detected_patterns": {},
+                    "detected_conflicts": [],
+                    "risk_detected": False,
+                    "risk_level": "none",
+                    "risk_score": 0,
+                    "risk_keywords": [],
+                    "risk_categories": {},
+                    "is_exchange_post": False,
+                    "exchange_strength": "none",
+                    "exchange_keywords": [],
+                    "trade_type": "sale",
+                    "telegram_sent": False,
+                    "message": "이미 분석된 URL",
+                }
 
         try:
             html = fetch_html(url)
