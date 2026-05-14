@@ -31,7 +31,7 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(list(targets.keys()), ["맥북 m1"])
         self.assertEqual(len(targets["맥북 m1"]), 2)
 
-    def test_poll_once_applies_watch_rule_matching(self):
+    def test_poll_once_enqueues_jobs_for_due_watch_rules(self):
         due_rules = [
             {
                 "id": 1,
@@ -75,22 +75,26 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
             with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
                 with patch("src.joongna_polling_service.get_connection", side_effect=RuntimeError("db down")):
                     with patch("src.joongna_polling_service.mark_watch_rule_polled") as mock_mark_polled:
-                        with patch("src.joongna_polling_service.analyze_url_for_user") as mock_analyze:
-                            mock_analyze.return_value = {
-                                "ok": True,
-                                "status": "success",
-                                "is_alert_target": True,
-                                "telegram_sent": True,
-                            }
-                            stats = poll_once()
+                        with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                            with patch(
+                                "src.joongna_polling_service.process_pending_analysis_jobs",
+                                return_value={"done": 2, "failed": 0},
+                            ):
+                                mock_enqueue.return_value = {
+                                    "ok": True,
+                                    "created_jobs": [{"job_id": 1}, {"job_id": 2}],
+                                    "skipped_jobs": [],
+                                }
+                                stats = poll_once()
 
-        self.assertEqual(mock_analyze.call_count, 1)
-        call_kwargs = mock_analyze.call_args.kwargs
-        self.assertEqual(call_kwargs.get("user_id"), "test_user")
-        self.assertEqual(call_kwargs.get("fair_price_override_krw"), 1500000)
-        self.assertEqual(call_kwargs.get("alert_drop_rate_percent_override"), 13.33)
+        self.assertEqual(mock_enqueue.call_count, 1)
+        enqueue_args = mock_enqueue.call_args.args
+        self.assertEqual(enqueue_args[0].get("product_id"), 1001)
+        self.assertEqual(len(enqueue_args[1]), 2)
+        self.assertEqual(enqueue_args[2], "new_product")
         self.assertEqual(mock_mark_polled.call_count, 2)
-        self.assertEqual(stats.get("skipped_rule_mismatch"), 1)
+        self.assertEqual(stats.get("analysis_jobs_created"), 2)
+        self.assertEqual(stats.get("analysis_jobs_processed"), 2)
 
 
 if __name__ == "__main__":
