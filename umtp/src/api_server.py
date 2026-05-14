@@ -5,6 +5,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from src.analysis_service import analyze_url_for_user
+from src.notification_worker import list_alert_events_for_user
 from src.user_watch_rules import (
     delete_user_watch_rule,
     get_recommended_watch_keywords,
@@ -243,6 +244,33 @@ def user_watch_rules_request_poll_now(request: UserWatchRuleRequestPollNowReques
         return {"ok": False, "reason": str(exc)}
     except Exception as exc:
         return {"ok": False, "reason": f"즉시 검색 요청 실패: {exc}"}
+
+
+@app.get("/alerts")
+def alerts(user_id: str, limit: int = 200):
+    normalized_user_id = user_id.strip() if isinstance(user_id, str) else ""
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id", "items": []}
+
+    if not isinstance(limit, int) or limit <= 0:
+        return {"ok": False, "reason": "invalid_limit", "items": []}
+
+    try:
+        items = list_alert_events_for_user(normalized_user_id, limit=min(limit, 200))
+        return {
+            "ok": True,
+            "user_id": normalized_user_id,
+            "items": items,
+        }
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc), "items": []}
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": f"알림 조회 실패: {exc}",
+            "user_id": normalized_user_id,
+            "items": [],
+        }
 
 
 @app.get("/user-watch-rules/recommended-keywords")
