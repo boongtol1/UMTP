@@ -8,6 +8,7 @@ class UserPreferences(context: Context) {
 
     companion object {
         private const val KEY_USER_ID = "user_id"
+        private const val KEY_IS_REGISTERED = "is_user_registered"
     }
 
     fun getUserId(): String? {
@@ -15,10 +16,13 @@ class UserPreferences(context: Context) {
     }
 
     fun setUserId(userId: String) {
-        prefs.edit().putString(KEY_USER_ID, userId).apply()
+        prefs.edit()
+            .putString(KEY_USER_ID, userId)
+            .putBoolean(KEY_IS_REGISTERED, true)
+            .apply()
     }
 
-    fun clear() {
-        prefs.edit().remove(KEY_USER_ID).apply()
+    fun isRegistered(): Boolean {
+        return prefs.getBoolean(KEY_IS_REGISTERED, false)
     }
 }
