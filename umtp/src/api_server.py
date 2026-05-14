@@ -4,7 +4,11 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from src.analysis_service import analyze_url_for_user
-from src.user_settings_service import get_all_macbook_air_units_sorted, register_user
+from src.user_settings_service import (
+    get_all_macbook_air_units_sorted,
+    get_user_fair_price_settings,
+    register_user,
+)
 
 
 app = FastAPI(title="UMTP API", version="1.0")
@@ -35,6 +39,24 @@ def macbook_air_units():
             "ok": False,
             "reason": f"MacBook Air 단위 목록 조회 실패: {exc}",
             "units": [],
+        }
+
+
+@app.get("/user-fair-prices")
+def user_fair_prices(user_id: str):
+    normalized_user_id = user_id.strip() if isinstance(user_id, str) else ""
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id", "items": []}
+
+    try:
+        items = get_user_fair_price_settings(normalized_user_id)
+        return {"ok": True, "user_id": normalized_user_id, "items": items}
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": f"사용자 공정가 설정 조회 실패: {exc}",
+            "user_id": normalized_user_id,
+            "items": [],
         }
 
 
