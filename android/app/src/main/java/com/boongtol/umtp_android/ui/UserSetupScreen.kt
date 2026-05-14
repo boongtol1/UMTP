@@ -14,7 +14,7 @@ fun UserSetupScreen(
     isLoading: Boolean,
     onRegister: (String) -> Unit
 ) {
-    var userIdInput by remember { mutableStateOf("") }
+    var nicknameInput by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -32,7 +32,7 @@ fun UserSetupScreen(
         Spacer(modifier = Modifier.height(8.dp))
         
         Text(
-            text = "사용자 ID를 입력해주세요.",
+            text = "닉네임을 입력해주세요.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.secondary
         )
@@ -40,9 +40,9 @@ fun UserSetupScreen(
         Spacer(modifier = Modifier.height(32.dp))
 
         OutlinedTextField(
-            value = userIdInput,
-            onValueChange = { userIdInput = it },
-            label = { Text("User ID") },
+            value = nicknameInput,
+            onValueChange = { nicknameInput = it },
+            label = { Text("닉네임") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             enabled = !isLoading
@@ -51,9 +51,9 @@ fun UserSetupScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(
-            onClick = { onRegister(userIdInput) },
+            onClick = { onRegister(nicknameInput) },
             modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading && userIdInput.trim().length >= 2
+            enabled = !isLoading && nicknameInput.trim().length >= 2
         ) {
             if (isLoading) {
                 CircularProgressIndicator(

@@ -44,12 +44,61 @@ def _create_users_table_if_needed(cursor):
         CREATE TABLE IF NOT EXISTS users (
             id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             user_id VARCHAR(100) NOT NULL,
+            device_id VARCHAR(200) NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            UNIQUE KEY uq_users_user_id (user_id)
+            UNIQUE KEY uq_users_user_id (user_id),
+            UNIQUE KEY uq_users_device_id (device_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """
     )
+
+
+def _column_exists(cursor, table_name, column_name):
+    cursor.execute(
+        """
+        SELECT COUNT(*) AS column_count
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = %s
+          AND column_name = %s
+        """,
+        (table_name, column_name),
+    )
+    row = cursor.fetchone() or {}
+    return int(row.get("column_count", 0)) > 0
+
+
+def _index_exists(cursor, table_name, index_name):
+    cursor.execute(
+        """
+        SELECT COUNT(*) AS index_count
+        FROM information_schema.statistics
+        WHERE table_schema = DATABASE()
+          AND table_name = %s
+          AND index_name = %s
+        """,
+        (table_name, index_name),
+    )
+    row = cursor.fetchone() or {}
+    return int(row.get("index_count", 0)) > 0
+
+
+def _ensure_users_device_id_column(cursor):
+    if not _column_exists(cursor, "users", "device_id"):
+        cursor.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN device_id VARCHAR(200) NULL AFTER user_id
+            """
+        )
+    if not _index_exists(cursor, "users", "uq_users_device_id"):
+        cursor.execute(
+            """
+            ALTER TABLE users
+            ADD UNIQUE KEY uq_users_device_id (device_id)
+            """
+        )
 
 
 def get_all_macbook_air_units_sorted():
@@ -205,29 +254,144 @@ def get_user_fair_price_settings(user_id):
     return items
 
 
-def register_user(user_id):
+def register_user(user_id, device_id=None):
     if not isinstance(user_id, str) or not user_id.strip():
         raise ValueError("user_id_empty")
 
     normalized_user_id = user_id.strip()
+    normalized_device_id = device_id.strip() if isinstance(device_id, str) and device_id.strip() else None
 
     connection = None
     cursor = None
     try:
         connection = get_connection()
-        cursor = connection.cursor()
+        cursor = connection.cursor(dictionary=True)
         _create_users_table_if_needed(cursor)
+        _ensure_users_device_id_column(cursor)
+
+        if normalized_device_id is not None:
+            cursor.execute(
+                """
+                SELECT id, user_id
+                FROM users
+                WHERE device_id = %s
+                LIMIT 1
+                """,
+                (normalized_device_id,),
+            )
+            existing_device_user = cursor.fetchone()
+            if existing_device_user is not None:
+                cursor.execute(
+                    """
+                    UPDATE users
+                    SET updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    """,
+                    (existing_device_user["id"],),
+                )
+                connection.commit()
+                mapped_user_id = existing_device_user["user_id"]
+                return {
+                    "ok": True,
+                    "user_id": mapped_user_id,
+                    "nickname": mapped_user_id,
+                    "message": "기존 사용자로 로그인",
+                }
+
         cursor.execute(
             """
-            INSERT INTO users (user_id)
-            VALUES (%s)
-            ON DUPLICATE KEY UPDATE
-                updated_at = CURRENT_TIMESTAMP
+            SELECT id, user_id, device_id
+            FROM users
+            WHERE user_id = %s
+            LIMIT 1
             """,
             (normalized_user_id,),
         )
+        existing_user = cursor.fetchone()
+        if existing_user is not None:
+            existing_user_device_id = existing_user.get("device_id")
+            if normalized_device_id is not None and not existing_user_device_id:
+                cursor.execute(
+                    """
+                    UPDATE users
+                    SET device_id = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    """,
+                    (normalized_device_id, existing_user["id"]),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE users
+                    SET updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    """,
+                    (existing_user["id"],),
+                )
+            connection.commit()
+            return {
+                "ok": True,
+                "user_id": existing_user["user_id"],
+                "nickname": existing_user["user_id"],
+                "message": "기존 사용자로 로그인",
+            }
+
+        try:
+            cursor.execute(
+                """
+                INSERT INTO users (user_id, device_id)
+                VALUES (%s, %s)
+                """,
+                (normalized_user_id, normalized_device_id),
+            )
+        except Exception as exc:
+            # 동시 등록 등으로 duplicate key가 발생해도 실패로 보지 않고 기존 사용자로 처리
+            if "duplicate entry" in str(exc).lower():
+                connection.rollback()
+                if normalized_device_id is not None:
+                    cursor.execute(
+                        """
+                        SELECT user_id
+                        FROM users
+                        WHERE device_id = %s
+                        LIMIT 1
+                        """,
+                        (normalized_device_id,),
+                    )
+                    by_device_user = cursor.fetchone()
+                    if by_device_user is not None:
+                        mapped_user_id = by_device_user["user_id"]
+                        return {
+                            "ok": True,
+                            "user_id": mapped_user_id,
+                            "nickname": mapped_user_id,
+                            "message": "기존 사용자로 로그인",
+                        }
+                cursor.execute(
+                    """
+                    SELECT user_id
+                    FROM users
+                    WHERE user_id = %s
+                    LIMIT 1
+                    """,
+                    (normalized_user_id,),
+                )
+                by_user_id = cursor.fetchone()
+                mapped_user_id = by_user_id["user_id"] if by_user_id else normalized_user_id
+                return {
+                    "ok": True,
+                    "user_id": mapped_user_id,
+                    "nickname": mapped_user_id,
+                    "message": "기존 사용자로 로그인",
+                }
+            raise
         connection.commit()
-        return {"ok": True, "user_id": normalized_user_id, "message": "사용자 등록 완료"}
+        return {
+            "ok": True,
+            "user_id": normalized_user_id,
+            "nickname": normalized_user_id,
+            "message": "사용자 등록 완료",
+        }
     finally:
         if cursor is not None:
             cursor.close()
