@@ -24,6 +24,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 1.5 | user_watch_rules 기반 polling 대상 설정 | `python src/run_joongna_polling_umtp.py --once` |
 | 1.6 | 감시 조건 저장 즉시 polling 요청(force_poll) | `python src/run_joongna_polling_umtp.py --once --user-id boongtol` |
 | 1.7 | Android 사용자 지정 검색어 감시 조건 설정 | `uvicorn src.api_server:app --reload` |
+| 1.8 | analysis_jobs + notification worker 기반 파이프라인 | `python src/run_analysis_worker_umtp.py --once` |
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
 - `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.
@@ -87,6 +88,9 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.7 진행 현황: Android 앱에서 검색어/공정가/알림가격을 직접 저장하고 `user_watch_rules` 기반 polling 대상으로 즉시 반영할 수 있습니다.
 - 1.7 백엔드 API: `GET /user-watch-rules/recommended-keywords`, `POST /user-watch-rules/upsert`, `POST /user-watch-rules/request-poll-now`.
 - 1.7 polling 규칙: 검색어는 후보 수집용이며 최종 분석/알림 대상은 `spec_parser` 결과와 `watch_rule` 조건(`product_type/chip/screen/ram/ssd`) 매칭 후 결정합니다.
+- 1.8 진행 현황: polling은 감지된 매물을 `analysis_jobs`에 enqueue하고, analysis worker가 pending job을 처리해 `listing_analysis_results` 및 `alert_events`를 생성합니다.
+- 1.8 알림 구조: notification worker가 `alert_events` pending을 읽어 Telegram 전송(`sent`) 또는 앱 피드 전용 상태(`app_only`)로 처리합니다.
+- 1.8 운영 구조: MVP에서는 polling 직후 inline analysis 처리도 가능하지만, `run_analysis_worker_umtp.py`와 `run_notification_worker_umtp.py`를 별도 프로세스로 분리할 수 있습니다.
 
 ## 1) 설치 방법
 
@@ -748,6 +752,9 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_joongna_seen_products.sq
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_joongna_seen_products_refresh_detection.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_user_watch_rules.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_user_watch_rules_immediate_polling.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_analysis_jobs.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_or_alter_alert_events.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_listing_analysis_results_pipeline.sql
 ```
 
 ## 2) 실행 방법
@@ -755,6 +762,10 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_user_watch_rules_immediat
 ```bash
 python src/run_joongna_polling_umtp.py --once
 python src/run_joongna_polling_umtp.py --interval 60
+python src/run_analysis_worker_umtp.py --once
+python src/run_analysis_worker_umtp.py --interval 5
+python src/run_notification_worker_umtp.py --once
+python src/run_notification_worker_umtp.py --interval 3
 ```
 
 특정 검색어만 실행:
@@ -783,6 +794,30 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - 재분석 이유는 `joongna_seen_products.last_change_reason`에서 확인합니다.
 - CLI `--search-word` 실행은 `force_poll` 상태를 false로 바꾸지 않으며, DB 즉시요청 상태는 유지됩니다.
 - 개별 API 실패/JSON 구조 변경/개별 매물 분석 실패가 있어도 polling 루프는 계속 동작합니다.
+- `/alerts?user_id=...` API는 `alert_events`를 최신순(`created_at DESC`)으로 반환하며 Android 알림 피드에서 사용할 수 있습니다.
+
+## 4) Docker 분리 실행 예시
+
+```bash
+docker build -t umtp .
+
+docker run -d --name umtp-api --restart unless-stopped --env-file .env -p 8000:8000 umtp uvicorn src.api_server:app --host 0.0.0.0 --port 8000
+
+docker run -d --name umtp-polling --restart unless-stopped --env-file .env umtp python src/run_joongna_polling_umtp.py --interval 60
+
+docker run -d --name umtp-analysis --restart unless-stopped --env-file .env umtp python src/run_analysis_worker_umtp.py --interval 5
+
+docker run -d --name umtp-notification --restart unless-stopped --env-file .env umtp python src/run_notification_worker_umtp.py --interval 3
+```
+
+로그 확인:
+
+```bash
+docker logs -f umtp-api
+docker logs -f umtp-polling
+docker logs -f umtp-analysis
+docker logs -f umtp-notification
+```
 
 
 ---
