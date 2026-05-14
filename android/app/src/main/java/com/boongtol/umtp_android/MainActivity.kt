@@ -9,12 +9,14 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.boongtol.umtp_android.network.WatchRuleUpsertRequest
 import com.boongtol.umtp_android.ui.*
 import com.boongtol.umtp_android.ui.theme.UMTP_ANDROIDTheme
 import com.boongtol.umtp_android.user.UserPreferences
@@ -72,6 +74,10 @@ fun MainTabScreen(viewModel: MacBookAirSettingsViewModel, userId: String) {
     val units by viewModel.units.collectAsState()
     val userSettings by viewModel.userSettings.collectAsState()
     val savingItemKey by viewModel.savingItemKey.collectAsState()
+    val recommendedKeywords by viewModel.recommendedKeywords.collectAsState()
+    val watchRuleSaving by viewModel.watchRuleSaving.collectAsState()
+    val watchRuleRequestingNow by viewModel.watchRuleRequestingNow.collectAsState()
+    val watchRuleLastAlertDropRatePercent by viewModel.watchRuleLastAlertDropRatePercent.collectAsState()
 
     Scaffold(
         bottomBar = {
@@ -87,6 +93,12 @@ fun MainTabScreen(viewModel: MacBookAirSettingsViewModel, userId: String) {
                     onClick = { selectedTab = 1 },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
                     label = { Text("설정") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    icon = { Icon(Icons.Default.Search, contentDescription = "Watch Rules") },
+                    label = { Text("감시") }
                 )
             }
         }
@@ -104,6 +116,22 @@ fun MainTabScreen(viewModel: MacBookAirSettingsViewModel, userId: String) {
                     savingItemKey = savingItemKey,
                     onUpsert = { unit, price, rate, enabled ->
                         viewModel.upsertItem(unit, price, rate, enabled)
+                    }
+                )
+                2 -> WatchRuleSettingsScreen(
+                    userId = userId,
+                    recommendedKeywords = recommendedKeywords,
+                    isSaving = watchRuleSaving,
+                    isRequestingNow = watchRuleRequestingNow,
+                    lastServerDropRatePercent = watchRuleLastAlertDropRatePercent,
+                    onFetchRecommendedKeywords = { productType, chip, ramGb, ssdGb ->
+                        viewModel.fetchRecommendedKeywords(productType, chip, ramGb, ssdGb)
+                    },
+                    onUpsertWatchRule = { request: WatchRuleUpsertRequest ->
+                        viewModel.upsertWatchRule(request)
+                    },
+                    onRequestPollNow = { uid, keyword ->
+                        viewModel.requestWatchRulePollNow(uid, keyword)
                     }
                 )
             }

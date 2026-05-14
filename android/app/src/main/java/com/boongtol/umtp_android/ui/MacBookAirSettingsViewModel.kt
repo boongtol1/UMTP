@@ -44,6 +44,18 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _savingItemKey = MutableStateFlow<String?>(null)
     val savingItemKey: StateFlow<String?> = _savingItemKey.asStateFlow()
 
+    private val _recommendedKeywords = MutableStateFlow<List<String>>(emptyList())
+    val recommendedKeywords: StateFlow<List<String>> = _recommendedKeywords.asStateFlow()
+
+    private val _watchRuleSaving = MutableStateFlow(false)
+    val watchRuleSaving: StateFlow<Boolean> = _watchRuleSaving.asStateFlow()
+
+    private val _watchRuleRequestingNow = MutableStateFlow(false)
+    val watchRuleRequestingNow: StateFlow<Boolean> = _watchRuleRequestingNow.asStateFlow()
+
+    private val _watchRuleLastAlertDropRatePercent = MutableStateFlow<Double?>(null)
+    val watchRuleLastAlertDropRatePercent: StateFlow<Double?> = _watchRuleLastAlertDropRatePercent.asStateFlow()
+
     init {
         _userId.value?.let {
             loadInitialData(it)
@@ -201,5 +213,86 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
 
     fun clearToastMessage() {
         _toastMessage.value = null
+    }
+
+    fun fetchRecommendedKeywords(
+        productType: String,
+        chip: String,
+        ramGb: Int?,
+        ssdGb: Int?
+    ) {
+        viewModelScope.launch {
+            try {
+                val response = UmtpApiClient.apiService.getRecommendedKeywords(
+                    productType = productType,
+                    chip = chip,
+                    ramGb = ramGb,
+                    ssdGb = ssdGb
+                )
+                if (response.ok) {
+                    _recommendedKeywords.value = response.items
+                } else {
+                    _recommendedKeywords.value = emptyList()
+                    _toastMessage.value = "추천 검색어 조회 실패: ${response.reason ?: "unknown"}"
+                }
+            } catch (e: Exception) {
+                _recommendedKeywords.value = emptyList()
+                _toastMessage.value = "추천 검색어 조회 에러: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    fun upsertWatchRule(request: WatchRuleUpsertRequest) {
+        viewModelScope.launch {
+            _watchRuleSaving.value = true
+            try {
+                val response = UmtpApiClient.apiService.upsertWatchRule(request)
+                if (response.ok) {
+                    _watchRuleLastAlertDropRatePercent.value = response.alert_drop_rate_percent
+                    val immediateRequested = response.immediate_poll_requested == true
+                    _toastMessage.value = if (immediateRequested) {
+                        "저장 완료, 곧 검색 시작 (즉시 검색 요청됨)"
+                    } else {
+                        "저장 완료, 곧 검색 시작"
+                    }
+                } else {
+                    _toastMessage.value = "저장 실패: ${response.reason ?: response.message ?: "unknown"}"
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = "에러: ${e.localizedMessage}"
+            } finally {
+                _watchRuleSaving.value = false
+            }
+        }
+    }
+
+    fun requestWatchRulePollNow(userId: String, searchKeyword: String) {
+        val normalizedUserId = userId.trim()
+        val normalizedSearchKeyword = searchKeyword.trim()
+        if (normalizedUserId.isEmpty() || normalizedSearchKeyword.isEmpty()) {
+            _toastMessage.value = "user_id와 검색어를 확인하세요."
+            return
+        }
+
+        viewModelScope.launch {
+            _watchRuleRequestingNow.value = true
+            try {
+                val response = UmtpApiClient.apiService.requestPollNow(
+                    RequestPollNowRequest(
+                        user_id = normalizedUserId,
+                        search_keyword = normalizedSearchKeyword
+                    )
+                )
+                if (response.ok) {
+                    _toastMessage.value = "즉시 검색 요청 완료"
+                } else {
+                    _toastMessage.value = "즉시 검색 요청 실패: ${response.reason ?: response.message ?: "unknown"}"
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = "에러: ${e.localizedMessage}"
+            } finally {
+                _watchRuleRequestingNow.value = false
+            }
+        }
     }
 }
