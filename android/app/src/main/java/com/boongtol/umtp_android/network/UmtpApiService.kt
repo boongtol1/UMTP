@@ -28,4 +28,9 @@ interface UmtpApiService {
     suspend fun registerUser(
         @Body request: UserRegisterRequest
     ): UserRegisterResponse
+
+    @GET("alerts")
+    suspend fun getAlerts(
+        @Query("user_id") userId: String
+    ): AlertsResponse
 }

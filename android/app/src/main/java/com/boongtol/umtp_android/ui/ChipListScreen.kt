@@ -32,11 +32,6 @@ fun ChipListScreen(
                         Text("MacBook Air 설정", fontSize = 18.sp)
                         Text("User: $userId", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
                     }
-                },
-                actions = {
-                    IconButton(onClick = onLogout) {
-                        Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Logout")
-                    }
                 }
             )
         }

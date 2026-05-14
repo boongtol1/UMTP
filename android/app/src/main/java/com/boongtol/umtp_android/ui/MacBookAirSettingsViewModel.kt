@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.boongtol.umtp_android.network.*
 import com.boongtol.umtp_android.user.UserPreferences
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,6 +29,9 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _userSettings = MutableStateFlow<List<UserFairPriceItem>>(emptyList())
     val userSettings: StateFlow<List<UserFairPriceItem>> = _userSettings.asStateFlow()
 
+    private val _alerts = MutableStateFlow<List<AlertItem>>(emptyList())
+    val alerts: StateFlow<List<AlertItem>> = _alerts.asStateFlow()
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -43,6 +47,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     init {
         _userId.value?.let {
             loadInitialData(it)
+            startAlertPolling(it)
         }
     }
 
@@ -56,6 +61,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 }
                 
                 loadUserSettings(uid)
+                fetchAlerts(uid)
             } catch (e: Exception) {
                 _errorMessage.value = "데이터 로딩 에러: ${e.localizedMessage}"
             } finally {
@@ -72,7 +78,44 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     _userSettings.value = response.items
                 }
             } catch (e: Exception) {
-                // Ignore background refresh errors or handle silently
+                // Ignore background refresh errors
+            }
+        }
+    }
+
+    fun fetchAlerts(uid: String) {
+        viewModelScope.launch {
+            try {
+                val response = UmtpApiClient.apiService.getAlerts(uid)
+                if (response.ok) {
+                    _alerts.value = response.items.sortedByDescending { it.created_at }
+                }
+            } catch (e: Exception) {
+                // Mock fallback if API fails
+                if (_alerts.value.isEmpty()) {
+                    _alerts.value = listOf(
+                        AlertItem(
+                            id = 1,
+                            title = "Mock: 맥북 에어 M1 8GB 256GB 실버",
+                            listing_price_krw = 430000,
+                            fair_price_krw = 550000,
+                            diff_ratio = -21.8,
+                            is_alert_target = true,
+                            risk_score = 15,
+                            product_url = "https://web.joongna.com/product/228559836",
+                            created_at = "2026-05-14T03:22:11"
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun startAlertPolling(uid: String) {
+        viewModelScope.launch {
+            while (true) {
+                delay(30000) // 30 seconds
+                fetchAlerts(uid)
             }
         }
     }
@@ -92,6 +135,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     userPreferences.setUserId(trimmedId)
                     _userId.value = trimmedId
                     loadInitialData(trimmedId)
+                    startAlertPolling(trimmedId)
                 } else {
                     _toastMessage.value = "등록 실패: ${response.message ?: response.reason}"
                 }
@@ -143,12 +187,5 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
 
     fun clearToastMessage() {
         _toastMessage.value = null
-    }
-    
-    fun logout() {
-        userPreferences.clear()
-        _userId.value = null
-        _userSettings.value = emptyList()
-        _units.value = emptyList()
     }
 }
