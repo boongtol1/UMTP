@@ -20,6 +20,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 1.1 | 셀프검수 구조화 데이터 우선 파싱 + 숫자 기반 보조 파싱 | `uvicorn src.api_server:app --reload` |
 | 1.2 | 위험 키워드 점수화 + 교환글 탐지 + 주의 알림 | `uvicorn src.api_server:app --reload` |
 | 1.3 | 중고나라 Search API polling + seq 기반 새 매물 분석 | `python src/run_joongna_polling_umtp.py --once` |
+| 1.4 | 사용자별 MacBook Air 공정가/차이비율 설정 API | `uvicorn src.api_server:app --reload` |
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
 - `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.
@@ -67,6 +68,12 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.3 초안: `sql/create_joongna_seen_products.sql`로 `seq` 기준 중복 제거 테이블을 추가합니다.
 - 1.3 초안: Search API 응답의 `url`은 이미지 URL로 저장하고, 실제 매물 URL은 `https://web.joongna.com/product/{seq}`로 생성합니다.
 - 1.3 초안: 기본 검색어(`m1~m5맥북에어`) polling에서 새 `seq`만 기존 UMTP rule-based URL 분석 흐름으로 전달합니다.
+- 1.4 초안: Android 앱에서 `POST /users/register`로 `user_id`를 등록할 수 있습니다.
+- 1.4 초안: Android 앱에서 모델별 `enabled(on/off)`, 공정가, 차이비율 설정을 저장할 수 있습니다.
+- 1.4 초안: 설정 저장은 맥미니 서버의 MySQL(`user_fair_prices`)에 즉시 반영됩니다.
+- 1.4 초안: Telegram 기능은 삭제하지 않고 기존 동작을 그대로 유지합니다.
+- 1.4 초안: 이번 패치는 FCM/앱 푸시 자체를 구현하지 않습니다.
+- 1.4 초안: 이번 패치는 Android UI를 구현하지 않습니다.
 
 ## 1) 설치 방법
 
@@ -748,3 +755,79 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - 새 매물 URL은 기존 UMTP rule-based 분석(`analyze_url_for_user`)으로 재사용합니다.
 - 개별 API 실패/JSON 구조 변경/개별 매물 분석 실패가 있어도 polling 루프는 계속 동작합니다.
 
+
+---
+
+# UMTP 1.4 MVP
+
+1.4 MVP에서는 Android 앱이 사용자별 MacBook Air 설정을 서버 API로 저장/조회할 수 있도록,
+`users` 등록 API와 `user_fair_prices` 기반 설정 API를 추가합니다.
+
+## 1) 추가 SQL 실행
+
+```bash
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_users_table.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/add_user_fair_price_settings_columns.sql
+```
+
+`sql/add_user_fair_price_settings_columns.sql`은 `enabled`, `updated_at` 컬럼 추가를 시도합니다.
+MySQL 환경에서 `ADD COLUMN IF NOT EXISTS`가 제한되면, 컬럼 존재 여부를 먼저 확인한 뒤 수동 실행하세요.
+
+## 2) 실행 방법
+
+```bash
+uvicorn src.api_server:app --reload
+```
+
+## 3) API 테스트(curl)
+
+MacBook Air unit 목록 조회:
+
+```bash
+curl http://127.0.0.1:8000/macbook-air-units
+```
+
+사용자 등록:
+
+```bash
+curl -X POST http://127.0.0.1:8000/users/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "boongtol",
+    "nickname": "boongtol"
+  }'
+```
+
+사용자별 설정 조회:
+
+```bash
+curl "http://127.0.0.1:8000/user-fair-prices?user_id=boongtol"
+```
+
+사용자별 설정 저장:
+
+```bash
+curl -X POST http://127.0.0.1:8000/user-fair-prices/upsert \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "boongtol",
+    "product_type": "MacBook Air",
+    "chip": "M1",
+    "screen_inch": 13,
+    "ram_gb": 8,
+    "ssd_gb": 256,
+    "fair_price_krw": 600000,
+    "alert_drop_rate_percent": 15,
+    "enabled": true
+  }'
+```
+
+## 4) 동작 규칙
+
+- `GET /macbook-air-units`: 104개 MacBook Air 단위 조합을 `chip -> screen_inch -> ram_gb -> ssd_gb` 순으로 반환합니다.
+- `GET /user-fair-prices`: 전체 단위 목록 기준으로 system/user/effective 값을 함께 반환합니다.
+- user override가 없는 단위는 `enabled=false`를 기본값으로 반환합니다.
+- `POST /user-fair-prices/upsert`: `user_id + product_type + chip + screen_inch + ram_gb + ssd_gb` 복합 키 기준 upsert를 수행합니다.
+- 유효하지 않은 조합은 `invalid_macbook_air_unit`으로 거부합니다.
+- 기존 `/analyze-url` 요청 형식은 변경하지 않습니다.
+- polling 흐름과 Android Notification Listener 관련 내용은 이번 패치에서 크게 변경하지 않습니다.
