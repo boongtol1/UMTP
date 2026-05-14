@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
@@ -8,6 +8,7 @@ from src.user_settings_service import (
     get_all_macbook_air_units_sorted,
     get_user_fair_price_settings,
     register_user,
+    upsert_user_fair_price_setting,
 )
 
 
@@ -22,6 +23,18 @@ class AnalyzeUrlRequest(BaseModel):
 class UserRegisterRequest(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=100)
     nickname: Optional[str] = Field(default=None, max_length=100)
+
+
+class UserFairPriceUpsertRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=100)
+    product_type: str = Field(..., min_length=1, max_length=100)
+    chip: Literal["M1", "M2", "M3", "M4", "M5"]
+    screen_inch: int
+    ram_gb: int
+    ssd_gb: int
+    fair_price_krw: int = Field(..., gt=0)
+    alert_drop_rate_percent: float = Field(..., ge=0, le=100)
+    enabled: bool
 
 
 @app.get("/health")
@@ -72,6 +85,24 @@ def users_register(request: UserRegisterRequest):
         return register_user(user_id=user_id, nickname=nickname)
     except Exception as exc:
         return {"ok": False, "reason": f"사용자 등록 실패: {exc}", "user_id": user_id}
+
+
+@app.post("/user-fair-prices/upsert")
+def user_fair_prices_upsert(request: UserFairPriceUpsertRequest):
+    try:
+        return upsert_user_fair_price_setting(
+            user_id=request.user_id,
+            product_type=request.product_type,
+            chip=request.chip,
+            screen_inch=request.screen_inch,
+            ram_gb=request.ram_gb,
+            ssd_gb=request.ssd_gb,
+            fair_price_krw=request.fair_price_krw,
+            alert_drop_rate_percent=request.alert_drop_rate_percent,
+            enabled=request.enabled,
+        )
+    except Exception as exc:
+        return {"ok": False, "reason": f"사용자 공정가 설정 저장 실패: {exc}"}
 
 
 @app.post("/analyze-url")

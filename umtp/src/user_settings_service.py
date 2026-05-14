@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from src.db import get_connection
-from src.macbook_air_units import PRODUCT_TYPE, generate_macbook_air_units
+from src.macbook_air_units import PRODUCT_TYPE, generate_macbook_air_units, is_valid_macbook_air_unit
 
 
 CHIP_SORT_ORDER = {
@@ -231,6 +231,116 @@ def register_user(user_id, nickname=None):
         )
         connection.commit()
         return {"ok": True, "user_id": normalized_user_id, "message": "사용자 등록 완료"}
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def upsert_user_fair_price_setting(
+    user_id,
+    product_type,
+    chip,
+    screen_inch,
+    ram_gb,
+    ssd_gb,
+    fair_price_krw,
+    alert_drop_rate_percent,
+    enabled,
+):
+    if not isinstance(user_id, str) or not user_id.strip():
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    normalized_user_id = user_id.strip()
+    normalized_product_type = product_type.strip() if isinstance(product_type, str) else ""
+    normalized_chip = chip.strip().upper() if isinstance(chip, str) else ""
+
+    if normalized_product_type != PRODUCT_TYPE:
+        return {"ok": False, "reason": "invalid_product_type"}
+
+    try:
+        normalized_screen_inch = int(screen_inch)
+        normalized_ram_gb = int(ram_gb)
+        normalized_ssd_gb = int(ssd_gb)
+        normalized_fair_price_krw = int(fair_price_krw)
+        normalized_alert_drop_rate_percent = float(alert_drop_rate_percent)
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "invalid_numeric_value"}
+
+    if normalized_fair_price_krw <= 0:
+        return {"ok": False, "reason": "invalid_fair_price_krw"}
+
+    if normalized_alert_drop_rate_percent < 0 or normalized_alert_drop_rate_percent > 100:
+        return {"ok": False, "reason": "invalid_alert_drop_rate_percent"}
+
+    if not isinstance(enabled, bool):
+        return {"ok": False, "reason": "invalid_enabled"}
+
+    if not is_valid_macbook_air_unit(
+        normalized_chip, normalized_screen_inch, normalized_ram_gb, normalized_ssd_gb
+    ):
+        return {"ok": False, "reason": "invalid_macbook_air_unit"}
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        try:
+            cursor.execute(
+                """
+                INSERT INTO user_fair_prices (
+                    user_id,
+                    product_type,
+                    chip,
+                    screen_inch,
+                    ram_gb,
+                    ssd_gb,
+                    fair_price_krw,
+                    alert_drop_rate_percent,
+                    enabled
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    fair_price_krw = VALUES(fair_price_krw),
+                    alert_drop_rate_percent = VALUES(alert_drop_rate_percent),
+                    enabled = VALUES(enabled),
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    normalized_user_id,
+                    normalized_product_type,
+                    normalized_chip,
+                    normalized_screen_inch,
+                    normalized_ram_gb,
+                    normalized_ssd_gb,
+                    normalized_fair_price_krw,
+                    normalized_alert_drop_rate_percent,
+                    enabled,
+                ),
+            )
+        except Exception as exc:
+            if "unknown column" in str(exc).lower() and "enabled" in str(exc).lower():
+                return {"ok": False, "reason": "missing_enabled_column"}
+            raise
+
+        connection.commit()
+        return {
+            "ok": True,
+            "message": "사용자 공정가 설정 저장 완료",
+            "item": {
+                "user_id": normalized_user_id,
+                "product_type": normalized_product_type,
+                "chip": normalized_chip,
+                "screen_inch": normalized_screen_inch,
+                "ram_gb": normalized_ram_gb,
+                "ssd_gb": normalized_ssd_gb,
+                "fair_price_krw": normalized_fair_price_krw,
+                "alert_drop_rate_percent": normalized_alert_drop_rate_percent,
+                "enabled": enabled,
+            },
+        }
     finally:
         if cursor is not None:
             cursor.close()
