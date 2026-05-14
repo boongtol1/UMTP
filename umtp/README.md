@@ -21,6 +21,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 1.2 | 위험 키워드 점수화 + 교환글 탐지 + 주의 알림 | `uvicorn src.api_server:app --reload` |
 | 1.3 | 중고나라 Search API polling + 끌올/가격변경 감지 분석 | `python src/run_joongna_polling_umtp.py --once` |
 | 1.4 | 사용자별 MacBook Air 공정가/차이비율 설정 API | `uvicorn src.api_server:app --reload` |
+| 1.5 | user_watch_rules 기반 polling 대상 설정 | `python src/run_joongna_polling_umtp.py --once` |
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
 - `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.
@@ -75,6 +76,9 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.4 초안: Telegram 기능은 삭제하지 않고 기존 동작을 그대로 유지합니다.
 - 1.4 초안: 이번 패치는 FCM/앱 푸시 자체를 구현하지 않습니다.
 - 1.4 초안: 이번 패치는 Android UI를 구현하지 않습니다.
+- 1.5 진행 현황: `user_watch_rules` 기반 polling 대상 설정 구조를 추가했습니다.
+- 1.5 역할 분리: `user_fair_prices`는 사용자별 공정가 저장용, `user_watch_rules`는 polling worker 감시 조건 저장용입니다.
+- 1.5 polling 규칙: `--search-word`가 있으면 최우선 사용, 없으면 due `user_watch_rules`, due rule이 없으면 `DEFAULT_SEARCH_WORDS`를 사용합니다.
 
 ## 1) 설치 방법
 
@@ -734,6 +738,7 @@ mysql -u <DB_USER> -p < sql/add_risk_exchange_columns.sql
 ```bash
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_joongna_seen_products.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_joongna_seen_products_refresh_detection.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_user_watch_rules.sql
 ```
 
 ## 2) 실행 방법
@@ -752,6 +757,9 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 ## 3) 동작 규칙
 
 - 중고나라 Search API polling 기반으로 `m1~m5맥북에어` 검색 결과를 조회합니다.
+- `user_fair_prices`는 사용자별 공정가 저장용으로 유지하고, polling 대상 선정은 `user_watch_rules`를 사용합니다.
+- 앱/API에서 감시 조건을 저장하면 `enabled=true`, `last_polled_at=NULL`로 저장되어 다음 polling에서 즉시 due 대상이 됩니다.
+- polling worker는 due watch rule을 읽어 검색하며, 같은 검색어를 여러 사용자가 켜도 Search API는 검색어당 1회만 호출합니다.
 - `joongna_seen_products`는 단순 중복 차단이 아니라 마지막 관측 상태 저장용으로 사용합니다.
 - 같은 `product_id/seq`라도 가격/제목/`refresh_key`가 바뀌면 재분석합니다.
 - Search API에서 끌올 시각 필드를 안정적으로 찾을 수 없으면 가격/제목 변경만으로도 재분석합니다.
