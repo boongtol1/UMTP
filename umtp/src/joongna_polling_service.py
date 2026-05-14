@@ -187,11 +187,13 @@ def poll_once(user_id=None, search_words=None):
 
         for search_word in words:
             targets_for_word = keyword_targets.get(search_word) or []
+            search_completed_for_word = False
 
             try:
                 print(f"[{search_word}] Search API 조회 시작")
                 try:
                     items = search_joongna_products(search_word)
+                    search_completed_for_word = True
                     stats["fetched_items"] += len(items)
                     print(f"[{search_word}] 검색 결과 {len(items)}건")
                 except Exception as exc:
@@ -359,7 +361,13 @@ def poll_once(user_id=None, search_words=None):
                                 )
                                 disable_seen_db(str(exc))
             finally:
-                mark_related_rules_polled(targets_for_word)
+                if search_completed_for_word:
+                    mark_related_rules_polled(targets_for_word)
+                elif target_source == "watch_rules" and targets_for_word:
+                    print(
+                        f"[{search_word}] Search API 실패로 watch rule polled_at 갱신 생략 "
+                        "(force_poll 유지)"
+                    )
 
     finally:
         if cursor is not None:
