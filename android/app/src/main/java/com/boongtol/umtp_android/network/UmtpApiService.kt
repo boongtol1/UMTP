@@ -23,4 +23,9 @@ interface UmtpApiService {
     suspend fun upsertUserFairPrice(
         @Body request: UserFairPriceUpsertRequest
     ): UserFairPriceUpsertResponse
+
+    @POST("users/register")
+    suspend fun registerUser(
+        @Body request: UserRegisterRequest
+    ): UserRegisterResponse
 }

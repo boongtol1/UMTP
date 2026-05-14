@@ -1,5 +1,17 @@
 package com.boongtol.umtp_android.network
 
+data class UserRegisterRequest(
+    val user_id: String,
+    val nickname: String? = null
+)
+
+data class UserRegisterResponse(
+    val ok: Boolean,
+    val user_id: String? = null,
+    val message: String? = null,
+    val reason: String? = null
+)
+
 data class MacBookAirUnit(
     val product_type: String,
     val chip: String,
