@@ -68,7 +68,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.3 초안: `sql/create_joongna_seen_products.sql`로 `seq` 기준 중복 제거 테이블을 추가합니다.
 - 1.3 초안: Search API 응답의 `url`은 이미지 URL로 저장하고, 실제 매물 URL은 `https://web.joongna.com/product/{seq}`로 생성합니다.
 - 1.3 초안: 기본 검색어(`m1~m5맥북에어`) polling에서 새 `seq`만 기존 UMTP rule-based URL 분석 흐름으로 전달합니다.
-- 1.4 초안: Android 앱에서 `POST /users/register`로 `nickname + device_id(Android ID)`를 등록할 수 있습니다.
+- 1.4 초안: Android 앱에서 `POST /users/register`로 `user_id + device_id(Android ID)`를 등록할 수 있습니다.
 - 1.4 초안: Android 앱에서 모델별 `enabled(on/off)`, 공정가, 차이비율 설정을 저장할 수 있습니다.
 - 1.4 초안: 설정 저장은 맥미니 서버의 MySQL(`user_fair_prices`)에 즉시 반영됩니다.
 - 1.4 초안: Telegram 기능은 삭제하지 않고 기존 동작을 그대로 유지합니다.
@@ -797,7 +797,7 @@ curl http://127.0.0.1:8000/macbook-air-units
 curl -X POST http://127.0.0.1:8000/users/register \
   -H "Content-Type: application/json" \
   -d '{
-    "nickname": "길동이",
+    "user_id": "boongtol",
     "device_id": "android-1234567890abcdef"
   }'
 ```
@@ -831,7 +831,7 @@ curl -X POST http://127.0.0.1:8000/user-fair-prices/upsert \
 - `GET /macbook-air-units`: 104개 MacBook Air 단위 조합을 `chip -> screen_inch -> ram_gb -> ssd_gb` 순으로 반환합니다.
 - `GET /user-fair-prices`: 전체 단위 목록 기준으로 system/user/effective 값을 함께 반환합니다.
 - user override가 없는 단위는 `enabled=false`를 기본값으로 반환합니다.
-- `POST /users/register`: `device_id`가 이미 등록되어 있으면 저장된 기존 닉네임(`user_id`)으로 로그인 처리합니다.
+- `POST /users/register`: `device_id`가 이미 등록되어 있으면 저장된 기존 `user_id`로 로그인 처리합니다.
 - `POST /user-fair-prices/upsert`: `user_id + product_type + chip + screen_inch + ram_gb + ssd_gb` 복합 키 기준 upsert를 수행합니다.
 - 유효하지 않은 조합은 `invalid_macbook_air_unit`으로 거부합니다.
 - 기존 `/analyze-url` 요청 형식은 변경하지 않습니다.

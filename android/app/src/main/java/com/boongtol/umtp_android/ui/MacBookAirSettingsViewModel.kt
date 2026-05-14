@@ -120,11 +120,11 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
     }
 
-    fun registerUser(nickname: String, deviceId: String) {
-        val trimmedNickname = nickname.trim()
+    fun registerUser(userId: String, deviceId: String) {
+        val trimmedUserId = userId.trim()
         val trimmedDeviceId = deviceId.trim()
-        if (trimmedNickname.length < 2) {
-            _toastMessage.value = "닉네임은 2자 이상이어야 합니다."
+        if (trimmedUserId.length < 2) {
+            _toastMessage.value = "User ID는 2자 이상이어야 합니다."
             return
         }
         if (trimmedDeviceId.isEmpty()) {
@@ -137,14 +137,14 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             try {
                 val response = UmtpApiClient.apiService.registerUser(
                     UserRegisterRequest(
-                        nickname = trimmedNickname,
+                        user_id = trimmedUserId,
                         device_id = trimmedDeviceId
                     )
                 )
                 if (response.ok) {
                     val effectiveUserId = response.user_id?.trim()
                         ?.takeIf { it.isNotEmpty() }
-                        ?: trimmedNickname
+                        ?: trimmedUserId
                     userPreferences.setUserId(effectiveUserId)
                     _userId.value = effectiveUserId
                     loadInitialData(effectiveUserId)

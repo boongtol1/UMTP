@@ -294,7 +294,6 @@ def register_user(user_id, device_id=None):
                 return {
                     "ok": True,
                     "user_id": mapped_user_id,
-                    "nickname": mapped_user_id,
                     "message": "기존 사용자로 로그인",
                 }
 
@@ -332,7 +331,6 @@ def register_user(user_id, device_id=None):
             return {
                 "ok": True,
                 "user_id": existing_user["user_id"],
-                "nickname": existing_user["user_id"],
                 "message": "기존 사용자로 로그인",
             }
 
@@ -364,7 +362,6 @@ def register_user(user_id, device_id=None):
                         return {
                             "ok": True,
                             "user_id": mapped_user_id,
-                            "nickname": mapped_user_id,
                             "message": "기존 사용자로 로그인",
                         }
                 cursor.execute(
@@ -381,7 +378,6 @@ def register_user(user_id, device_id=None):
                 return {
                     "ok": True,
                     "user_id": mapped_user_id,
-                    "nickname": mapped_user_id,
                     "message": "기존 사용자로 로그인",
                 }
             raise
@@ -389,7 +385,6 @@ def register_user(user_id, device_id=None):
         return {
             "ok": True,
             "user_id": normalized_user_id,
-            "nickname": normalized_user_id,
             "message": "사용자 등록 완료",
         }
     finally:
