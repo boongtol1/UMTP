@@ -23,6 +23,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 1.4 | 사용자별 MacBook Air 공정가/차이비율 설정 API | `uvicorn src.api_server:app --reload` |
 | 1.5 | user_watch_rules 기반 polling 대상 설정 | `python src/run_joongna_polling_umtp.py --once` |
 | 1.6 | 감시 조건 저장 즉시 polling 요청(force_poll) | `python src/run_joongna_polling_umtp.py --once --user-id boongtol` |
+| 1.7 | Android 사용자 지정 검색어 감시 조건 설정 | `uvicorn src.api_server:app --reload` |
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
 - `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.
@@ -83,6 +84,9 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.6 진행 현황: 감시 조건 저장 시 `force_poll=true`로 즉시 polling 요청하는 구조를 추가했습니다.
 - 1.6 polling 규칙: `force_poll=true` 또는 `last_polled_at IS NULL`이면 즉시 검색하고, 검색 완료 후 `force_poll=false`와 `last_polled_at=NOW()`로 갱신합니다.
 - 1.6 CLI 규칙: `--search-word` 수동 실행은 DB `force_poll` 요청 상태를 소비하지 않습니다.
+- 1.7 진행 현황: Android 앱에서 검색어/공정가/알림가격을 직접 저장하고 `user_watch_rules` 기반 polling 대상으로 즉시 반영할 수 있습니다.
+- 1.7 백엔드 API: `GET /user-watch-rules/recommended-keywords`, `POST /user-watch-rules/upsert`, `POST /user-watch-rules/request-poll-now`.
+- 1.7 polling 규칙: 검색어는 후보 수집용이며 최종 분석/알림 대상은 `spec_parser` 결과와 `watch_rule` 조건(`product_type/chip/screen/ram/ssd`) 매칭 후 결정합니다.
 
 ## 1) 설치 방법
 
@@ -766,12 +770,15 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - 앱/API에서 감시 조건을 저장하면 `enabled=true`, `last_polled_at=NULL`로 저장되어 다음 polling에서 즉시 due 대상이 됩니다.
 - 앱/API에서 감시 조건을 저장하면 `force_poll=true`, `last_poll_requested_at=NOW()`로 즉시 검색 요청 상태가 됩니다.
 - polling worker는 due watch rule을 읽어 검색하며, 같은 검색어를 여러 사용자가 켜도 Search API는 검색어당 1회만 호출합니다.
+- `POST /user-watch-rules/upsert`에서 `search_keyword`를 비우면 스펙 기반 기본 검색어(예: `m1맥북에어`)를 자동 생성합니다.
+- `GET /user-watch-rules/recommended-keywords`로 Android 앱에서 추천 검색어를 받아 선택할 수 있습니다.
 - polling worker는 `force_poll=true`인 rule을 우선 due로 처리하고, 검색 완료 후 `force_poll=false`, `last_polled_at=NOW()`로 갱신합니다.
 - `joongna_seen_products`는 단순 중복 차단이 아니라 마지막 관측 상태 저장용으로 사용합니다.
 - 같은 `product_id/seq`라도 가격/제목/`refresh_key`가 바뀌면 재분석합니다.
 - Search API에서 끌올 시각 필드를 안정적으로 찾을 수 없으면 가격/제목 변경만으로도 재분석합니다.
 - 완전히 동일한 상태(`unchanged`)면 `last_seen_at`, `seen_count`만 갱신하고 중복 분석/중복 알림을 막습니다.
 - Search API 응답의 `url` 필드는 이미지 URL로 저장하며, 실제 매물 URL은 `https://web.joongna.com/product/{seq}`로 생성합니다.
+- 같은 검색어를 쓰는 여러 rule/user는 검색 결과를 공유하되, 최종 분석 대상은 rule별 스펙 매칭(`watch_rule_matcher`)과 가격 조건(`target_price_krw`)을 통과한 경우로 제한합니다.
 - 새 매물 URL은 기존 UMTP rule-based 분석(`analyze_url_for_user`)으로 재사용합니다.
 - 재분석 이유는 `joongna_seen_products.last_change_reason`에서 확인합니다.
 - CLI `--search-word` 실행은 `force_poll` 상태를 false로 바꾸지 않으며, DB 즉시요청 상태는 유지됩니다.
