@@ -184,7 +184,14 @@ def _build_failed_response(url, reason, *, parsed_spec=None, self_check_fields=N
     }
 
 
-def analyze_url_for_user(user_id, url, *, force_reanalyze=False):
+def analyze_url_for_user(
+    user_id,
+    url,
+    *,
+    force_reanalyze=False,
+    fair_price_override_krw=None,
+    alert_drop_rate_percent_override=None,
+):
     if not isinstance(user_id, str) or not user_id.strip():
         return _build_failed_response(url if isinstance(url, str) else "", "user_id가 비어 있습니다.")
     if not isinstance(url, str) or not url.strip():
@@ -192,6 +199,35 @@ def analyze_url_for_user(user_id, url, *, force_reanalyze=False):
 
     user_id = user_id.strip()
     url = url.strip()
+
+    normalized_fair_price_override_krw = None
+    normalized_alert_drop_rate_percent_override = None
+    if fair_price_override_krw is not None:
+        try:
+            normalized_fair_price_override_krw = int(fair_price_override_krw)
+        except (TypeError, ValueError):
+            return _build_failed_response(url, "invalid_fair_price_override", risk_result=_default_risk_result())
+        if normalized_fair_price_override_krw <= 0:
+            return _build_failed_response(
+                url,
+                "invalid_fair_price_override",
+                risk_result=_default_risk_result(),
+            )
+    if alert_drop_rate_percent_override is not None:
+        try:
+            normalized_alert_drop_rate_percent_override = float(alert_drop_rate_percent_override)
+        except (TypeError, ValueError):
+            return _build_failed_response(
+                url,
+                "invalid_alert_drop_rate_percent_override",
+                risk_result=_default_risk_result(),
+            )
+        if normalized_alert_drop_rate_percent_override < 0 or normalized_alert_drop_rate_percent_override > 100:
+            return _build_failed_response(
+                url,
+                "invalid_alert_drop_rate_percent_override",
+                risk_result=_default_risk_result(),
+            )
 
     connection = None
     cursor = None
@@ -292,17 +328,26 @@ def analyze_url_for_user(user_id, url, *, force_reanalyze=False):
         if not parsed_spec.get("parse_success", False):
             return fail(_build_parse_failure_reason(parsed_spec), source=SOURCE_NAME)
 
-        user_fair_price = fetch_user_fair_price(cursor, user_id, parsed_spec)
-        if user_fair_price is None:
-            return fail("사용자 공정가 조회 실패: 해당 user_id/스펙 조합이 없습니다.", source=SOURCE_NAME)
+        use_price_override = (
+            normalized_fair_price_override_krw is not None
+            and normalized_alert_drop_rate_percent_override is not None
+        )
+        if use_price_override:
+            fair_price_krw = normalized_fair_price_override_krw
+            alert_drop_rate_percent = normalized_alert_drop_rate_percent_override
+        else:
+            user_fair_price = fetch_user_fair_price(cursor, user_id, parsed_spec)
+            if user_fair_price is None:
+                return fail("사용자 공정가 조회 실패: 해당 user_id/스펙 조합이 없습니다.", source=SOURCE_NAME)
 
-        fair_price_krw = user_fair_price["fair_price_krw"]
-        if fair_price_krw <= 0:
-            return fail("사용자 공정가 조회 실패: 공정가가 0보다 커야 합니다.", source=SOURCE_NAME)
+            fair_price_krw = user_fair_price["fair_price_krw"]
+            if fair_price_krw <= 0:
+                return fail("사용자 공정가 조회 실패: 공정가가 0보다 커야 합니다.", source=SOURCE_NAME)
+            alert_drop_rate_percent = user_fair_price["alert_drop_rate_percent"]
 
         diff_amount_krw = fair_price_krw - listing_price_krw
         diff_ratio = (diff_amount_krw / fair_price_krw) * 100
-        is_alert_target = diff_ratio >= user_fair_price["alert_drop_rate_percent"]
+        is_alert_target = diff_ratio >= alert_drop_rate_percent
 
         listing = {
             "title": title,

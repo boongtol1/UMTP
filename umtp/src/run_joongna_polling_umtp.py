@@ -58,6 +58,8 @@ def _print_summary(stats):
         f"analysis_success={stats.get('analysis_success', 0)}, "
         f"analysis_duplicate={stats.get('analysis_duplicate', 0)}, "
         f"analysis_failed={stats.get('analysis_failed', 0)}, "
+        f"rule_mismatch_skip={stats.get('skipped_rule_mismatch', 0)}, "
+        f"price_condition_skip={stats.get('skipped_price_condition', 0)}, "
         f"search_errors={stats.get('search_errors', 0)}, "
         f"db_errors={stats.get('db_errors', 0)}, "
         f"watch_rules_due={stats.get('watch_rules_due', 0)}"
