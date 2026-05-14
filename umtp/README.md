@@ -19,7 +19,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 1.0 | 전체 MacBook Air 단위 제품 DB화 + rule-based 공정가 자동 생성 | `python src/seed_user_fair_prices.py` |
 | 1.1 | 셀프검수 구조화 데이터 우선 파싱 + 숫자 기반 보조 파싱 | `uvicorn src.api_server:app --reload` |
 | 1.2 | 위험 키워드 점수화 + 교환글 탐지 + 주의 알림 | `uvicorn src.api_server:app --reload` |
-| 1.3 | 중고나라 Search API polling + seq 기반 새 매물 분석 | `python src/run_joongna_polling_umtp.py --once` |
+| 1.3 | 중고나라 Search API polling + 끌올/가격변경 감지 분석 | `python src/run_joongna_polling_umtp.py --once` |
 | 1.4 | 사용자별 MacBook Air 공정가/차이비율 설정 API | `uvicorn src.api_server:app --reload` |
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
@@ -67,7 +67,8 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.3 초안: Android Notification Listener 없이도 서버에서 중고나라 Search API polling만으로 동작할 수 있습니다.
 - 1.3 초안: `sql/create_joongna_seen_products.sql`로 `seq` 기준 중복 제거 테이블을 추가합니다.
 - 1.3 초안: Search API 응답의 `url`은 이미지 URL로 저장하고, 실제 매물 URL은 `https://web.joongna.com/product/{seq}`로 생성합니다.
-- 1.3 초안: 기본 검색어(`m1~m5맥북에어`) polling에서 새 `seq`만 기존 UMTP rule-based URL 분석 흐름으로 전달합니다.
+- 1.3 초안: 기본 검색어(`m1~m5맥북에어`) polling에서 `joongna_seen_products` 상태 비교 후 신규/변경 매물만 기존 UMTP rule-based URL 분석 흐름으로 전달합니다.
+- 1.3 진행 현황: 중고나라 끌올/가격변경 감지 구조를 추가했습니다.
 - 1.4 초안: Android 앱에서 `POST /users/register`로 `user_id + device_id(Android ID)`를 등록할 수 있습니다.
 - 1.4 초안: Android 앱에서 모델별 `enabled(on/off)`, 공정가, 차이비율 설정을 저장할 수 있습니다.
 - 1.4 초안: 설정 저장은 맥미니 서버의 MySQL(`user_fair_prices`)에 즉시 반영됩니다.
@@ -732,6 +733,7 @@ mysql -u <DB_USER> -p < sql/add_risk_exchange_columns.sql
 
 ```bash
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_joongna_seen_products.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_joongna_seen_products_refresh_detection.sql
 ```
 
 ## 2) 실행 방법
@@ -750,9 +752,13 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 ## 3) 동작 규칙
 
 - 중고나라 Search API polling 기반으로 `m1~m5맥북에어` 검색 결과를 조회합니다.
-- `seq`를 매물 고유번호로 사용해 중복을 제거하고, 새 매물만 분석합니다.
+- `joongna_seen_products`는 단순 중복 차단이 아니라 마지막 관측 상태 저장용으로 사용합니다.
+- 같은 `product_id/seq`라도 가격/제목/`refresh_key`가 바뀌면 재분석합니다.
+- Search API에서 끌올 시각 필드를 안정적으로 찾을 수 없으면 가격/제목 변경만으로도 재분석합니다.
+- 완전히 동일한 상태(`unchanged`)면 `last_seen_at`, `seen_count`만 갱신하고 중복 분석/중복 알림을 막습니다.
 - Search API 응답의 `url` 필드는 이미지 URL로 저장하며, 실제 매물 URL은 `https://web.joongna.com/product/{seq}`로 생성합니다.
 - 새 매물 URL은 기존 UMTP rule-based 분석(`analyze_url_for_user`)으로 재사용합니다.
+- 재분석 이유는 `joongna_seen_products.last_change_reason`에서 확인합니다.
 - 개별 API 실패/JSON 구조 변경/개별 매물 분석 실패가 있어도 polling 루프는 계속 동작합니다.
 
 
