@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
@@ -22,7 +22,6 @@ class AnalyzeUrlRequest(BaseModel):
 
 class UserRegisterRequest(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=100)
-    nickname: Optional[str] = Field(default=None, max_length=100)
 
 
 class UserFairPriceUpsertRequest(BaseModel):
@@ -76,13 +75,12 @@ def user_fair_prices(user_id: str):
 @app.post("/users/register")
 def users_register(request: UserRegisterRequest):
     user_id = request.user_id.strip() if isinstance(request.user_id, str) else ""
-    nickname = request.nickname.strip() if isinstance(request.nickname, str) else None
 
     if not user_id:
         return {"ok": False, "reason": "invalid_user_id"}
 
     try:
-        return register_user(user_id=user_id, nickname=nickname)
+        return register_user(user_id=user_id)
     except Exception as exc:
         return {"ok": False, "reason": f"사용자 등록 실패: {exc}", "user_id": user_id}
 

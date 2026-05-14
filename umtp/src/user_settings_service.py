@@ -44,7 +44,6 @@ def _create_users_table_if_needed(cursor):
         CREATE TABLE IF NOT EXISTS users (
             id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             user_id VARCHAR(100) NOT NULL,
-            nickname VARCHAR(100) NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY uq_users_user_id (user_id)
@@ -206,12 +205,11 @@ def get_user_fair_price_settings(user_id):
     return items
 
 
-def register_user(user_id, nickname=None):
+def register_user(user_id):
     if not isinstance(user_id, str) or not user_id.strip():
         raise ValueError("user_id_empty")
 
     normalized_user_id = user_id.strip()
-    normalized_nickname = nickname.strip() if isinstance(nickname, str) and nickname.strip() else None
 
     connection = None
     cursor = None
@@ -221,13 +219,12 @@ def register_user(user_id, nickname=None):
         _create_users_table_if_needed(cursor)
         cursor.execute(
             """
-            INSERT INTO users (user_id, nickname)
-            VALUES (%s, %s)
+            INSERT INTO users (user_id)
+            VALUES (%s)
             ON DUPLICATE KEY UPDATE
-                nickname = COALESCE(VALUES(nickname), nickname),
                 updated_at = CURRENT_TIMESTAMP
             """,
-            (normalized_user_id, normalized_nickname),
+            (normalized_user_id,),
         )
         connection.commit()
         return {"ok": True, "user_id": normalized_user_id, "message": "사용자 등록 완료"}

@@ -767,11 +767,13 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 
 ```bash
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_users_table.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/drop_users_nickname_column.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/add_user_fair_price_settings_columns.sql
 ```
 
 `sql/add_user_fair_price_settings_columns.sql`은 `enabled`, `updated_at` 컬럼 추가를 시도합니다.
 MySQL 환경에서 `ADD COLUMN IF NOT EXISTS`가 제한되면, 컬럼 존재 여부를 먼저 확인한 뒤 수동 실행하세요.
+`sql/drop_users_nickname_column.sql`은 users 테이블의 `nickname` 컬럼이 남아 있을 때만 삭제합니다.
 
 ## 2) 실행 방법
 
@@ -793,8 +795,7 @@ curl http://127.0.0.1:8000/macbook-air-units
 curl -X POST http://127.0.0.1:8000/users/register \
   -H "Content-Type: application/json" \
   -d '{
-    "user_id": "boongtol",
-    "nickname": "boongtol"
+    "user_id": "boongtol"
   }'
 ```
 
