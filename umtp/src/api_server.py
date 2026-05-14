@@ -8,6 +8,7 @@ from src.analysis_service import analyze_url_for_user
 from src.user_watch_rules import (
     delete_user_watch_rule,
     list_user_watch_rules,
+    request_immediate_poll,
     set_watch_rule_enabled,
     upsert_user_watch_rule,
 )
@@ -65,6 +66,11 @@ class UserWatchRuleSetEnabledRequest(BaseModel):
 
 
 class UserWatchRuleDeleteRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=100)
+    search_keyword: str = Field(..., min_length=1, max_length=255)
+
+
+class UserWatchRuleRequestPollNowRequest(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=100)
     search_keyword: str = Field(..., min_length=1, max_length=255)
 
@@ -223,6 +229,19 @@ def user_watch_rules_delete(request: UserWatchRuleDeleteRequest):
         return {"ok": False, "reason": str(exc)}
     except Exception as exc:
         return {"ok": False, "reason": f"감시 조건 삭제 실패: {exc}"}
+
+
+@app.post("/user-watch-rules/request-poll-now")
+def user_watch_rules_request_poll_now(request: UserWatchRuleRequestPollNowRequest):
+    try:
+        return request_immediate_poll(
+            user_id=request.user_id,
+            search_keyword=request.search_keyword,
+        )
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "reason": f"즉시 검색 요청 실패: {exc}"}
 
 
 @app.post("/analyze-url")
