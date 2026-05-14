@@ -9,9 +9,9 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 try:
-    from src.joongna_polling_service import DEFAULT_USER_ID, poll_once
+    from src.joongna_polling_service import poll_once
 except ModuleNotFoundError:
-    from joongna_polling_service import DEFAULT_USER_ID, poll_once
+    from joongna_polling_service import poll_once
 
 
 DEFAULT_INTERVAL_SECONDS = 60
@@ -40,8 +40,8 @@ def parse_args():
     )
     parser.add_argument(
         "--user-id",
-        default=DEFAULT_USER_ID,
-        help=f"분석 user_id (기본값: {DEFAULT_USER_ID})",
+        default=None,
+        help="watch rule user_id 필터(미지정 시 전체 due enabled rule 대상)",
     )
     return parser.parse_args()
 
@@ -59,7 +59,8 @@ def _print_summary(stats):
         f"analysis_duplicate={stats.get('analysis_duplicate', 0)}, "
         f"analysis_failed={stats.get('analysis_failed', 0)}, "
         f"search_errors={stats.get('search_errors', 0)}, "
-        f"db_errors={stats.get('db_errors', 0)}"
+        f"db_errors={stats.get('db_errors', 0)}, "
+        f"watch_rules_due={stats.get('watch_rules_due', 0)}"
     )
 
 
@@ -70,7 +71,8 @@ def main():
         raise ValueError("--interval은 1 이상의 정수여야 합니다.")
 
     print("중고나라 polling 시작")
-    print(f"interval={args.interval}s, once={args.once}, user_id={args.user_id}")
+    user_scope = args.user_id if isinstance(args.user_id, str) and args.user_id.strip() else "ALL"
+    print(f"interval={args.interval}s, once={args.once}, user_scope={user_scope}")
 
     try:
         while True:
