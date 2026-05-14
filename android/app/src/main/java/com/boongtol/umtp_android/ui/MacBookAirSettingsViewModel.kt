@@ -3,9 +3,7 @@ package com.boongtol.umtp_android.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.boongtol.umtp_android.network.UmtpApiClient
-import com.boongtol.umtp_android.network.UserFairPriceItem
-import com.boongtol.umtp_android.network.UserFairPriceUpsertRequest
+import com.boongtol.umtp_android.network.*
 import com.boongtol.umtp_android.user.UserPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,12 +14,19 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
 
     class Factory(private val userPreferences: UserPreferences) : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            @Suppress("UNCHECKED_CAST")
             return MacBookAirSettingsViewModel(userPreferences) as T
         }
     }
 
-    private val _items = MutableStateFlow<List<UserFairPriceItem>>(emptyList())
-    val items: StateFlow<List<UserFairPriceItem>> = _items.asStateFlow()
+    private val _userId = MutableStateFlow(userPreferences.getUserId())
+    val userId: StateFlow<String?> = _userId.asStateFlow()
+
+    private val _units = MutableStateFlow<List<MacBookAirUnit>>(emptyList())
+    val units: StateFlow<List<MacBookAirUnit>> = _units.asStateFlow()
+
+    private val _userSettings = MutableStateFlow<List<UserFairPriceItem>>(emptyList())
+    val userSettings: StateFlow<List<UserFairPriceItem>> = _userSettings.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -35,25 +40,63 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _savingItemKey = MutableStateFlow<String?>(null)
     val savingItemKey: StateFlow<String?> = _savingItemKey.asStateFlow()
 
-    val userId: String = userPreferences.getUserId()
-
     init {
-        loadItems()
+        _userId.value?.let {
+            loadInitialData(it)
+        }
     }
 
-    fun loadItems() {
+    private fun loadInitialData(uid: String) {
         viewModelScope.launch {
             _isLoading.value = true
-            _errorMessage.value = null
             try {
-                val response = UmtpApiClient.apiService.getUserFairPrices(userId)
+                val unitsResponse = UmtpApiClient.apiService.getMacBookAirUnits()
+                if (unitsResponse.ok) {
+                    _units.value = unitsResponse.units
+                }
+                
+                loadUserSettings(uid)
+            } catch (e: Exception) {
+                _errorMessage.value = "데이터 로딩 에러: ${e.localizedMessage}"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun loadUserSettings(uid: String) {
+        viewModelScope.launch {
+            try {
+                val response = UmtpApiClient.apiService.getUserFairPrices(uid)
                 if (response.ok) {
-                    _items.value = response.items
-                } else {
-                    _errorMessage.value = "Failed to load settings"
+                    _userSettings.value = response.items
                 }
             } catch (e: Exception) {
-                _errorMessage.value = "Error: ${e.localizedMessage}"
+                // Ignore background refresh errors or handle silently
+            }
+        }
+    }
+
+    fun registerUser(id: String) {
+        val trimmedId = id.trim()
+        if (trimmedId.length < 2) {
+            _toastMessage.value = "User ID는 2자 이상이어야 합니다."
+            return
+        }
+
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val response = UmtpApiClient.apiService.registerUser(UserRegisterRequest(user_id = trimmedId))
+                if (response.ok) {
+                    userPreferences.setUserId(trimmedId)
+                    _userId.value = trimmedId
+                    loadInitialData(trimmedId)
+                } else {
+                    _toastMessage.value = "등록 실패: ${response.message ?: response.reason}"
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = "에러: ${e.localizedMessage}"
             } finally {
                 _isLoading.value = false
             }
@@ -61,22 +104,24 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     }
 
     fun upsertItem(
-        item: UserFairPriceItem,
+        unit: MacBookAirUnit,
         fairPrice: Int,
         dropRate: Int,
         enabled: Boolean
     ) {
-        val itemKey = "${item.chip}-${item.screen_inch}-${item.ram_gb}-${item.ssd_gb}"
+        val uid = _userId.value ?: return
+        val itemKey = "${unit.chip}-${unit.screen_inch}-${unit.ram_gb}-${unit.ssd_gb}"
+        
         viewModelScope.launch {
             _savingItemKey.value = itemKey
             try {
                 val request = UserFairPriceUpsertRequest(
-                    user_id = userId,
-                    product_type = item.product_type,
-                    chip = item.chip,
-                    screen_inch = item.screen_inch,
-                    ram_gb = item.ram_gb,
-                    ssd_gb = item.ssd_gb,
+                    user_id = uid,
+                    product_type = unit.product_type,
+                    chip = unit.chip,
+                    screen_inch = unit.screen_inch,
+                    ram_gb = unit.ram_gb,
+                    ssd_gb = unit.ssd_gb,
                     fair_price_krw = fairPrice,
                     alert_drop_rate_percent = dropRate,
                     enabled = enabled
@@ -84,7 +129,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 val response = UmtpApiClient.apiService.upsertUserFairPrice(request)
                 if (response.ok) {
                     _toastMessage.value = "저장 완료"
-                    loadItems() // Reload to get effective values
+                    loadUserSettings(uid)
                 } else {
                     _toastMessage.value = "저장 실패: ${response.message ?: response.reason}"
                 }
@@ -98,5 +143,12 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
 
     fun clearToastMessage() {
         _toastMessage.value = null
+    }
+    
+    fun logout() {
+        userPreferences.clear()
+        _userId.value = null
+        _userSettings.value = emptyList()
+        _units.value = emptyList()
     }
 }
