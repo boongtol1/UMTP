@@ -1,6 +1,7 @@
 package com.boongtol.umtp_android.ui
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.boongtol.umtp_android.network.UmtpApiClient
 import com.boongtol.umtp_android.network.UserFairPriceItem
@@ -12,6 +13,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) : ViewModel() {
+
+    class Factory(private val userPreferences: UserPreferences) : ViewModelProvider.Factory {
+        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            return MacBookAirSettingsViewModel(userPreferences) as T
+        }
+    }
 
     private val _items = MutableStateFlow<List<UserFairPriceItem>>(emptyList())
     val items: StateFlow<List<UserFairPriceItem>> = _items.asStateFlow()

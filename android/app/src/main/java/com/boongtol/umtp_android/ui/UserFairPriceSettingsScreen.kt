@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -16,7 +16,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.boongtol.umtp_android.network.UserFairPriceItem
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,13 +43,16 @@ fun UserFairPriceSettingsScreen(
             TopAppBar(
                 title = { 
                     Column {
-                        Text("MacBook Air 설정", fontSize = 18.sp)
-                        Text("User ID: ${viewModel.userId}", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
+                        Text(text = "MacBook Air 설정", fontSize = 18.sp)
+                        Text(text = "User ID: ${viewModel.userId}", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back"
+                        )
                     }
                 }
             )
@@ -58,19 +60,19 @@ fun UserFairPriceSettingsScreen(
     ) { innerPadding ->
         Box(
             modifier = Modifier
-                .padding(innerPadding)
+                .padding(paddingValues = innerPadding)
                 .fillMaxSize()
         ) {
             if (isLoading && items.isEmpty()) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                CircularProgressIndicator(modifier = Modifier.align(alignment = Alignment.Center))
             } else if (errorMessage != null && items.isEmpty()) {
                 Column(
-                    modifier = Modifier.align(Alignment.Center),
+                    modifier = Modifier.align(alignment = Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(text = errorMessage!!, color = Color.Red)
                     Button(onClick = { viewModel.loadItems() }) {
-                        Text("다시 시도")
+                        Text(text = "다시 시도")
                     }
                 }
             } else {
@@ -78,20 +80,20 @@ fun UserFairPriceSettingsScreen(
                 
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp)
+                    contentPadding = PaddingValues(all = 16.dp)
                 ) {
                     groupedItems.forEach { (chip, chipItems) ->
                         item {
-                            ChipHeader(chip)
+                            ChipHeader(chip = chip)
                         }
                         
                         val screenGroups = chipItems.groupBy { it.screen_inch }
                         screenGroups.forEach { (screen, screenItems) ->
                             item {
-                                ScreenHeader(screen)
+                                ScreenHeader(screen = screen)
                             }
                             
-                            items(screenItems) { item ->
+                            items(items = screenItems) { item ->
                                 val itemKey = "${item.chip}-${item.screen_inch}-${item.ram_gb}-${item.ssd_gb}"
                                 MacBookAirUnitCard(
                                     item = item,
@@ -117,8 +119,8 @@ fun ChipHeader(chip: String) {
         fontWeight = FontWeight.Bold,
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.primaryContainer)
-            .padding(8.dp)
+            .background(color = MaterialTheme.colorScheme.primaryContainer)
+            .padding(all = 8.dp)
     )
 }
 
