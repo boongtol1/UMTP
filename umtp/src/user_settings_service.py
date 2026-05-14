@@ -215,19 +215,60 @@ def register_user(user_id):
     cursor = None
     try:
         connection = get_connection()
-        cursor = connection.cursor()
+        cursor = connection.cursor(dictionary=True)
         _create_users_table_if_needed(cursor)
         cursor.execute(
             """
-            INSERT INTO users (user_id)
-            VALUES (%s)
-            ON DUPLICATE KEY UPDATE
-                updated_at = CURRENT_TIMESTAMP
+            SELECT id
+            FROM users
+            WHERE user_id = %s
+            LIMIT 1
             """,
             (normalized_user_id,),
         )
+        existing_user = cursor.fetchone()
+        if existing_user is not None:
+            cursor.execute(
+                """
+                UPDATE users
+                SET updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = %s
+                """,
+                (normalized_user_id,),
+            )
+            connection.commit()
+            return {
+                "ok": True,
+                "user_id": normalized_user_id,
+                "message": "기존 사용자로 로그인",
+            }
+
+        try:
+            cursor.execute(
+                """
+                INSERT INTO users (user_id)
+                VALUES (%s)
+                ON DUPLICATE KEY UPDATE
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (normalized_user_id,),
+            )
+        except Exception as exc:
+            # 동시 등록 등으로 duplicate key가 발생해도 실패로 보지 않고 기존 사용자로 처리
+            if "duplicate entry" in str(exc).lower():
+                connection.rollback()
+                return {
+                    "ok": True,
+                    "user_id": normalized_user_id,
+                    "message": "기존 사용자로 로그인",
+                }
+            raise
         connection.commit()
-        return {"ok": True, "user_id": normalized_user_id, "message": "사용자 등록 완료"}
+        return {
+            "ok": True,
+            "user_id": normalized_user_id,
+            "message": "사용자 등록 완료",
+        }
     finally:
         if cursor is not None:
             cursor.close()
