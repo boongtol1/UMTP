@@ -1,6 +1,12 @@
 from decimal import Decimal
 
 from src.db import get_connection
+from src.search_keyword_utils import (
+    build_default_keyword_for_watch_rule,
+    build_recommended_keywords_for_spec,
+    normalize_search_keyword,
+    validate_search_keyword,
+)
 
 
 UNKNOWN_COLUMN_ERRNO = 1054
@@ -41,13 +47,17 @@ def _normalize_user_id(user_id):
     return normalized
 
 
-def _normalize_search_keyword(search_keyword):
-    if not isinstance(search_keyword, str):
-        raise ValueError("invalid_search_keyword")
-    normalized = search_keyword.strip()
+def _normalize_required_search_keyword(search_keyword):
+    return validate_search_keyword(search_keyword)
+
+
+def _normalize_optional_search_keyword(search_keyword):
+    if search_keyword is None:
+        return None
+    normalized = normalize_search_keyword(search_keyword)
     if not normalized:
-        raise ValueError("invalid_search_keyword")
-    return normalized
+        return None
+    return validate_search_keyword(normalized)
 
 
 def _normalize_optional_int(value, field_name):
@@ -94,6 +104,51 @@ def compute_alert_drop_rate_percent(target_price_krw, fair_price_krw):
     )
 
 
+def get_recommended_watch_keywords(product_type, chip, ram_gb=None, ssd_gb=None):
+    normalized_product_type = _normalize_optional_text(product_type)
+    normalized_chip = _normalize_optional_text(chip)
+    if normalized_chip is not None:
+        normalized_chip = normalized_chip.upper()
+
+    normalized_ram_gb = _normalize_optional_int(ram_gb, "ram_gb")
+    normalized_ssd_gb = _normalize_optional_int(ssd_gb, "ssd_gb")
+
+    return build_recommended_keywords_for_spec(
+        normalized_product_type,
+        normalized_chip,
+        ram_gb=normalized_ram_gb,
+        ssd_gb=normalized_ssd_gb,
+    )
+
+
+def _resolve_watch_rule_search_keyword(
+    *,
+    explicit_search_keyword,
+    product_type,
+    chip,
+    screen_inch,
+    ram_gb,
+    ssd_gb,
+):
+    normalized_explicit_search_keyword = _normalize_optional_search_keyword(explicit_search_keyword)
+    if normalized_explicit_search_keyword is not None:
+        return normalized_explicit_search_keyword
+
+    default_keyword = build_default_keyword_for_watch_rule(
+        {
+            "product_type": product_type,
+            "chip": chip,
+            "screen_inch": screen_inch,
+            "ram_gb": ram_gb,
+            "ssd_gb": ssd_gb,
+        }
+    )
+    if default_keyword is None:
+        raise ValueError("unable_to_build_search_keyword")
+
+    return _normalize_required_search_keyword(default_keyword)
+
+
 def _rule_row_to_dict(row):
     return {
         "id": _safe_int(row.get("id")),
@@ -103,7 +158,7 @@ def _rule_row_to_dict(row):
         "screen_inch": _safe_int(row.get("screen_inch")),
         "ram_gb": _safe_int(row.get("ram_gb")),
         "ssd_gb": _safe_int(row.get("ssd_gb")),
-        "search_keyword": row.get("search_keyword"),
+        "search_keyword": _normalize_optional_search_keyword(row.get("search_keyword")),
         "enabled": _safe_bool(row.get("enabled"), default=True),
         "force_poll": _safe_bool(row.get("force_poll"), default=False),
         "poll_interval_seconds": _safe_int(row.get("poll_interval_seconds")),
@@ -118,7 +173,7 @@ def _rule_row_to_dict(row):
 
 
 def _fetch_watch_rules(*, user_id=None, enabled_only=False, due_only=False):
-    filters = []
+    filters = ["COALESCE(TRIM(search_keyword), '') <> ''"]
     params = []
 
     if enabled_only:
@@ -186,7 +241,7 @@ def _fetch_watch_rules(*, user_id=None, enabled_only=False, due_only=False):
             if not _is_unknown_column_error(exc):
                 raise
 
-            legacy_filters = []
+            legacy_filters = ["COALESCE(TRIM(search_keyword), '') <> ''"]
             if enabled_only:
                 legacy_filters.append("enabled = TRUE")
             if due_only:
@@ -270,7 +325,6 @@ def upsert_user_watch_rule(
     fair_price_krw=None,
 ):
     normalized_user_id = _normalize_user_id(user_id)
-    normalized_search_keyword = _normalize_search_keyword(search_keyword)
 
     if not isinstance(enabled, bool):
         raise ValueError("invalid_enabled")
@@ -286,6 +340,16 @@ def upsert_user_watch_rule(
     normalized_poll_interval_seconds = _normalize_poll_interval_seconds(poll_interval_seconds)
     normalized_target_price_krw = _normalize_optional_int(target_price_krw, "target_price_krw")
     normalized_fair_price_krw = _normalize_optional_int(fair_price_krw, "fair_price_krw")
+
+    normalized_search_keyword = _resolve_watch_rule_search_keyword(
+        explicit_search_keyword=search_keyword,
+        product_type=normalized_product_type,
+        chip=normalized_chip,
+        screen_inch=normalized_screen_inch,
+        ram_gb=normalized_ram_gb,
+        ssd_gb=normalized_ssd_gb,
+    )
+
     alert_drop_rate_percent = compute_alert_drop_rate_percent(
         normalized_target_price_krw,
         normalized_fair_price_krw,
@@ -424,6 +488,7 @@ def upsert_user_watch_rule(
     return {
         "ok": True,
         "message": "감시 조건 저장 완료",
+        "search_keyword": normalized_search_keyword,
         "immediate_poll_requested": immediate_poll_requested,
         "alert_drop_rate_percent": alert_drop_rate_percent,
     }
@@ -431,7 +496,7 @@ def upsert_user_watch_rule(
 
 def set_watch_rule_enabled(user_id, search_keyword, enabled):
     normalized_user_id = _normalize_user_id(user_id)
-    normalized_search_keyword = _normalize_search_keyword(search_keyword)
+    normalized_search_keyword = _normalize_required_search_keyword(search_keyword)
     if not isinstance(enabled, bool):
         raise ValueError("invalid_enabled")
 
@@ -504,7 +569,7 @@ def set_watch_rule_enabled(user_id, search_keyword, enabled):
 
 def delete_user_watch_rule(user_id, search_keyword):
     normalized_user_id = _normalize_user_id(user_id)
-    normalized_search_keyword = _normalize_search_keyword(search_keyword)
+    normalized_search_keyword = _normalize_required_search_keyword(search_keyword)
 
     connection = None
     cursor = None
@@ -577,7 +642,7 @@ def mark_watch_rule_polled(rule_id):
 
 def request_immediate_poll(user_id, search_keyword):
     normalized_user_id = _normalize_user_id(user_id)
-    normalized_search_keyword = _normalize_search_keyword(search_keyword)
+    normalized_search_keyword = _normalize_required_search_keyword(search_keyword)
 
     connection = None
     cursor = None
