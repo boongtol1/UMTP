@@ -5,6 +5,12 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from src.analysis_service import analyze_url_for_user
+from src.user_watch_rules import (
+    delete_user_watch_rule,
+    list_user_watch_rules,
+    set_watch_rule_enabled,
+    upsert_user_watch_rule,
+)
 from src.user_settings_service import (
     get_all_macbook_air_units_sorted,
     get_user_fair_price_settings,
@@ -36,6 +42,31 @@ class UserFairPriceUpsertRequest(BaseModel):
     fair_price_krw: int = Field(..., gt=0)
     alert_drop_rate_percent: float = Field(..., ge=0, le=100)
     enabled: bool
+
+
+class UserWatchRuleUpsertRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=100)
+    product_type: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    chip: Optional[str] = Field(default=None, min_length=1, max_length=20)
+    screen_inch: Optional[int] = None
+    ram_gb: Optional[int] = None
+    ssd_gb: Optional[int] = None
+    search_keyword: str = Field(..., min_length=1, max_length=255)
+    enabled: bool = True
+    poll_interval_seconds: int = Field(default=60, ge=1)
+    target_price_krw: Optional[int] = None
+    fair_price_krw: Optional[int] = None
+
+
+class UserWatchRuleSetEnabledRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=100)
+    search_keyword: str = Field(..., min_length=1, max_length=255)
+    enabled: bool
+
+
+class UserWatchRuleDeleteRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=100)
+    search_keyword: str = Field(..., min_length=1, max_length=255)
 
 
 @app.get("/health")
@@ -121,6 +152,77 @@ def user_fair_prices_upsert(request: UserFairPriceUpsertRequest):
         )
     except Exception as exc:
         return {"ok": False, "reason": f"사용자 공정가 설정 저장 실패: {exc}"}
+
+
+@app.get("/user-watch-rules")
+def user_watch_rules(user_id: str):
+    normalized_user_id = user_id.strip() if isinstance(user_id, str) else ""
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id", "items": []}
+
+    try:
+        items = list_user_watch_rules(normalized_user_id)
+        return {
+            "ok": True,
+            "user_id": normalized_user_id,
+            "items": items,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": f"감시 조건 조회 실패: {exc}",
+            "user_id": normalized_user_id,
+            "items": [],
+        }
+
+
+@app.post("/user-watch-rules/upsert")
+def user_watch_rules_upsert(request: UserWatchRuleUpsertRequest):
+    try:
+        return upsert_user_watch_rule(
+            user_id=request.user_id,
+            product_type=request.product_type,
+            chip=request.chip,
+            screen_inch=request.screen_inch,
+            ram_gb=request.ram_gb,
+            ssd_gb=request.ssd_gb,
+            search_keyword=request.search_keyword,
+            enabled=request.enabled,
+            poll_interval_seconds=request.poll_interval_seconds,
+            target_price_krw=request.target_price_krw,
+            fair_price_krw=request.fair_price_krw,
+        )
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "reason": f"감시 조건 저장 실패: {exc}"}
+
+
+@app.post("/user-watch-rules/set-enabled")
+def user_watch_rules_set_enabled(request: UserWatchRuleSetEnabledRequest):
+    try:
+        return set_watch_rule_enabled(
+            user_id=request.user_id,
+            search_keyword=request.search_keyword,
+            enabled=request.enabled,
+        )
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "reason": f"감시 조건 상태 변경 실패: {exc}"}
+
+
+@app.post("/user-watch-rules/delete")
+def user_watch_rules_delete(request: UserWatchRuleDeleteRequest):
+    try:
+        return delete_user_watch_rule(
+            user_id=request.user_id,
+            search_keyword=request.search_keyword,
+        )
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "reason": f"감시 조건 삭제 실패: {exc}"}
 
 
 @app.post("/analyze-url")
