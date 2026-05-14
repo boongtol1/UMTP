@@ -10,11 +10,15 @@ class UserPreferences(context: Context) {
         private const val KEY_USER_ID = "user_id"
     }
 
-    fun getUserId(): String {
-        return prefs.getString(KEY_USER_ID, "test_user") ?: "test_user"
+    fun getUserId(): String? {
+        return prefs.getString(KEY_USER_ID, null)
     }
 
     fun setUserId(userId: String) {
         prefs.edit().putString(KEY_USER_ID, userId).apply()
+    }
+
+    fun clear() {
+        prefs.edit().remove(KEY_USER_ID).apply()
     }
 }
