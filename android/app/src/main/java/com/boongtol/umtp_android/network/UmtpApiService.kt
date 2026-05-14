@@ -33,4 +33,22 @@ interface UmtpApiService {
     suspend fun getAlerts(
         @Query("user_id") userId: String
     ): AlertsResponse
+
+    @GET("user-watch-rules/recommended-keywords")
+    suspend fun getRecommendedKeywords(
+        @Query("product_type") productType: String,
+        @Query("chip") chip: String,
+        @Query("ram_gb") ramGb: Int?,
+        @Query("ssd_gb") ssdGb: Int?
+    ): RecommendedKeywordsResponse
+
+    @POST("user-watch-rules/upsert")
+    suspend fun upsertWatchRule(
+        @Body request: WatchRuleUpsertRequest
+    ): WatchRuleUpsertResponse
+
+    @POST("user-watch-rules/request-poll-now")
+    suspend fun requestPollNow(
+        @Body request: RequestPollNowRequest
+    ): RequestPollNowResponse
 }
