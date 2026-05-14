@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from src.analysis_service import analyze_url_for_user
 from src.user_watch_rules import (
     delete_user_watch_rule,
+    get_recommended_watch_keywords,
     list_user_watch_rules,
     request_immediate_poll,
     set_watch_rule_enabled,
@@ -52,7 +53,7 @@ class UserWatchRuleUpsertRequest(BaseModel):
     screen_inch: Optional[int] = None
     ram_gb: Optional[int] = None
     ssd_gb: Optional[int] = None
-    search_keyword: str = Field(..., min_length=1, max_length=255)
+    search_keyword: Optional[str] = Field(default=None, max_length=255)
     enabled: bool = True
     poll_interval_seconds: int = Field(default=60, ge=1)
     target_price_krw: Optional[int] = None
@@ -242,6 +243,30 @@ def user_watch_rules_request_poll_now(request: UserWatchRuleRequestPollNowReques
         return {"ok": False, "reason": str(exc)}
     except Exception as exc:
         return {"ok": False, "reason": f"즉시 검색 요청 실패: {exc}"}
+
+
+@app.get("/user-watch-rules/recommended-keywords")
+def user_watch_rules_recommended_keywords(
+    product_type: str,
+    chip: str,
+    ram_gb: Optional[int] = None,
+    ssd_gb: Optional[int] = None,
+):
+    try:
+        items = get_recommended_watch_keywords(
+            product_type=product_type,
+            chip=chip,
+            ram_gb=ram_gb,
+            ssd_gb=ssd_gb,
+        )
+        return {
+            "ok": True,
+            "items": items,
+        }
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc), "items": []}
+    except Exception as exc:
+        return {"ok": False, "reason": f"추천 검색어 조회 실패: {exc}", "items": []}
 
 
 @app.post("/analyze-url")
