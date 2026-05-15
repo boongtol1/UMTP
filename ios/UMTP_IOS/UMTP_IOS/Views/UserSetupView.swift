@@ -12,7 +12,7 @@ struct UserSetupView: View {
 
             TextField("user_id 입력", text: $viewModel.userIdInput)
                 .textFieldStyle(.roundedBorder)
-                .autocapitalization(.none)
+                .textInputAutocapitalization(.never)
                 .disableAutocorrection(true)
 
             Button("저장") {
