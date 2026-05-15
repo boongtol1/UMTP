@@ -166,7 +166,12 @@ def user_fair_prices_upsert(request: UserFairPriceUpsertRequest):
 def user_watch_rules(user_id: str):
     normalized_user_id = user_id.strip() if isinstance(user_id, str) else ""
     if not normalized_user_id:
-        return {"ok": False, "reason": "invalid_user_id", "items": []}
+        return {
+            "ok": False,
+            "reason": "invalid_user_id",
+            "message": "user_id를 확인해주세요.",
+            "items": [],
+        }
 
     try:
         items = list_user_watch_rules(normalized_user_id)
@@ -179,6 +184,7 @@ def user_watch_rules(user_id: str):
         return {
             "ok": False,
             "reason": f"감시 조건 조회 실패: {exc}",
+            "message": f"감시 조건 조회 실패: {exc}",
             "user_id": normalized_user_id,
             "items": [],
         }
@@ -201,9 +207,13 @@ def user_watch_rules_upsert(request: UserWatchRuleUpsertRequest):
             fair_price_krw=request.fair_price_krw,
         )
     except ValueError as exc:
-        return {"ok": False, "reason": str(exc)}
+        return {"ok": False, "reason": str(exc), "message": str(exc)}
     except Exception as exc:
-        return {"ok": False, "reason": f"감시 조건 저장 실패: {exc}"}
+        return {
+            "ok": False,
+            "reason": f"감시 조건 저장 실패: {exc}",
+            "message": f"감시 조건 저장 실패: {exc}",
+        }
 
 
 @app.post("/user-watch-rules/set-enabled")
@@ -215,9 +225,13 @@ def user_watch_rules_set_enabled(request: UserWatchRuleSetEnabledRequest):
             enabled=request.enabled,
         )
     except ValueError as exc:
-        return {"ok": False, "reason": str(exc)}
+        return {"ok": False, "reason": str(exc), "message": str(exc)}
     except Exception as exc:
-        return {"ok": False, "reason": f"감시 조건 상태 변경 실패: {exc}"}
+        return {
+            "ok": False,
+            "reason": f"감시 조건 상태 변경 실패: {exc}",
+            "message": f"감시 조건 상태 변경 실패: {exc}",
+        }
 
 
 @app.post("/user-watch-rules/delete")
@@ -228,9 +242,13 @@ def user_watch_rules_delete(request: UserWatchRuleDeleteRequest):
             search_keyword=request.search_keyword,
         )
     except ValueError as exc:
-        return {"ok": False, "reason": str(exc)}
+        return {"ok": False, "reason": str(exc), "message": str(exc)}
     except Exception as exc:
-        return {"ok": False, "reason": f"감시 조건 삭제 실패: {exc}"}
+        return {
+            "ok": False,
+            "reason": f"감시 조건 삭제 실패: {exc}",
+            "message": f"감시 조건 삭제 실패: {exc}",
+        }
 
 
 @app.post("/user-watch-rules/request-poll-now")
@@ -241,9 +259,13 @@ def user_watch_rules_request_poll_now(request: UserWatchRuleRequestPollNowReques
             search_keyword=request.search_keyword,
         )
     except ValueError as exc:
-        return {"ok": False, "reason": str(exc)}
+        return {"ok": False, "reason": str(exc), "message": str(exc)}
     except Exception as exc:
-        return {"ok": False, "reason": f"즉시 검색 요청 실패: {exc}"}
+        return {
+            "ok": False,
+            "reason": f"즉시 검색 요청 실패: {exc}",
+            "message": f"즉시 검색 요청 실패: {exc}",
+        }
 
 
 @app.get("/alerts")
@@ -292,9 +314,14 @@ def user_watch_rules_recommended_keywords(
             "items": items,
         }
     except ValueError as exc:
-        return {"ok": False, "reason": str(exc), "items": []}
+        return {"ok": False, "reason": str(exc), "message": str(exc), "items": []}
     except Exception as exc:
-        return {"ok": False, "reason": f"추천 검색어 조회 실패: {exc}", "items": []}
+        return {
+            "ok": False,
+            "reason": f"추천 검색어 조회 실패: {exc}",
+            "message": f"추천 검색어 조회 실패: {exc}",
+            "items": [],
+        }
 
 
 @app.post("/analyze-url")
