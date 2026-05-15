@@ -75,6 +75,7 @@ fun MainTabScreen(viewModel: MacBookAirSettingsViewModel, userId: String) {
     val userSettings by viewModel.userSettings.collectAsState()
     val savingItemKey by viewModel.savingItemKey.collectAsState()
     val recommendedKeywords by viewModel.recommendedKeywords.collectAsState()
+    val watchRules by viewModel.watchRules.collectAsState()
     val watchRuleSaving by viewModel.watchRuleSaving.collectAsState()
     val watchRuleRequestingNow by viewModel.watchRuleRequestingNow.collectAsState()
     val watchRuleLastAlertDropRatePercent by viewModel.watchRuleLastAlertDropRatePercent.collectAsState()
@@ -121,6 +122,7 @@ fun MainTabScreen(viewModel: MacBookAirSettingsViewModel, userId: String) {
                 2 -> WatchRuleSettingsScreen(
                     userId = userId,
                     recommendedKeywords = recommendedKeywords,
+                    watchRules = watchRules,
                     isSaving = watchRuleSaving,
                     isRequestingNow = watchRuleRequestingNow,
                     lastServerDropRatePercent = watchRuleLastAlertDropRatePercent,
@@ -132,6 +134,9 @@ fun MainTabScreen(viewModel: MacBookAirSettingsViewModel, userId: String) {
                     },
                     onRequestPollNow = { uid, keyword ->
                         viewModel.requestWatchRulePollNow(uid, keyword)
+                    },
+                    onRefreshWatchRules = {
+                        viewModel.loadUserWatchRules(userId)
                     }
                 )
             }

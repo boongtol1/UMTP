@@ -42,6 +42,11 @@ interface UmtpApiService {
         @Query("ssd_gb") ssdGb: Int?
     ): RecommendedKeywordsResponse
 
+    @GET("user-watch-rules")
+    suspend fun getUserWatchRules(
+        @Query("user_id") userId: String
+    ): WatchRuleListResponse
+
     @POST("user-watch-rules/upsert")
     suspend fun upsertWatchRule(
         @Body request: WatchRuleUpsertRequest

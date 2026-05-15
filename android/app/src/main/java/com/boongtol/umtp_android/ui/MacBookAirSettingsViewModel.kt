@@ -56,6 +56,9 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _watchRuleLastAlertDropRatePercent = MutableStateFlow<Double?>(null)
     val watchRuleLastAlertDropRatePercent: StateFlow<Double?> = _watchRuleLastAlertDropRatePercent.asStateFlow()
 
+    private val _watchRules = MutableStateFlow<List<WatchRuleItem>>(emptyList())
+    val watchRules: StateFlow<List<WatchRuleItem>> = _watchRules.asStateFlow()
+
     init {
         _userId.value?.let {
             loadInitialData(it)
@@ -73,6 +76,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 }
                 
                 loadUserSettings(uid)
+                loadUserWatchRules(uid)
                 fetchAlerts(uid)
             } catch (e: Exception) {
                 _errorMessage.value = "데이터 로딩 에러: ${e.localizedMessage}"
@@ -119,6 +123,22 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                         )
                     )
                 }
+            }
+        }
+    }
+
+    fun loadUserWatchRules(uid: String) {
+        viewModelScope.launch {
+            try {
+                val response = UmtpApiClient.apiService.getUserWatchRules(uid)
+                if (response.ok) {
+                    _watchRules.value = response.items
+                } else {
+                    _watchRules.value = emptyList()
+                }
+            } catch (e: Exception) {
+                // Keep screen responsive even when network fails.
+                _watchRules.value = emptyList()
             }
         }
     }
@@ -250,13 +270,14 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 if (response.ok) {
                     _watchRuleLastAlertDropRatePercent.value = response.alert_drop_rate_percent
                     val immediateRequested = response.immediate_poll_requested == true
+                    loadUserWatchRules(request.user_id)
                     _toastMessage.value = if (immediateRequested) {
-                        "저장 완료, 곧 검색 시작 (즉시 검색 요청됨)"
+                        "감시 조건이 저장됐어요. 곧 검색이 시작됩니다. (즉시 검색 요청됨)"
                     } else {
-                        "저장 완료, 곧 검색 시작"
+                        "감시 조건이 저장됐어요. 곧 검색이 시작됩니다."
                     }
                 } else {
-                    _toastMessage.value = "저장 실패: ${response.reason ?: response.message ?: "unknown"}"
+                    _toastMessage.value = "저장 실패: ${response.message ?: response.reason ?: "unknown"}"
                 }
             } catch (e: Exception) {
                 _toastMessage.value = "에러: ${e.localizedMessage}"
@@ -284,9 +305,10 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     )
                 )
                 if (response.ok) {
+                    loadUserWatchRules(normalizedUserId)
                     _toastMessage.value = "즉시 검색 요청 완료"
                 } else {
-                    _toastMessage.value = "즉시 검색 요청 실패: ${response.reason ?: response.message ?: "unknown"}"
+                    _toastMessage.value = "즉시 검색 요청 실패: ${response.message ?: response.reason ?: "unknown"}"
                 }
             } catch (e: Exception) {
                 _toastMessage.value = "에러: ${e.localizedMessage}"
