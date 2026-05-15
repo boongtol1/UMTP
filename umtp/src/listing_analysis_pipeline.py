@@ -553,7 +553,14 @@ def process_analysis_job(job):
     if job_id is None:
         raise ValueError("invalid_job")
 
-    mark_analysis_job_started(job_id)
+    started = mark_analysis_job_started(job_id)
+    if not started:
+        return {
+            "ok": True,
+            "skipped": True,
+            "job_id": job_id,
+            "reason": "job_not_pending",
+        }
 
     try:
         result = analyze_product_for_watch_rule(job)
@@ -579,6 +586,7 @@ def process_pending_analysis_jobs(limit=20):
     stats = {
         "fetched": len(jobs),
         "done": 0,
+        "skipped": 0,
         "failed": 0,
         "results": [],
     }
@@ -587,7 +595,9 @@ def process_pending_analysis_jobs(limit=20):
         try:
             result = process_analysis_job(job)
             stats["results"].append(result)
-            if result.get("ok"):
+            if result.get("skipped"):
+                stats["skipped"] += 1
+            elif result.get("ok"):
                 stats["done"] += 1
             else:
                 stats["failed"] += 1

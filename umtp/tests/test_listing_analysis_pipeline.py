@@ -8,7 +8,11 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.listing_analysis_pipeline import analyze_product_for_watch_rule  # noqa: E402
+from src.listing_analysis_pipeline import (  # noqa: E402
+    analyze_product_for_watch_rule,
+    process_analysis_job,
+    process_pending_analysis_jobs,
+)
 
 
 class _FakeCursor:
@@ -191,6 +195,33 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
         self.assertEqual(result.get("fair_price_source"), "mac_fair_prices")
         self.assertEqual(result.get("alert_skip_reason"), "drop_rate_below_threshold")
         self.assertEqual(mock_create_alert.call_count, 0)
+
+    def test_process_analysis_job_skips_when_not_pending(self):
+        job = {"id": 10, "product_id": "1001"}
+
+        with patch("src.listing_analysis_pipeline.mark_analysis_job_started", return_value=False):
+            with patch("src.listing_analysis_pipeline.analyze_product_for_watch_rule") as mock_analyze:
+                result = process_analysis_job(job)
+
+        self.assertTrue(result.get("ok"))
+        self.assertTrue(result.get("skipped"))
+        self.assertEqual(result.get("reason"), "job_not_pending")
+        self.assertEqual(mock_analyze.call_count, 0)
+
+    def test_process_pending_analysis_jobs_counts_skipped(self):
+        jobs = [{"id": 11, "product_id": "1002"}]
+
+        with patch("src.listing_analysis_pipeline.get_pending_analysis_jobs", return_value=jobs):
+            with patch(
+                "src.listing_analysis_pipeline.process_analysis_job",
+                return_value={"ok": True, "skipped": True, "job_id": 11, "reason": "job_not_pending"},
+            ):
+                stats = process_pending_analysis_jobs(limit=20)
+
+        self.assertEqual(stats.get("fetched"), 1)
+        self.assertEqual(stats.get("skipped"), 1)
+        self.assertEqual(stats.get("done"), 0)
+        self.assertEqual(stats.get("failed"), 0)
 
 
 if __name__ == "__main__":

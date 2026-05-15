@@ -396,17 +396,18 @@ def mark_analysis_job_started(job_id):
             """
             UPDATE analysis_jobs
             SET
-                status = 'processing',
+                status = 'running',
                 attempts = COALESCE(attempts, 0) + 1,
                 started_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = %s
+              AND status = 'pending'
             """,
             (normalized_job_id,),
         )
         connection.commit()
 
-        return cursor.rowcount > 0
+        return cursor.rowcount == 1
     finally:
         if cursor is not None:
             cursor.close()

@@ -123,7 +123,8 @@ class AnalysisJobsTest(unittest.TestCase):
             self.assertTrue(mark_analysis_job_done(3))
             self.assertTrue(mark_analysis_job_failed(3, "boom"))
 
-        self.assertIn("status = 'processing'", fake_cursor.executed[0][0])
+        self.assertIn("status = 'running'", fake_cursor.executed[0][0])
+        self.assertIn("status = 'pending'", fake_cursor.executed[0][0])
         self.assertIn("status = 'done'", fake_cursor.executed[1][0])
         self.assertIn("status = 'failed'", fake_cursor.executed[2][0])
 
