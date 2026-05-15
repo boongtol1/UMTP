@@ -12,47 +12,96 @@ from src.notification_worker import process_pending_alert_events, send_alert_eve
 
 
 class NotificationWorkerTest(unittest.TestCase):
-    def test_send_alert_event_app_only_when_telegram_not_configured(self):
-        with patch("src.notification_worker._telegram_configured", return_value=False):
+    def test_send_alert_event_app_only_when_alerts_disabled(self):
+        with patch(
+            "src.notification_worker.resolve_user_alert_delivery_policy",
+            return_value={
+                "enabled": False,
+                "telegram_chat_id": None,
+                "allow_global_fallback": False,
+            },
+        ):
             with patch("src.notification_worker.mark_alert_event_app_only") as mock_mark_app_only:
-                result = send_alert_event(
-                    {
-                        "id": 1,
-                        "title": "테스트",
-                        "message": "테스트 메시지",
-                    }
-                )
-
-        self.assertTrue(result.get("ok"))
-        self.assertEqual(result.get("status"), "app_only")
-        self.assertEqual(mock_mark_app_only.call_count, 1)
-
-    def test_send_alert_event_sent_when_telegram_success(self):
-        with patch("src.notification_worker._telegram_configured", return_value=True):
-            with patch("src.notification_worker.send_telegram_alert", return_value=True):
-                with patch("src.notification_worker.mark_alert_event_sent") as mock_mark_sent:
+                with patch("src.notification_worker.send_telegram_alert") as mock_send_telegram:
                     result = send_alert_event(
                         {
-                            "id": 2,
+                            "id": 1,
+                            "user_id": "boongtol",
                             "title": "테스트",
                             "message": "테스트 메시지",
                         }
                     )
 
         self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("status"), "app_only")
+        self.assertEqual(result.get("reason"), "alerts_disabled")
+        self.assertEqual(mock_mark_app_only.call_count, 1)
+        self.assertEqual(mock_send_telegram.call_count, 0)
+
+    def test_send_alert_event_skips_when_missing_user_chat_id(self):
+        with patch(
+            "src.notification_worker.resolve_user_alert_delivery_policy",
+            return_value={
+                "enabled": True,
+                "telegram_chat_id": None,
+                "allow_global_fallback": False,
+            },
+        ):
+            with patch("src.notification_worker._telegram_configured", return_value=True):
+                with patch("src.notification_worker.mark_alert_event_app_only") as mock_mark_app_only:
+                    with patch("src.notification_worker.send_telegram_alert") as mock_send_telegram:
+                        result = send_alert_event(
+                            {
+                                "id": 2,
+                                "user_id": "boongtol",
+                                "title": "테스트",
+                                "message": "테스트 메시지",
+                            }
+                        )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("status"), "app_only")
+        self.assertEqual(result.get("reason"), "missing_telegram_chat_id")
+        self.assertEqual(mock_mark_app_only.call_count, 1)
+        self.assertEqual(mock_send_telegram.call_count, 0)
+
+    def test_send_alert_event_sent_when_telegram_success(self):
+        with patch(
+            "src.notification_worker.resolve_user_alert_delivery_policy",
+            return_value={
+                "enabled": True,
+                "telegram_chat_id": "123456",
+                "allow_global_fallback": False,
+            },
+        ):
+            with patch("src.notification_worker._telegram_configured", return_value=True):
+                with patch("src.notification_worker.send_telegram_alert", return_value=True) as mock_send_telegram:
+                    with patch("src.notification_worker.mark_alert_event_sent") as mock_mark_sent:
+                        result = send_alert_event(
+                            {
+                                "id": 3,
+                                "user_id": "boongtol",
+                                "title": "테스트",
+                                "message": "테스트 메시지",
+                            }
+                        )
+
+        self.assertTrue(result.get("ok"))
         self.assertEqual(result.get("status"), "sent")
+        self.assertEqual(result.get("reason"), "telegram_sent")
         self.assertEqual(mock_mark_sent.call_count, 1)
+        self.assertEqual(mock_send_telegram.call_args.kwargs.get("chat_id"), "123456")
 
     def test_process_pending_alert_events_continues_after_failure(self):
         pending_alerts = [
-            {"id": 11, "message": "A"},
-            {"id": 12, "message": "B"},
+            {"id": 11, "user_id": "u1", "message": "A"},
+            {"id": 12, "user_id": "u2", "message": "B"},
         ]
 
         def _send_side_effect(alert):
             if alert.get("id") == 11:
                 raise RuntimeError("send failed")
-            return {"ok": True, "alert_id": 12, "status": "sent"}
+            return {"ok": True, "alert_id": 12, "status": "sent", "reason": "telegram_sent"}
 
         with patch("src.notification_worker.get_pending_alert_events", return_value=pending_alerts):
             with patch("src.notification_worker.mark_alert_event_sending"):
@@ -66,7 +115,7 @@ class NotificationWorkerTest(unittest.TestCase):
         self.assertEqual(mock_mark_failed.call_count, 1)
 
     def test_process_pending_alert_events_skips_when_not_claimed(self):
-        pending_alerts = [{"id": 11, "message": "A"}]
+        pending_alerts = [{"id": 11, "user_id": "u1", "message": "A"}]
 
         with patch("src.notification_worker.get_pending_alert_events", return_value=pending_alerts):
             with patch("src.notification_worker.mark_alert_event_sending", return_value=False):

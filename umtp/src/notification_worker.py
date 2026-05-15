@@ -5,9 +5,11 @@ from dotenv import load_dotenv
 try:
     from src.db import get_connection
     from src.telegram_notifier import send_telegram_alert
+    from src.user_alert_settings import resolve_user_alert_delivery_policy
 except ModuleNotFoundError:
     from db import get_connection
     from telegram_notifier import send_telegram_alert
+    from user_alert_settings import resolve_user_alert_delivery_policy
 
 
 def _normalize_optional_text(value):
@@ -55,8 +57,7 @@ def _normalize_alert_id(alert_id):
 def _telegram_configured():
     load_dotenv()
     bot_token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
-    chat_id = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
-    return bool(bot_token and chat_id)
+    return bool(bot_token)
 
 
 def _build_telegram_message(alert):
@@ -225,18 +226,56 @@ def send_alert_event(alert):
         raise ValueError("invalid_alert")
 
     alert_id = _normalize_alert_id(alert.get("id"))
-    telegram_ready = _telegram_configured()
+    user_id = _normalize_required_text(alert.get("user_id"), "user_id")
+    delivery_policy = resolve_user_alert_delivery_policy(user_id)
+    user_alert_enabled = bool(delivery_policy.get("enabled"))
+    user_chat_id = _normalize_optional_text(delivery_policy.get("telegram_chat_id"))
+    allow_global_fallback = bool(delivery_policy.get("allow_global_fallback"))
 
-    if not telegram_ready:
+    if not user_alert_enabled:
+        print(f"[notification_worker] telegram skipped: alerts disabled for user_id={user_id}")
         mark_alert_event_app_only(alert_id)
         return {
             "ok": True,
             "alert_id": alert_id,
             "status": "app_only",
+            "reason": "alerts_disabled",
         }
 
+    telegram_ready = _telegram_configured()
+
+    if not telegram_ready:
+        print(f"[notification_worker] telegram skipped: bot token missing for user_id={user_id}")
+        mark_alert_event_app_only(alert_id)
+        return {
+            "ok": True,
+            "alert_id": alert_id,
+            "status": "app_only",
+            "reason": "telegram_bot_token_missing",
+        }
+
+    if user_chat_id is None and not allow_global_fallback:
+        print(f"[notification_worker] telegram skipped: missing telegram_chat_id for user_id={user_id}")
+        mark_alert_event_app_only(alert_id)
+        return {
+            "ok": True,
+            "alert_id": alert_id,
+            "status": "app_only",
+            "reason": "missing_telegram_chat_id",
+        }
+
+    if user_chat_id is None and allow_global_fallback:
+        print(
+            f"[notification_worker] telegram fallback: using global chat id for user_id={user_id} "
+            "(deprecated)"
+        )
+
     telegram_message = _build_telegram_message(alert)
-    sent_ok = send_telegram_alert(telegram_message)
+    sent_ok = send_telegram_alert(
+        telegram_message,
+        chat_id=user_chat_id,
+        allow_global_fallback=allow_global_fallback,
+    )
 
     if sent_ok:
         mark_alert_event_sent(alert_id)
@@ -244,6 +283,7 @@ def send_alert_event(alert):
             "ok": True,
             "alert_id": alert_id,
             "status": "sent",
+            "reason": "telegram_sent",
         }
 
     mark_alert_event_failed(alert_id, "telegram_send_failed")

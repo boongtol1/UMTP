@@ -5,6 +5,7 @@ from src.risk_analyzer import analyze_risk
 from src.spec_parser import parse_listing_title
 from src.telegram_notifier import send_telegram_alert
 from src.url_history import find_existing_url_record, save_duplicate_url_record
+from src.user_alert_settings import resolve_user_alert_delivery_policy
 from src.user_fair_price import fetch_user_fair_price
 
 
@@ -389,17 +390,32 @@ def analyze_url_for_user(
             if risk_result.get("is_exchange_post"):
                 message_parts.append("교환글")
             message = " - ".join(message_parts)
-            telegram_sent = send_telegram_alert(
-                _build_telegram_message(
-                    title=title,
-                    listing_price_krw=listing_price_krw,
-                    fair_price_krw=fair_price_krw,
-                    diff_ratio=diff_ratio,
-                    url=url,
-                    risk_result=risk_result,
-                    screen_inch_defaulted=parsed_spec.get("screen_inch_defaulted", False),
-                )
-            )
+            delivery_policy = resolve_user_alert_delivery_policy(user_id)
+            policy_enabled = bool(delivery_policy.get("enabled"))
+            user_chat_id = delivery_policy.get("telegram_chat_id")
+            allow_global_fallback = bool(delivery_policy.get("allow_global_fallback"))
+
+            if policy_enabled:
+                if user_chat_id is None and not allow_global_fallback:
+                    print(
+                        f"[analysis_service] telegram skipped: missing telegram_chat_id for user_id={user_id}"
+                    )
+                else:
+                    telegram_sent = send_telegram_alert(
+                        _build_telegram_message(
+                            title=title,
+                            listing_price_krw=listing_price_krw,
+                            fair_price_krw=fair_price_krw,
+                            diff_ratio=diff_ratio,
+                            url=url,
+                            risk_result=risk_result,
+                            screen_inch_defaulted=parsed_spec.get("screen_inch_defaulted", False),
+                        ),
+                        chat_id=user_chat_id,
+                        allow_global_fallback=allow_global_fallback,
+                    )
+            else:
+                print(f"[analysis_service] telegram skipped: alerts disabled for user_id={user_id}")
 
         return {
             "ok": True,
