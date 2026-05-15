@@ -35,6 +35,7 @@ except ModuleNotFoundError:
 
 
 DEFAULT_USER_ID = "test_user"
+DUPLICATE_ENTRY_ERROR_CODE = 1062
 
 
 def _normalize_optional_text(value):
@@ -63,6 +64,15 @@ def _normalize_optional_float(value):
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _is_duplicate_entry_error(exc):
+    error_code = getattr(exc, "errno", None)
+    if error_code == DUPLICATE_ENTRY_ERROR_CODE:
+        return True
+
+    message = str(exc).lower()
+    return "duplicate" in message and "entry" in message
 
 
 def _build_listing_snapshot_from_job(job):
@@ -164,22 +174,16 @@ def _build_alert_message(title, listing_price_krw, fair_price_krw, drop_rate_per
     )
 
 
-def _find_recent_duplicate_alert(
+def _find_alert_event_by_identity(
     cursor,
     *,
     user_id,
     product_id,
-    watch_rule_id,
-    trigger_reason,
-    within_seconds=300,
 ):
     normalized_user_id = _normalize_optional_text(user_id)
     normalized_product_id = _normalize_optional_text(product_id)
-    normalized_watch_rule_id = _normalize_optional_int(watch_rule_id)
-    normalized_trigger_reason = _normalize_optional_text(trigger_reason)
-    normalized_within_seconds = _normalize_optional_int(within_seconds) or 300
 
-    if normalized_user_id is None:
+    if normalized_user_id is None or normalized_product_id is None:
         return None
 
     cursor.execute(
@@ -187,32 +191,13 @@ def _find_recent_duplicate_alert(
         SELECT id
         FROM alert_events
         WHERE user_id = %s
-          AND (
-                (product_id IS NULL AND %s IS NULL)
-             OR product_id = %s
-          )
-          AND (
-                (watch_rule_id IS NULL AND %s IS NULL)
-             OR watch_rule_id = %s
-          )
-          AND (
-                (trigger_reason IS NULL AND %s IS NULL)
-             OR trigger_reason = %s
-          )
-          AND status IN ('pending', 'sending', 'sent', 'app_only')
-          AND TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP) <= %s
-        ORDER BY created_at DESC
+          AND product_id = %s
+        ORDER BY id DESC
         LIMIT 1
         """,
         (
             normalized_user_id,
             normalized_product_id,
-            normalized_product_id,
-            normalized_watch_rule_id,
-            normalized_watch_rule_id,
-            normalized_trigger_reason,
-            normalized_trigger_reason,
-            normalized_within_seconds,
         ),
     )
     return cursor.fetchone()
@@ -234,55 +219,72 @@ def maybe_create_alert_event(
     trigger_reason,
     message,
 ):
-    duplicate = _find_recent_duplicate_alert(
+    normalized_user_id = _normalize_optional_text(user_id)
+    normalized_product_id = _normalize_optional_text(product_id)
+
+    duplicate = _find_alert_event_by_identity(
         cursor,
-        user_id=user_id,
-        product_id=product_id,
-        watch_rule_id=watch_rule_id,
-        trigger_reason=trigger_reason,
+        user_id=normalized_user_id,
+        product_id=normalized_product_id,
     )
     if duplicate is not None:
         return {
             "created": False,
-            "reason": "duplicate_recent_alert",
+            "reason": "duplicate_identity_alert",
             "alert_id": int(duplicate[0]) if isinstance(duplicate, (tuple, list)) else int(duplicate.get("id")),
         }
 
-    cursor.execute(
-        """
-        INSERT INTO alert_events (
-            user_id,
-            watch_rule_id,
-            analysis_job_id,
-            product_id,
-            url,
-            title,
-            price_krw,
-            fair_price_krw,
-            target_price_krw,
-            drop_rate_percent,
-            trigger_reason,
-            message,
-            status,
-            send_attempts
+    try:
+        cursor.execute(
+            """
+            INSERT INTO alert_events (
+                user_id,
+                watch_rule_id,
+                analysis_job_id,
+                product_id,
+                url,
+                title,
+                price_krw,
+                fair_price_krw,
+                target_price_krw,
+                drop_rate_percent,
+                trigger_reason,
+                message,
+                status,
+                send_attempts
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 0)
+            """,
+            (
+                normalized_user_id,
+                _normalize_optional_int(watch_rule_id),
+                _normalize_optional_int(analysis_job_id),
+                normalized_product_id,
+                _normalize_optional_text(url),
+                _normalize_optional_text(title),
+                _normalize_optional_int(price_krw),
+                _normalize_optional_int(fair_price_krw),
+                _normalize_optional_int(target_price_krw),
+                _normalize_optional_float(drop_rate_percent),
+                _normalize_optional_text(trigger_reason),
+                _normalize_optional_text(message),
+            ),
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 0)
-        """,
-        (
-            _normalize_optional_text(user_id),
-            _normalize_optional_int(watch_rule_id),
-            _normalize_optional_int(analysis_job_id),
-            _normalize_optional_text(product_id),
-            _normalize_optional_text(url),
-            _normalize_optional_text(title),
-            _normalize_optional_int(price_krw),
-            _normalize_optional_int(fair_price_krw),
-            _normalize_optional_int(target_price_krw),
-            _normalize_optional_float(drop_rate_percent),
-            _normalize_optional_text(trigger_reason),
-            _normalize_optional_text(message),
-        ),
-    )
+    except Exception as exc:
+        if _is_duplicate_entry_error(exc):
+            duplicate = _find_alert_event_by_identity(
+                cursor,
+                user_id=normalized_user_id,
+                product_id=normalized_product_id,
+            )
+            if duplicate is not None:
+                return {
+                    "created": False,
+                    "reason": "duplicate_identity_alert",
+                    "alert_id": int(duplicate[0]) if isinstance(duplicate, (tuple, list)) else int(duplicate.get("id")),
+                }
+        raise
+
     return {
         "created": True,
         "alert_id": int(cursor.lastrowid),
