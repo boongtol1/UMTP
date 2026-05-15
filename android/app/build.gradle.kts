@@ -3,6 +3,11 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val configuredBaseUrl = (project.findProperty("UMTP_BASE_URL") as String?)
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() }
+    ?: "http://183.111.181.122:8000/"
+
 android {
     namespace = "com.boongtol.umtp_android"
     compileSdk {
@@ -19,6 +24,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "UMTP_BASE_URL", "\"$configuredBaseUrl\"")
     }
 
     buildTypes {
@@ -36,6 +42,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

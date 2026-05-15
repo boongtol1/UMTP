@@ -66,3 +66,13 @@ UMTP(Used Market Tracker Project)의 Android 클라이언트 앱입니다.
 - Retrofit2, OkHttp3 (Logging Interceptor)
 - Kotlin Coroutines
 - Material 3
+
+### 서버 주소 설정
+- 기본 서버 주소는 `http://183.111.181.122:8000/` 입니다.
+- 다른 서버를 쓰려면 `android/gradle.properties` 또는 사용자 전역 `~/.gradle/gradle.properties`에 아래를 추가하세요.
+
+```properties
+UMTP_BASE_URL=http://<SERVER_HOST>:8000/
+```
+
+- 주소 끝 `/`는 없어도 자동 보정됩니다.

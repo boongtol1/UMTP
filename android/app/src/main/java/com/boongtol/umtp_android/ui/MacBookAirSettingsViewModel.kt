@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
 class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) : ViewModel() {
 
@@ -186,7 +189,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     _toastMessage.value = "등록 실패: ${response.message ?: response.reason}"
                 }
             } catch (e: Exception) {
-                _toastMessage.value = "에러: ${e.localizedMessage}"
+                _toastMessage.value = buildNetworkErrorMessage("등록 실패", e)
             } finally {
                 _isLoading.value = false
             }
@@ -224,7 +227,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     _toastMessage.value = "저장 실패: ${response.message ?: response.reason}"
                 }
             } catch (e: Exception) {
-                _toastMessage.value = "에러: ${e.localizedMessage}"
+                _toastMessage.value = buildNetworkErrorMessage("저장 실패", e)
             } finally {
                 _savingItemKey.value = null
             }
@@ -257,7 +260,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 }
             } catch (e: Exception) {
                 _recommendedKeywords.value = emptyList()
-                _toastMessage.value = "추천 검색어 조회 에러: ${e.localizedMessage}"
+                _toastMessage.value = buildNetworkErrorMessage("추천 검색어 조회 실패", e)
             }
         }
     }
@@ -280,7 +283,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     _toastMessage.value = "저장 실패: ${response.message ?: response.reason ?: "unknown"}"
                 }
             } catch (e: Exception) {
-                _toastMessage.value = "에러: ${e.localizedMessage}"
+                _toastMessage.value = buildNetworkErrorMessage("감시 조건 저장 실패", e)
             } finally {
                 _watchRuleSaving.value = false
             }
@@ -311,10 +314,20 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     _toastMessage.value = "즉시 검색 요청 실패: ${response.message ?: response.reason ?: "unknown"}"
                 }
             } catch (e: Exception) {
-                _toastMessage.value = "에러: ${e.localizedMessage}"
+                _toastMessage.value = buildNetworkErrorMessage("즉시 검색 요청 실패", e)
             } finally {
                 _watchRuleRequestingNow.value = false
             }
         }
+    }
+
+    private fun buildNetworkErrorMessage(prefix: String, error: Exception): String {
+        val reason = when (error) {
+            is UnknownHostException -> "서버 주소를 찾지 못했어요."
+            is ConnectException -> "서버에 연결할 수 없어요."
+            is SocketTimeoutException -> "서버 응답 시간이 초과됐어요."
+            else -> error.localizedMessage ?: "알 수 없는 네트워크 오류"
+        }
+        return "$prefix: $reason 서버 주소(${UmtpApiClient.baseUrl})를 확인해주세요."
     }
 }
