@@ -1,5 +1,6 @@
 package com.boongtol.umtp_android.ui
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -155,15 +156,12 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
     }
 
-    fun registerUser(userId: String, deviceId: String) {
+    fun registerUser(userId: String, deviceId: String?) {
         val trimmedUserId = userId.trim()
-        val trimmedDeviceId = deviceId.trim()
+        val trimmedDeviceId = deviceId?.trim().orEmpty()
+        val normalizedDeviceId = trimmedDeviceId.takeIf { it.isNotEmpty() }
         if (trimmedUserId.length < 2) {
             _toastMessage.value = "User ID는 2자 이상이어야 합니다."
-            return
-        }
-        if (trimmedDeviceId.isEmpty()) {
-            _toastMessage.value = "기기 ID를 읽지 못했습니다."
             return
         }
 
@@ -173,9 +171,12 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 val response = UmtpApiClient.apiService.registerUser(
                     UserRegisterRequest(
                         user_id = trimmedUserId,
-                        device_id = trimmedDeviceId
+                        device_id = normalizedDeviceId
                     )
                 )
+                
+                Log.d("UMTP_NET", "Register Response: ok=${response.ok}, user_id=${response.user_id}, message=${response.message}")
+
                 if (response.ok) {
                     val effectiveUserId = response.user_id?.trim()
                         ?.takeIf { it.isNotEmpty() }
@@ -186,9 +187,10 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     startAlertPolling(effectiveUserId)
                     _toastMessage.value = response.message ?: "등록 완료"
                 } else {
-                    _toastMessage.value = "등록 실패: ${response.message ?: response.reason}"
+                    _toastMessage.value = "등록 실패: ${response.message ?: response.reason ?: "서버 응답 오류"}"
                 }
             } catch (e: Exception) {
+                Log.e("UMTP_NET", "Register Error", e)
                 _toastMessage.value = buildNetworkErrorMessage("등록 실패", e)
             } finally {
                 _isLoading.value = false
@@ -216,7 +218,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     ram_gb = unit.ram_gb,
                     ssd_gb = unit.ssd_gb,
                     fair_price_krw = fairPrice,
-                    alert_drop_rate_percent = dropRate,
+                    alert_drop_rate_percent = dropRate.toDouble(),
                     enabled = enabled
                 )
                 val response = UmtpApiClient.apiService.upsertUserFairPrice(request)

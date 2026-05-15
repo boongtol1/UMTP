@@ -15,6 +15,7 @@ import com.boongtol.umtp_android.network.MacBookAirUnit
 import com.boongtol.umtp_android.network.UserFairPriceItem
 import java.text.NumberFormat
 import java.util.*
+import kotlin.math.roundToInt
 
 @Composable
 fun MacBookAirSettingCard(
@@ -27,7 +28,11 @@ fun MacBookAirSettingCard(
         mutableStateOf(userSetting?.user_fair_price_krw?.toString() ?: userSetting?.system_fair_price_krw?.toString() ?: "") 
     }
     var dropRateText by remember(userSetting) { 
-        mutableStateOf(userSetting?.user_alert_drop_rate_percent?.toString() ?: userSetting?.system_alert_drop_rate_percent?.toString() ?: "") 
+        mutableStateOf(
+            formatDropRateForInput(
+                userSetting?.user_alert_drop_rate_percent ?: userSetting?.system_alert_drop_rate_percent
+            )
+        )
     }
     var enabled by remember(userSetting) { mutableStateOf(userSetting?.enabled ?: false) }
 
@@ -70,7 +75,7 @@ fun MacBookAirSettingCard(
                 value = "${numberFormat.format(userSetting?.effective_fair_price_krw ?: 0)}원", 
                 valueColor = if (userSetting?.has_user_override == true) Color(0xFF388E3C) else Color.Unspecified
             )
-            InfoRow(label = "알림 기준", value = "${userSetting?.effective_alert_drop_rate_percent ?: 0}%")
+            InfoRow(label = "알림 기준", value = formatDropRateForDisplay(userSetting?.effective_alert_drop_rate_percent))
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -117,6 +122,21 @@ fun MacBookAirSettingCard(
             }
         }
     }
+}
+
+private fun formatDropRateForInput(value: Double?): String {
+    if (value == null) {
+        return ""
+    }
+    return value.roundToInt().toString()
+}
+
+private fun formatDropRateForDisplay(value: Double?): String {
+    if (value == null) {
+        return "0%"
+    }
+    val rounded = value.roundToInt()
+    return "$rounded%"
 }
 
 @Composable

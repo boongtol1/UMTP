@@ -27,6 +27,34 @@ app = FastAPI(title="UMTP API", version="1.0")
 logger = logging.getLogger("umtp.api")
 
 
+def _normalize_user_id(value: Optional[str]) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
+def _ensure_user_registered(raw_user_id: Optional[str], *, source: str) -> str:
+    normalized_user_id = _normalize_user_id(raw_user_id)
+    if not normalized_user_id:
+        raise ValueError("invalid_user_id")
+
+    registration_result = register_user(user_id=normalized_user_id)
+    if not registration_result.get("ok"):
+        reason = registration_result.get("reason") or registration_result.get("message") or "user_register_failed"
+        raise RuntimeError(reason)
+
+    saved_user_id = _normalize_user_id(registration_result.get("user_id"))
+    resolved_user_id = saved_user_id if saved_user_id else normalized_user_id
+    if resolved_user_id != normalized_user_id:
+        logger.info(
+            "[%s] user_id remapped requested=%s saved=%s",
+            source,
+            normalized_user_id,
+            resolved_user_id,
+        )
+    return resolved_user_id
+
+
 class AnalyzeUrlRequest(BaseModel):
     user_id: str
     url: str
@@ -109,13 +137,23 @@ def macbook_air_units():
 
 @app.get("/user-fair-prices")
 def user_fair_prices(user_id: str):
-    normalized_user_id = user_id.strip() if isinstance(user_id, str) else ""
+    normalized_user_id = _normalize_user_id(user_id)
     if not normalized_user_id:
         return {"ok": False, "reason": "invalid_user_id", "items": []}
 
     try:
-        items = get_user_fair_price_settings(normalized_user_id)
-        return {"ok": True, "user_id": normalized_user_id, "items": items}
+        resolved_user_id = _ensure_user_registered(normalized_user_id, source="api/user-fair-prices")
+        items = get_user_fair_price_settings(resolved_user_id)
+        return {"ok": True, "user_id": resolved_user_id, "items": items}
+    except ValueError:
+        return {"ok": False, "reason": "invalid_user_id", "items": []}
+    except RuntimeError as exc:
+        return {
+            "ok": False,
+            "reason": f"사용자 등록 실패: {exc}",
+            "user_id": normalized_user_id,
+            "items": [],
+        }
     except Exception as exc:
         return {
             "ok": False,
@@ -165,8 +203,9 @@ def users_register(request: UserRegisterRequest):
 @app.post("/user-fair-prices/upsert")
 def user_fair_prices_upsert(request: UserFairPriceUpsertRequest):
     try:
+        resolved_user_id = _ensure_user_registered(request.user_id, source="api/user-fair-prices/upsert")
         return upsert_user_fair_price_setting(
-            user_id=request.user_id,
+            user_id=resolved_user_id,
             product_type=request.product_type,
             chip=request.chip,
             screen_inch=request.screen_inch,
@@ -176,13 +215,17 @@ def user_fair_prices_upsert(request: UserFairPriceUpsertRequest):
             alert_drop_rate_percent=request.alert_drop_rate_percent,
             enabled=request.enabled,
         )
+    except ValueError:
+        return {"ok": False, "reason": "invalid_user_id"}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
     except Exception as exc:
         return {"ok": False, "reason": f"사용자 공정가 설정 저장 실패: {exc}"}
 
 
 @app.get("/user-watch-rules")
 def user_watch_rules(user_id: str):
-    normalized_user_id = user_id.strip() if isinstance(user_id, str) else ""
+    normalized_user_id = _normalize_user_id(user_id)
     if not normalized_user_id:
         return {
             "ok": False,
@@ -192,11 +235,27 @@ def user_watch_rules(user_id: str):
         }
 
     try:
-        items = list_user_watch_rules(normalized_user_id)
+        resolved_user_id = _ensure_user_registered(normalized_user_id, source="api/user-watch-rules")
+        items = list_user_watch_rules(resolved_user_id)
         return {
             "ok": True,
-            "user_id": normalized_user_id,
+            "user_id": resolved_user_id,
             "items": items,
+        }
+    except ValueError:
+        return {
+            "ok": False,
+            "reason": "invalid_user_id",
+            "message": "user_id를 확인해주세요.",
+            "items": [],
+        }
+    except RuntimeError as exc:
+        return {
+            "ok": False,
+            "reason": f"사용자 등록 실패: {exc}",
+            "message": f"사용자 등록 실패: {exc}",
+            "user_id": normalized_user_id,
+            "items": [],
         }
     except Exception as exc:
         return {
@@ -211,8 +270,9 @@ def user_watch_rules(user_id: str):
 @app.post("/user-watch-rules/upsert")
 def user_watch_rules_upsert(request: UserWatchRuleUpsertRequest):
     try:
+        resolved_user_id = _ensure_user_registered(request.user_id, source="api/user-watch-rules/upsert")
         return upsert_user_watch_rule(
-            user_id=request.user_id,
+            user_id=resolved_user_id,
             product_type=request.product_type,
             chip=request.chip,
             screen_inch=request.screen_inch,
@@ -224,6 +284,12 @@ def user_watch_rules_upsert(request: UserWatchRuleUpsertRequest):
             target_price_krw=request.target_price_krw,
             fair_price_krw=request.fair_price_krw,
         )
+    except RuntimeError as exc:
+        return {
+            "ok": False,
+            "reason": f"사용자 등록 실패: {exc}",
+            "message": f"사용자 등록 실패: {exc}",
+        }
     except ValueError as exc:
         return {"ok": False, "reason": str(exc), "message": str(exc)}
     except Exception as exc:
@@ -237,11 +303,18 @@ def user_watch_rules_upsert(request: UserWatchRuleUpsertRequest):
 @app.post("/user-watch-rules/set-enabled")
 def user_watch_rules_set_enabled(request: UserWatchRuleSetEnabledRequest):
     try:
+        resolved_user_id = _ensure_user_registered(request.user_id, source="api/user-watch-rules/set-enabled")
         return set_watch_rule_enabled(
-            user_id=request.user_id,
+            user_id=resolved_user_id,
             search_keyword=request.search_keyword,
             enabled=request.enabled,
         )
+    except RuntimeError as exc:
+        return {
+            "ok": False,
+            "reason": f"사용자 등록 실패: {exc}",
+            "message": f"사용자 등록 실패: {exc}",
+        }
     except ValueError as exc:
         return {"ok": False, "reason": str(exc), "message": str(exc)}
     except Exception as exc:
@@ -255,10 +328,17 @@ def user_watch_rules_set_enabled(request: UserWatchRuleSetEnabledRequest):
 @app.post("/user-watch-rules/delete")
 def user_watch_rules_delete(request: UserWatchRuleDeleteRequest):
     try:
+        resolved_user_id = _ensure_user_registered(request.user_id, source="api/user-watch-rules/delete")
         return delete_user_watch_rule(
-            user_id=request.user_id,
+            user_id=resolved_user_id,
             search_keyword=request.search_keyword,
         )
+    except RuntimeError as exc:
+        return {
+            "ok": False,
+            "reason": f"사용자 등록 실패: {exc}",
+            "message": f"사용자 등록 실패: {exc}",
+        }
     except ValueError as exc:
         return {"ok": False, "reason": str(exc), "message": str(exc)}
     except Exception as exc:
@@ -272,10 +352,20 @@ def user_watch_rules_delete(request: UserWatchRuleDeleteRequest):
 @app.post("/user-watch-rules/request-poll-now")
 def user_watch_rules_request_poll_now(request: UserWatchRuleRequestPollNowRequest):
     try:
+        resolved_user_id = _ensure_user_registered(
+            request.user_id,
+            source="api/user-watch-rules/request-poll-now",
+        )
         return request_immediate_poll(
-            user_id=request.user_id,
+            user_id=resolved_user_id,
             search_keyword=request.search_keyword,
         )
+    except RuntimeError as exc:
+        return {
+            "ok": False,
+            "reason": f"사용자 등록 실패: {exc}",
+            "message": f"사용자 등록 실패: {exc}",
+        }
     except ValueError as exc:
         return {"ok": False, "reason": str(exc), "message": str(exc)}
     except Exception as exc:
@@ -288,7 +378,7 @@ def user_watch_rules_request_poll_now(request: UserWatchRuleRequestPollNowReques
 
 @app.get("/alerts")
 def alerts(user_id: str, limit: int = 200):
-    normalized_user_id = user_id.strip() if isinstance(user_id, str) else ""
+    normalized_user_id = _normalize_user_id(user_id)
     if not normalized_user_id:
         return {"ok": False, "reason": "invalid_user_id", "items": []}
 
@@ -296,11 +386,19 @@ def alerts(user_id: str, limit: int = 200):
         return {"ok": False, "reason": "invalid_limit", "items": []}
 
     try:
-        items = list_alert_events_for_user(normalized_user_id, limit=min(limit, 200))
+        resolved_user_id = _ensure_user_registered(normalized_user_id, source="api/alerts")
+        items = list_alert_events_for_user(resolved_user_id, limit=min(limit, 200))
         return {
             "ok": True,
-            "user_id": normalized_user_id,
+            "user_id": resolved_user_id,
             "items": items,
+        }
+    except RuntimeError as exc:
+        return {
+            "ok": False,
+            "reason": f"사용자 등록 실패: {exc}",
+            "user_id": normalized_user_id,
+            "items": [],
         }
     except ValueError as exc:
         return {"ok": False, "reason": str(exc), "items": []}
@@ -345,10 +443,25 @@ def user_watch_rules_recommended_keywords(
 @app.post("/analyze-url")
 def analyze_url(request: AnalyzeUrlRequest):
     try:
+        resolved_user_id = _ensure_user_registered(request.user_id, source="api/analyze-url")
         return analyze_url_for_user(
-            user_id=request.user_id,
+            user_id=resolved_user_id,
             url=request.url,
         )
+    except ValueError:
+        return {
+            "ok": False,
+            "status": "failed",
+            "url": request.url,
+            "reason": "invalid_user_id",
+        }
+    except RuntimeError as exc:
+        return {
+            "ok": False,
+            "status": "failed",
+            "url": request.url,
+            "reason": f"사용자 등록 실패: {exc}",
+        }
     except Exception as exc:
         return {
             "ok": False,

@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
                                 contentResolver,
                                 Settings.Secure.ANDROID_ID
                             )
-                            viewModel.registerUser(it, androidId ?: "")
+                            viewModel.registerUser(it, androidId)
                         }
                     )
                 } else {
