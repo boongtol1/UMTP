@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 
 from src.db import get_connection
@@ -12,6 +13,16 @@ CHIP_SORT_ORDER = {
     "M5": 5,
 }
 DEFAULT_SYSTEM_ALERT_DROP_RATE_PERCENT = 20.0
+logger = logging.getLogger("umtp.user_settings")
+
+
+def _mask_device_id(device_id):
+    if device_id is None:
+        return None
+    text = str(device_id)
+    if len(text) <= 8:
+        return text
+    return f"{text[:4]}...{text[-4:]}"
 
 
 def _safe_int(value):
@@ -260,6 +271,13 @@ def register_user(user_id, device_id=None):
 
     normalized_user_id = user_id.strip()
     normalized_device_id = device_id.strip() if isinstance(device_id, str) and device_id.strip() else None
+    masked_device_id = _mask_device_id(normalized_device_id)
+
+    logger.info(
+        "[users/register] start requested_user_id=%s device_id=%s",
+        normalized_user_id,
+        masked_device_id,
+    )
 
     connection = None
     cursor = None
@@ -270,6 +288,10 @@ def register_user(user_id, device_id=None):
         _ensure_users_device_id_column(cursor)
 
         if normalized_device_id is not None:
+            logger.info(
+                "[users/register] checking existing device mapping device_id=%s",
+                masked_device_id,
+            )
             cursor.execute(
                 """
                 SELECT id, user_id
@@ -281,6 +303,12 @@ def register_user(user_id, device_id=None):
             )
             existing_device_user = cursor.fetchone()
             if existing_device_user is not None:
+                logger.info(
+                    "[users/register] existing device mapping found requested_user_id=%s mapped_user_id=%s row_id=%s",
+                    normalized_user_id,
+                    existing_device_user["user_id"],
+                    existing_device_user["id"],
+                )
                 cursor.execute(
                     """
                     UPDATE users
@@ -291,12 +319,25 @@ def register_user(user_id, device_id=None):
                 )
                 connection.commit()
                 mapped_user_id = existing_device_user["user_id"]
+                logger.info(
+                    "[users/register] commit complete action=existing_device_login mapped_user_id=%s",
+                    mapped_user_id,
+                )
                 return {
                     "ok": True,
                     "user_id": mapped_user_id,
                     "message": "기존 사용자로 로그인",
+                    "action": "existing_device_login",
+                    "requested_user_id": normalized_user_id,
+                    "saved_user_id": mapped_user_id,
+                    "insert_executed": False,
+                    "commit_called": True,
                 }
 
+        logger.info(
+            "[users/register] checking existing user requested_user_id=%s",
+            normalized_user_id,
+        )
         cursor.execute(
             """
             SELECT id, user_id, device_id
@@ -309,7 +350,18 @@ def register_user(user_id, device_id=None):
         existing_user = cursor.fetchone()
         if existing_user is not None:
             existing_user_device_id = existing_user.get("device_id")
+            logger.info(
+                "[users/register] existing user found user_id=%s row_id=%s existing_device_id=%s",
+                existing_user["user_id"],
+                existing_user["id"],
+                _mask_device_id(existing_user_device_id),
+            )
             if normalized_device_id is not None and not existing_user_device_id:
+                logger.info(
+                    "[users/register] binding device to existing user user_id=%s device_id=%s",
+                    existing_user["user_id"],
+                    masked_device_id,
+                )
                 cursor.execute(
                     """
                     UPDATE users
@@ -328,13 +380,27 @@ def register_user(user_id, device_id=None):
                     (existing_user["id"],),
                 )
             connection.commit()
+            logger.info(
+                "[users/register] commit complete action=existing_user_login user_id=%s",
+                existing_user["user_id"],
+            )
             return {
                 "ok": True,
                 "user_id": existing_user["user_id"],
                 "message": "기존 사용자로 로그인",
+                "action": "existing_user_login",
+                "requested_user_id": normalized_user_id,
+                "saved_user_id": existing_user["user_id"],
+                "insert_executed": False,
+                "commit_called": True,
             }
 
         try:
+            logger.info(
+                "[users/register] INSERT executing user_id=%s device_id=%s",
+                normalized_user_id,
+                masked_device_id,
+            )
             cursor.execute(
                 """
                 INSERT INTO users (user_id, device_id)
@@ -342,10 +408,23 @@ def register_user(user_id, device_id=None):
                 """,
                 (normalized_user_id, normalized_device_id),
             )
+            insert_row_id = cursor.lastrowid
+            logger.info(
+                "[users/register] INSERT executed row_id=%s rowcount=%s",
+                insert_row_id,
+                cursor.rowcount,
+            )
         except Exception as exc:
             # 동시 등록 등으로 duplicate key가 발생해도 실패로 보지 않고 기존 사용자로 처리
             if "duplicate entry" in str(exc).lower():
+                logger.warning(
+                    "[users/register] duplicate entry during insert requested_user_id=%s device_id=%s exc=%s",
+                    normalized_user_id,
+                    masked_device_id,
+                    exc,
+                )
                 connection.rollback()
+                logger.info("[users/register] rollback called for duplicate entry")
                 if normalized_device_id is not None:
                     cursor.execute(
                         """
@@ -359,10 +438,20 @@ def register_user(user_id, device_id=None):
                     by_device_user = cursor.fetchone()
                     if by_device_user is not None:
                         mapped_user_id = by_device_user["user_id"]
+                        logger.info(
+                            "[users/register] duplicate resolved by device mapped_user_id=%s",
+                            mapped_user_id,
+                        )
                         return {
                             "ok": True,
                             "user_id": mapped_user_id,
                             "message": "기존 사용자로 로그인",
+                            "action": "duplicate_device_login",
+                            "requested_user_id": normalized_user_id,
+                            "saved_user_id": mapped_user_id,
+                            "insert_executed": True,
+                            "commit_called": False,
+                            "rollback_called": True,
                         }
                 cursor.execute(
                     """
@@ -375,18 +464,70 @@ def register_user(user_id, device_id=None):
                 )
                 by_user_id = cursor.fetchone()
                 mapped_user_id = by_user_id["user_id"] if by_user_id else normalized_user_id
+                logger.info(
+                    "[users/register] duplicate resolved by user_id mapped_user_id=%s",
+                    mapped_user_id,
+                )
                 return {
                     "ok": True,
                     "user_id": mapped_user_id,
                     "message": "기존 사용자로 로그인",
+                    "action": "duplicate_user_login",
+                    "requested_user_id": normalized_user_id,
+                    "saved_user_id": mapped_user_id,
+                    "insert_executed": True,
+                    "commit_called": False,
+                    "rollback_called": True,
                 }
             raise
+
         connection.commit()
+        logger.info("[users/register] commit called after insert user_id=%s", normalized_user_id)
+
+        cursor.execute(
+            """
+            SELECT id, user_id, device_id
+            FROM users
+            WHERE user_id = %s
+            LIMIT 1
+            """,
+            (normalized_user_id,),
+        )
+        inserted_row = cursor.fetchone()
+        logger.info(
+            "[users/register] post-insert verification user_id=%s exists=%s row=%s",
+            normalized_user_id,
+            inserted_row is not None,
+            {
+                "id": inserted_row.get("id") if inserted_row else None,
+                "user_id": inserted_row.get("user_id") if inserted_row else None,
+                "device_id": _mask_device_id(inserted_row.get("device_id")) if inserted_row else None,
+            },
+        )
         return {
             "ok": True,
             "user_id": normalized_user_id,
             "message": "사용자 등록 완료",
+            "action": "created",
+            "requested_user_id": normalized_user_id,
+            "saved_user_id": normalized_user_id,
+            "insert_executed": True,
+            "commit_called": True,
+            "saved": inserted_row is not None,
         }
+    except Exception:
+        if connection is not None and connection.is_connected():
+            try:
+                connection.rollback()
+                logger.info("[users/register] rollback called due to exception")
+            except Exception as rollback_exc:
+                logger.warning("[users/register] rollback failed: %s", rollback_exc)
+        logger.exception(
+            "[users/register] failed requested_user_id=%s device_id=%s",
+            normalized_user_id,
+            masked_device_id,
+        )
+        raise
     finally:
         if cursor is not None:
             cursor.close()

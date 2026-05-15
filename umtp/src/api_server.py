@@ -1,5 +1,6 @@
 from typing import Literal, Optional
 
+import logging
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
@@ -23,6 +24,7 @@ from src.user_settings_service import (
 
 
 app = FastAPI(title="UMTP API", version="1.0")
+logger = logging.getLogger("umtp.api")
 
 
 class AnalyzeUrlRequest(BaseModel):
@@ -127,19 +129,35 @@ def user_fair_prices(user_id: str):
 def users_register(request: UserRegisterRequest):
     user_id = request.user_id.strip() if isinstance(request.user_id, str) else ""
     device_id = request.device_id.strip() if isinstance(request.device_id, str) else ""
+    masked_device_id = f"{device_id[:4]}...{device_id[-4:]}" if len(device_id) > 8 else device_id
+
+    logger.info(
+        "[api/users/register] received user_id=%s device_id=%s",
+        user_id,
+        masked_device_id,
+    )
 
     if not user_id:
+        logger.warning("[api/users/register] invalid_user_id request body=%s", request.model_dump())
         return {"ok": False, "reason": "invalid_user_id"}
 
     try:
-        return register_user(
+        result = register_user(
             user_id=user_id,
             device_id=device_id if device_id else None,
         )
+        logger.info("[api/users/register] result=%s", result)
+        return result
     except Exception as exc:
+        logger.exception(
+            "[api/users/register] failed user_id=%s device_id=%s",
+            user_id,
+            masked_device_id,
+        )
         return {
             "ok": False,
             "reason": f"사용자 등록 실패: {exc}",
+            "message": f"사용자 등록 실패: {exc}",
             "user_id": user_id,
         }
 
