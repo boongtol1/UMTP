@@ -80,7 +80,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.3 초안: Android Notification Listener 없이도 서버에서 중고나라 Search API polling만으로 동작할 수 있습니다.
 - 1.3 초안: `sql/create_joongna_seen_products.sql`로 `seq` 기준 중복 제거 테이블을 추가합니다.
 - 1.3 초안: Search API 응답의 `url`은 이미지 URL로 저장하고, 실제 매물 URL은 `https://web.joongna.com/product/{seq}`로 생성합니다.
-- 1.3 초안: 기본 검색어(`m1~m5맥북에어`) polling에서 `joongna_seen_products` 상태 비교 후 신규/변경 매물만 기존 UMTP rule-based URL 분석 흐름으로 전달합니다.
+- 1.3 초안: 고정 기본 검색어 polling은 제거되었고, 앱에서 활성화된 사용자 설정 검색어만 대상으로 `joongna_seen_products` 상태 비교 후 신규/변경 매물만 기존 UMTP rule-based URL 분석 흐름으로 전달합니다.
 - 1.3 진행 현황: 중고나라 끌올/가격변경 감지 구조를 추가했습니다.
 - 1.4 초안: Android 앱에서 `POST /users/register`로 `user_id + device_id(Android ID)` 쌍이 모두 일치할 때만 로그인/등록됩니다.
 - 1.4 초안: Android 앱에서 모델별 `enabled(on/off)`, 공정가, 차이비율 설정을 저장할 수 있습니다.
@@ -90,7 +90,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.4 초안: 이번 패치는 Android UI를 구현하지 않습니다.
 - 1.5 진행 현황: `user_fair_prices(enabled)` 기반 polling 대상 설정 구조를 추가했습니다.
 - 1.5 역할 분리 변경: 감시 조건 테이블(`user_watch_rules`)을 분리하지 않고 `user_fair_prices`에 검색어/폴링 상태 컬럼을 함께 사용합니다.
-- 1.5 polling 규칙: `--search-word`가 있으면 최우선 사용, 없으면 due `user_fair_prices(enabled)`를 사용하며 due 대상이 없으면 `DEFAULT_SEARCH_WORDS`를 사용합니다.
+- 1.5 polling 규칙: `--search-word`가 있어도 DB due 대상(`enabled=true`, `last_poll_requested_at IS NOT NULL`) 안에 있는 검색어만 실행하며, due 대상이 없으면 polling은 스킵합니다.
 - 1.6 진행 현황: 설정 저장 시 `force_poll=true`로 즉시 polling 요청하는 구조를 추가했습니다.
 - 1.6 polling 규칙: `force_poll=true` 또는 `last_polled_at IS NULL`이면 즉시 검색하고, 검색 완료 후 `force_poll=false`와 `last_polled_at=NOW()`로 갱신합니다.
 - 1.6 CLI 규칙: `--search-word` 수동 실행은 DB `force_poll` 요청 상태를 소비하지 않습니다.
@@ -800,7 +800,7 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 
 - 중고나라 Search API polling 기반으로 `m1~m5맥북에어` 검색 결과를 조회합니다.
 - Search API `sort=RECENT_SORT` 응답의 `sortDate`를 수집합니다.
-- polling 대상 선정은 `user_fair_prices(enabled=true)`를 사용합니다.
+- polling 대상 선정은 `user_fair_prices(enabled=true AND last_poll_requested_at IS NOT NULL)`를 사용합니다.
 - `enabled=true` 대상이 없으면 polling은 검색 자체를 실행하지 않고 스킵합니다.
 - `DEFAULT_SEARCH_WORDS(m1~m5맥북에어)` + `test_user` fallback 검색은 제거되었습니다.
 - analysis identity는 `(user_id, product_id)`입니다. 같은 사용자/같은 매물 enqueue가 반복되어도 `analysis_jobs`는 1개만 유지됩니다.

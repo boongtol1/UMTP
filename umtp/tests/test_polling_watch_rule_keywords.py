@@ -92,6 +92,29 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(len(targets["맥북 m1"]), 1)
         self.assertEqual(targets["맥북 m1"][0].get("setting_ids"), [1, 2])
 
+    def test_build_keyword_targets_skips_rows_without_toggle_activation_marker(self):
+        targets = _build_keyword_targets_from_watch_rules(
+            [
+                {
+                    "id": 1,
+                    "user_id": "boongtol",
+                    "search_keyword": "m1맥북에어",
+                    "enabled": True,
+                    "last_poll_requested_at": None,
+                },
+                {
+                    "id": 2,
+                    "user_id": "boongtol",
+                    "search_keyword": "m2맥북에어",
+                    "enabled": True,
+                    "last_poll_requested_at": "2026-05-15 12:00:00",
+                },
+            ]
+        )
+
+        self.assertEqual(list(targets.keys()), ["m2맥북에어"])
+        self.assertEqual(len(targets["m2맥북에어"]), 1)
+
     def test_poll_once_enqueues_jobs_for_due_watch_rules(self):
         due_rules = [
             {

@@ -104,6 +104,11 @@ def _build_keyword_targets_from_user_fair_prices(watch_rules):
     target_by_key = {}
 
     for rule in watch_rules:
+        if rule.get("enabled") is not None and not bool(rule.get("enabled")):
+            continue
+        if "last_poll_requested_at" in rule and rule.get("last_poll_requested_at") is None:
+            continue
+
         search_keyword = normalize_search_keyword(rule.get("search_keyword"))
         user_id = _normalize_optional_user_id(rule.get("user_id"))
         if not search_keyword or not user_id:

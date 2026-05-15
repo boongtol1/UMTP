@@ -794,9 +794,11 @@ def _poll_target_row_to_dict(row):
 
 
 def get_due_user_fair_price_polling_targets(user_id=None):
+    user_scope_exists_clause = None
     filters = [
         "enabled = TRUE",
         "COALESCE(TRIM(search_keyword), '') <> ''",
+        "last_poll_requested_at IS NOT NULL",
         """
         (
             force_poll = TRUE
@@ -823,6 +825,33 @@ def get_due_user_fair_price_polling_targets(user_id=None):
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
+        has_users_user_id = _column_exists(cursor, "users", "user_id")
+        if not has_users_user_id:
+            logger.warning(
+                "[polling_targets] users.user_id column missing; skip due targets to prevent unintended polling"
+            )
+            return []
+
+        has_app_notification_enabled = _column_exists(cursor, "users", "app_notification_enabled")
+        if has_app_notification_enabled:
+            user_scope_exists_clause = (
+                "EXISTS ("
+                "SELECT 1 FROM users u "
+                "WHERE u.user_id = user_fair_prices.user_id "
+                "AND u.app_notification_enabled = TRUE"
+                ")"
+            )
+        else:
+            user_scope_exists_clause = (
+                "EXISTS ("
+                "SELECT 1 FROM users u "
+                "WHERE u.user_id = user_fair_prices.user_id"
+                ")"
+            )
+
+        filters.append(user_scope_exists_clause)
+        where_clause = " AND ".join(filters)
+
         try:
             cursor.execute(
                 f"""
@@ -852,52 +881,14 @@ def get_due_user_fair_price_polling_targets(user_id=None):
             )
             rows = cursor.fetchall() or []
         except Exception as exc:
-            if "unknown column" not in str(exc).lower():
+            lowered_exc = str(exc).lower()
+            if "unknown column" not in lowered_exc:
                 raise
-            cursor.execute(
-                """
-                SELECT
-                    id,
-                    user_id,
-                    product_type,
-                    chip,
-                    screen_inch,
-                    ram_gb,
-                    ssd_gb,
-                    enabled,
-                    fair_price_krw,
-                    alert_drop_rate_percent,
-                    created_at,
-                    updated_at
-                FROM user_fair_prices
-                WHERE enabled = TRUE
-                """
-                + (" AND user_id = %s" if normalized_user_id else "")
-                + """
-                ORDER BY id ASC
-                """,
-                ((normalized_user_id,) if normalized_user_id else ()),
+            logger.warning(
+                "[polling_targets] required polling columns missing (%s); skip polling targets",
+                lowered_exc,
             )
-            legacy_rows = cursor.fetchall() or []
             rows = []
-            for row in legacy_rows:
-                try:
-                    row["search_keyword"] = _resolve_setting_search_keyword(
-                        explicit_search_keyword=None,
-                        product_type=row.get("product_type"),
-                        chip=row.get("chip"),
-                        screen_inch=row.get("screen_inch"),
-                        ram_gb=row.get("ram_gb"),
-                        ssd_gb=row.get("ssd_gb"),
-                    )
-                except ValueError:
-                    row["search_keyword"] = None
-                row["force_poll"] = False
-                row["poll_interval_seconds"] = DEFAULT_POLL_INTERVAL_SECONDS
-                row["last_polled_at"] = None
-                row["last_poll_requested_at"] = None
-                if row["search_keyword"] is not None:
-                    rows.append(row)
         return [_poll_target_row_to_dict(row) for row in rows]
     finally:
         if cursor is not None:
