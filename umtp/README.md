@@ -134,6 +134,7 @@ DB_PASSWORD=your_db_password
 DB_NAME=UMTP_RB
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
+UMTP_ALLOW_GLOBAL_TELEGRAM_FALLBACK=false
 ```
 
 ### 3) 테이블 생성 방법
@@ -803,6 +804,9 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - analysis identity는 `(user_id, product_id)`입니다. 같은 사용자/같은 매물 enqueue가 반복되어도 `analysis_jobs`는 1개만 유지됩니다.
 - alert identity는 `(user_id, product_id)`입니다. 같은 사용자/같은 매물은 `alert_events` 1개만 생성됩니다.
 - Telegram 발송 기준은 job 완료가 아니라 `alert_events` 신규 insert 성공입니다.
+- Telegram 발송은 `user_id`별 알림 토글(enabled=true)일 때만 허용됩니다.
+- `users.telegram_chat_id`가 있으면 해당 사용자 채팅으로 발송하고, 없으면 앱 피드 상태만 갱신(`app_only`)합니다.
+- 전역 `TELEGRAM_CHAT_ID` fallback은 deprecated이며 기본 비활성(`UMTP_ALLOW_GLOBAL_TELEGRAM_FALLBACK=false`)입니다.
 - 공정가/알림 기준은 `user_fair_prices` override 우선, 없으면 `mac_fair_prices` fallback 순서입니다.
 - 두 테이블 모두 기준값이 없으면 alert를 만들지 않고 `fair_price_missing`으로 처리합니다.
 - 설정 저장 시 `enabled=true`이면 `force_poll=true`, `last_poll_requested_at=NOW()`, `last_polled_at=NULL`이 되어 즉시 due 대상이 됩니다.
@@ -869,6 +873,8 @@ python src/run_notification_worker_umtp.py --once
 - 같은 `user_id + product_id`를 여러 번 enqueue해도 `analysis_jobs`는 1개만 존재
 - 같은 `user_id + product_id`는 `alert_events` 1개만 생성
 - analysis worker 2개/notification worker 2개 동시 실행에서도 Telegram은 1회만 전송
+- `enabled=false` 사용자 alert는 Telegram을 보내지 않고 `app_only`로 남음
+- `users.telegram_chat_id`가 없는 사용자 alert는 Telegram을 보내지 않고 `app_only`로 남음
 - 공정가 조회는 `user_fair_prices` override 우선
 - override가 없으면 `mac_fair_prices` fallback 사용
 - 둘 다 없으면 `fair_price_missing`으로 alert 미생성
