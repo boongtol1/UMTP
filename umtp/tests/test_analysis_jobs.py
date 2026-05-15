@@ -10,6 +10,7 @@ if PROJECT_ROOT not in sys.path:
 
 from src.analysis_jobs import (  # noqa: E402
     create_analysis_job,
+    find_analysis_job_by_identity,
     get_pending_analysis_jobs,
     mark_analysis_job_done,
     mark_analysis_job_failed,
@@ -56,14 +57,25 @@ class _FakeConnection:
 
 
 class AnalysisJobsTest(unittest.TestCase):
+    def test_find_analysis_job_by_identity(self):
+        fake_cursor = _FakeCursor(row={"id": 7, "status": "pending"})
+        fake_connection = _FakeConnection(fake_cursor)
+
+        with patch("src.analysis_jobs.get_connection", return_value=fake_connection):
+            row = find_analysis_job_by_identity("boongtol", "1001")
+
+        self.assertEqual(row.get("id"), 7)
+        self.assertIn("WHERE user_id = %s", fake_cursor.executed[0][0])
+
     def test_create_analysis_job_dedup(self):
         with patch(
-            "src.analysis_jobs.find_recent_duplicate_job",
+            "src.analysis_jobs.find_analysis_job_by_identity",
             return_value={"id": 7, "status": "pending"},
         ):
             result = create_analysis_job(
                 product_id="1001",
                 url="https://web.joongna.com/product/1001",
+                user_id="boongtol",
                 watch_rule_id=1,
                 trigger_reason="price_changed",
             )
@@ -71,12 +83,13 @@ class AnalysisJobsTest(unittest.TestCase):
         self.assertTrue(result.get("ok"))
         self.assertFalse(result.get("created"))
         self.assertEqual(result.get("job_id"), 7)
+        self.assertEqual(result.get("reason"), "duplicate_identity_job")
 
     def test_create_analysis_job_insert(self):
         fake_cursor = _FakeCursor(lastrowid=11)
         fake_connection = _FakeConnection(fake_cursor)
 
-        with patch("src.analysis_jobs.find_recent_duplicate_job", return_value=None):
+        with patch("src.analysis_jobs.find_analysis_job_by_identity", return_value=None):
             with patch("src.analysis_jobs.get_connection", return_value=fake_connection):
                 result = create_analysis_job(
                     product_id="1002",

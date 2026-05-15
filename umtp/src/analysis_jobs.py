@@ -1,6 +1,9 @@
 from src.db import get_connection
 
 
+DUPLICATE_ENTRY_ERROR_CODE = 1062
+
+
 def _normalize_optional_text(value):
     if value is None:
         return None
@@ -59,6 +62,49 @@ def _normalize_status(status):
     return normalized.lower()
 
 
+def _is_duplicate_entry_error(exc):
+    error_code = getattr(exc, "errno", None)
+    if error_code == DUPLICATE_ENTRY_ERROR_CODE:
+        return True
+
+    message = str(exc).lower()
+    return "duplicate" in message and "entry" in message
+
+
+def find_analysis_job_by_identity(user_id, product_id):
+    normalized_user_id = _normalize_optional_text(user_id)
+    normalized_product_id = _normalize_product_id(product_id)
+
+    if normalized_user_id is None or normalized_product_id is None:
+        return None
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT
+                id,
+                status,
+                created_at
+            FROM analysis_jobs
+            WHERE user_id = %s
+              AND product_id = %s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (normalized_user_id, normalized_product_id),
+        )
+        return cursor.fetchone()
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
 def find_recent_duplicate_job(product_id, watch_rule_id, trigger_reason, within_seconds=300):
     normalized_product_id = _normalize_product_id(product_id)
     normalized_watch_rule_id = _normalize_optional_int(watch_rule_id, "watch_rule_id")
@@ -89,7 +135,7 @@ def find_recent_duplicate_job(product_id, watch_rule_id, trigger_reason, within_
                     (trigger_reason IS NULL AND %s IS NULL)
                  OR trigger_reason = %s
               )
-              AND status IN ('pending', 'processing', 'done')
+              AND status IN ('pending', 'processing', 'running', 'done')
               AND TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP) <= %s
             ORDER BY created_at DESC
             LIMIT 1
@@ -134,54 +180,80 @@ def create_analysis_job(
     normalized_watch_rule_id = _normalize_optional_int(watch_rule_id, "watch_rule_id")
     normalized_trigger_reason = _normalize_optional_text(trigger_reason)
 
-    existing = find_recent_duplicate_job(
-        normalized_product_id,
-        normalized_watch_rule_id,
-        normalized_trigger_reason,
-        within_seconds=dedupe_within_seconds,
-    )
-    if existing is not None:
+    identity_job = find_analysis_job_by_identity(normalized_user_id, normalized_product_id)
+    if identity_job is not None:
         return {
             "ok": True,
             "created": False,
-            "reason": "duplicate_recent_job",
-            "job_id": int(existing.get("id")),
-            "status": existing.get("status"),
+            "reason": "duplicate_identity_job",
+            "job_id": int(identity_job.get("id")),
+            "status": identity_job.get("status"),
         }
+
+    # user_id/product_id가 없는 구버전 입력도 안전 처리
+    if normalized_user_id is None or normalized_product_id is None:
+        existing = find_recent_duplicate_job(
+            normalized_product_id,
+            normalized_watch_rule_id,
+            normalized_trigger_reason,
+            within_seconds=dedupe_within_seconds,
+        )
+        if existing is not None:
+            return {
+                "ok": True,
+                "created": False,
+                "reason": "duplicate_recent_job",
+                "job_id": int(existing.get("id")),
+                "status": existing.get("status"),
+            }
 
     connection = None
     cursor = None
     try:
         connection = get_connection()
         cursor = connection.cursor()
-        cursor.execute(
-            """
-            INSERT INTO analysis_jobs (
-                source,
-                product_id,
-                url,
-                title,
-                price_krw,
-                search_keyword,
-                user_id,
-                watch_rule_id,
-                trigger_reason,
-                status
+        try:
+            cursor.execute(
+                """
+                INSERT INTO analysis_jobs (
+                    source,
+                    product_id,
+                    url,
+                    title,
+                    price_krw,
+                    search_keyword,
+                    user_id,
+                    watch_rule_id,
+                    trigger_reason,
+                    status
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                """,
+                (
+                    normalized_source,
+                    normalized_product_id,
+                    normalized_url,
+                    normalized_title,
+                    normalized_price_krw,
+                    normalized_search_keyword,
+                    normalized_user_id,
+                    normalized_watch_rule_id,
+                    normalized_trigger_reason,
+                ),
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
-            """,
-            (
-                normalized_source,
-                normalized_product_id,
-                normalized_url,
-                normalized_title,
-                normalized_price_krw,
-                normalized_search_keyword,
-                normalized_user_id,
-                normalized_watch_rule_id,
-                normalized_trigger_reason,
-            ),
-        )
+        except Exception as exc:
+            if _is_duplicate_entry_error(exc):
+                duplicate_job = find_analysis_job_by_identity(normalized_user_id, normalized_product_id)
+                if duplicate_job is not None:
+                    return {
+                        "ok": True,
+                        "created": False,
+                        "reason": "duplicate_identity_job",
+                        "job_id": int(duplicate_job.get("id")),
+                        "status": duplicate_job.get("status"),
+                    }
+            raise
+
         job_id = int(cursor.lastrowid)
         connection.commit()
         return {
