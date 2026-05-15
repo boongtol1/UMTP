@@ -102,8 +102,8 @@ fun MainTabScreen(viewModel: MacBookAirSettingsViewModel, userId: String) {
                     units = units,
                     userSettings = userSettings,
                     savingItemKey = savingItemKey,
-                    onUpsert = { unit, price, rate, enabled, searchKeyword ->
-                        viewModel.upsertItem(unit, price, rate, enabled, searchKeyword)
+                    onUpsert = { unit, fairPrice, desiredPrice, enabled, searchKeyword ->
+                        viewModel.upsertItem(unit, fairPrice, desiredPrice, enabled, searchKeyword)
                     }
                 )
             }

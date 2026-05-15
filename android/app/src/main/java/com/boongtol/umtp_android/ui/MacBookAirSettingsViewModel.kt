@@ -127,9 +127,12 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     fun registerUser(userId: String, deviceId: String?) {
         val trimmedUserId = userId.trim()
         val trimmedDeviceId = deviceId?.trim().orEmpty()
-        val normalizedDeviceId = trimmedDeviceId.takeIf { it.isNotEmpty() }
         if (trimmedUserId.length < 2) {
             _toastMessage.value = "User ID는 2자 이상이어야 합니다."
+            return
+        }
+        if (trimmedDeviceId.isEmpty()) {
+            _toastMessage.value = "기기 식별값(device_id)을 확인할 수 없습니다."
             return
         }
 
@@ -139,7 +142,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 val response = UmtpApiClient.apiService.registerUser(
                     UserRegisterRequest(
                         user_id = trimmedUserId,
-                        device_id = normalizedDeviceId
+                        device_id = trimmedDeviceId
                     )
                 )
                 
@@ -169,13 +172,24 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     fun upsertItem(
         unit: MacBookAirUnit,
         fairPrice: Int,
-        dropRate: Int,
+        desiredPrice: Int,
         enabled: Boolean,
         searchKeyword: String?
     ) {
         val uid = _userId.value ?: return
         val itemKey = "${unit.chip}-${unit.screen_inch}-${unit.ram_gb}-${unit.ssd_gb}"
-        
+
+        if (fairPrice <= 0 || desiredPrice <= 0) {
+            _toastMessage.value = "공정가와 희망 구매가는 1원 이상이어야 합니다."
+            return
+        }
+        if (desiredPrice > fairPrice) {
+            _toastMessage.value = "희망 구매가는 공정가 이하로 입력해주세요."
+            return
+        }
+
+        val dropRatePercent = ((fairPrice - desiredPrice).toDouble() / fairPrice.toDouble()) * 100.0
+
         viewModelScope.launch {
             _savingItemKey.value = itemKey
             try {
@@ -187,7 +201,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     ram_gb = unit.ram_gb,
                     ssd_gb = unit.ssd_gb,
                     fair_price_krw = fairPrice,
-                    alert_drop_rate_percent = dropRate.toDouble(),
+                    alert_drop_rate_percent = dropRatePercent,
                     enabled = enabled,
                     search_keyword = searchKeyword?.trim()?.ifEmpty { null },
                     poll_interval_seconds = 60

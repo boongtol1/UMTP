@@ -62,8 +62,8 @@ fun RamSsdSettingsScreen(
                         unit = unit,
                         userSetting = setting,
                         isSaving = savingItemKey == itemKey,
-                        onSave = { fairPrice, dropRate, enabled, searchKeyword ->
-                            onSave(unit, fairPrice, dropRate, enabled, searchKeyword)
+                        onSave = { fairPrice, desiredPrice, enabled, searchKeyword ->
+                            onSave(unit, fairPrice, desiredPrice, enabled, searchKeyword)
                         }
                     )
                 }

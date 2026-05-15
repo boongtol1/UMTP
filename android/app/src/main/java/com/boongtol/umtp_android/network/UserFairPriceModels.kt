@@ -4,7 +4,7 @@ import com.google.gson.annotations.SerializedName
 
 data class UserRegisterRequest(
     @SerializedName("user_id") val user_id: String,
-    @SerializedName("device_id") val device_id: String? = null,
+    @SerializedName("device_id") val device_id: String,
 )
 
 data class UserRegisterResponse(

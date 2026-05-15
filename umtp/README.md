@@ -82,7 +82,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.3 초안: Search API 응답의 `url`은 이미지 URL로 저장하고, 실제 매물 URL은 `https://web.joongna.com/product/{seq}`로 생성합니다.
 - 1.3 초안: 기본 검색어(`m1~m5맥북에어`) polling에서 `joongna_seen_products` 상태 비교 후 신규/변경 매물만 기존 UMTP rule-based URL 분석 흐름으로 전달합니다.
 - 1.3 진행 현황: 중고나라 끌올/가격변경 감지 구조를 추가했습니다.
-- 1.4 초안: Android 앱에서 `POST /users/register`로 `user_id + device_id(Android ID)`를 등록할 수 있습니다.
+- 1.4 초안: Android 앱에서 `POST /users/register`로 `user_id + device_id(Android ID)` 쌍이 모두 일치할 때만 로그인/등록됩니다.
 - 1.4 초안: Android 앱에서 모델별 `enabled(on/off)`, 공정가, 차이비율 설정을 저장할 수 있습니다.
 - 1.4 초안: 설정 저장은 맥미니 서버의 MySQL(`user_fair_prices`)에 즉시 반영됩니다.
 - 1.4 초안: Telegram 기능은 삭제하지 않고 기존 동작을 그대로 유지합니다.
@@ -100,7 +100,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.8 진행 현황: polling은 감지된 매물을 `analysis_jobs`에 enqueue하고, analysis worker가 pending job을 처리해 `listing_analysis_results` 및 `alert_events`를 생성합니다.
 - 1.8 알림 구조: notification worker가 `alert_events` pending을 읽어 Telegram 전송(`sent`) 또는 앱 피드 전용 상태(`app_only`)로 처리합니다.
 - 1.8 운영 구조: MVP에서는 polling 직후 inline analysis 처리도 가능하지만, `run_analysis_worker_umtp.py`와 `run_notification_worker_umtp.py`를 별도 프로세스로 분리할 수 있습니다.
-- 1.9 진행 현황: Android 감시 조건 화면에서 사용자는 차이비율을 직접 입력하지 않고 `내 기준 적정 가격`과 `알림 받을 가격`만 입력합니다.
+- 1.9 진행 현황: Android 설정 화면에서 사용자는 차이비율을 직접 입력하지 않고 `내 기준 적정 가격`과 `내가 사고 싶은 가격`만 입력합니다.
 - 1.9 자동 계산: 앱이 할인 정도를 읽기 전용 설명으로 표시하고, 최종 기준은 서버 응답 `alert_drop_rate_percent`를 사용합니다.
 - 1.9 검색어 UX: 검색어를 직접 입력하거나 추천 검색어를 불러와 선택할 수 있습니다.
 - 1.9 저장 동작: 저장 시 `user_fair_prices`에 반영되고 즉시 검색 요청(`force_poll`)이 걸리며, 설정 토글 자체가 감시 on/off 역할을 합니다.

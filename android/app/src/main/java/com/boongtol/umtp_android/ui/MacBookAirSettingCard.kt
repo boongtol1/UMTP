@@ -22,24 +22,26 @@ fun MacBookAirSettingCard(
     unit: MacBookAirUnit,
     userSetting: UserFairPriceItem?,
     isSaving: Boolean,
-    onSave: (fairPrice: Int, dropRate: Int, enabled: Boolean, searchKeyword: String?) -> Unit
+    onSave: (fairPrice: Int, desiredPrice: Int, enabled: Boolean, searchKeyword: String?) -> Unit
 ) {
     var fairPriceText by remember(userSetting) { 
         mutableStateOf(userSetting?.user_fair_price_krw?.toString() ?: userSetting?.system_fair_price_krw?.toString() ?: "") 
-    }
-    var dropRateText by remember(userSetting) { 
-        mutableStateOf(
-            formatDropRateForInput(
-                userSetting?.user_alert_drop_rate_percent ?: userSetting?.system_alert_drop_rate_percent
-            )
-        )
     }
     var enabled by remember(userSetting) { mutableStateOf(userSetting?.enabled ?: false) }
     var searchKeywordText by remember(userSetting) {
         mutableStateOf(userSetting?.custom_search_keyword ?: userSetting?.effective_search_keyword ?: "")
     }
+    var desiredPriceText by remember(userSetting) {
+        val fair = userSetting?.user_fair_price_krw ?: userSetting?.effective_fair_price_krw
+        val dropRate = userSetting?.user_alert_drop_rate_percent ?: userSetting?.effective_alert_drop_rate_percent
+        val initialDesiredPrice = calculateDesiredPrice(fair, dropRate)
+        mutableStateOf(initialDesiredPrice?.toString() ?: "")
+    }
 
     val numberFormat = NumberFormat.getNumberInstance(Locale.KOREA)
+    val fairPriceInput = fairPriceText.toIntOrNull()
+    val desiredPriceInput = desiredPriceText.toIntOrNull()
+    val computedDropRate = calculateDropRatePercent(fairPriceInput, desiredPriceInput)
 
     Card(
         modifier = Modifier
@@ -107,23 +109,33 @@ fun MacBookAirSettingCard(
                     singleLine = true
                 )
                 OutlinedTextField(
-                    value = dropRateText,
-                    onValueChange = { if (it.all { char -> char.isDigit() }) dropRateText = it },
-                    label = { Text("차이비율 (%)", fontSize = 12.sp) },
+                    value = desiredPriceText,
+                    onValueChange = { if (it.all { char -> char.isDigit() }) desiredPriceText = it },
+                    label = { Text("내가 사고 싶은 가격 (원)", fontSize = 12.sp) },
                     modifier = Modifier.weight(1f),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true
                 )
             }
 
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = if (computedDropRate != null) {
+                    "차이비율(자동 계산): ${formatDropRateForDisplay(computedDropRate)}"
+                } else {
+                    "차이비율(자동 계산): -"
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+
             Spacer(modifier = Modifier.height(16.dp))
 
             Button(
                 onClick = {
                     val price = fairPriceText.toIntOrNull() ?: 0
-                    val rate = dropRateText.toIntOrNull() ?: 0
-                    if (price > 0 && rate in 0..100) {
-                        onSave(price, rate, enabled, searchKeywordText.trim().ifEmpty { null })
+                    val desiredPrice = desiredPriceText.toIntOrNull() ?: 0
+                    if (price > 0 && desiredPrice > 0) {
+                        onSave(price, desiredPrice, enabled, searchKeywordText.trim().ifEmpty { null })
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -139,19 +151,26 @@ fun MacBookAirSettingCard(
     }
 }
 
-private fun formatDropRateForInput(value: Double?): String {
-    if (value == null) {
-        return ""
-    }
-    return value.roundToInt().toString()
-}
-
 private fun formatDropRateForDisplay(value: Double?): String {
     if (value == null) {
-        return "0%"
+        return "-"
     }
-    val rounded = value.roundToInt()
-    return "$rounded%"
+    return "${"%.2f".format(value)}%"
+}
+
+private fun calculateDropRatePercent(fairPrice: Int?, desiredPrice: Int?): Double? {
+    if (fairPrice == null || desiredPrice == null || fairPrice <= 0) {
+        return null
+    }
+    return ((fairPrice - desiredPrice).toDouble() / fairPrice.toDouble()) * 100.0
+}
+
+private fun calculateDesiredPrice(fairPrice: Int?, dropRate: Double?): Int? {
+    if (fairPrice == null || fairPrice <= 0 || dropRate == null) {
+        return null
+    }
+    val desired = fairPrice.toDouble() * (1.0 - (dropRate / 100.0))
+    return desired.roundToInt().coerceAtLeast(0)
 }
 
 @Composable

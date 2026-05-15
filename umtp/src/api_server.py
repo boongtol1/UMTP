@@ -55,7 +55,7 @@ class AnalyzeUrlRequest(BaseModel):
 
 class UserRegisterRequest(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=100)
-    device_id: Optional[str] = Field(default=None, max_length=200)
+    device_id: str = Field(..., min_length=1, max_length=200)
 
 
 class UserFairPriceUpsertRequest(BaseModel):
@@ -143,11 +143,14 @@ def users_register(request: UserRegisterRequest):
     if not user_id:
         logger.warning("[api/users/register] invalid_user_id request body=%s", request.model_dump())
         return {"ok": False, "reason": "invalid_user_id"}
+    if not device_id:
+        logger.warning("[api/users/register] invalid_device_id request body=%s", request.model_dump())
+        return {"ok": False, "reason": "invalid_device_id"}
 
     try:
         result = register_user(
             user_id=user_id,
-            device_id=device_id if device_id else None,
+            device_id=device_id,
         )
         logger.info("[api/users/register] result=%s", result)
         return result
