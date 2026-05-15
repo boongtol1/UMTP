@@ -31,6 +31,26 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(list(targets.keys()), ["맥북 m1"])
         self.assertEqual(len(targets["맥북 m1"]), 2)
 
+    def test_build_keyword_targets_dedupes_same_user(self):
+        targets = _build_keyword_targets_from_watch_rules(
+            [
+                {
+                    "id": 1,
+                    "user_id": "boongtol",
+                    "search_keyword": "맥북 m1",
+                },
+                {
+                    "id": 2,
+                    "user_id": "boongtol",
+                    "search_keyword": "맥북 m1",
+                },
+            ]
+        )
+
+        self.assertEqual(list(targets.keys()), ["맥북 m1"])
+        self.assertEqual(len(targets["맥북 m1"]), 1)
+        self.assertEqual(targets["맥북 m1"][0].get("setting_ids"), [1, 2])
+
     def test_poll_once_enqueues_jobs_for_due_watch_rules(self):
         due_rules = [
             {
@@ -94,7 +114,7 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(enqueue_args[2], "new_product")
         self.assertEqual(mock_mark_polled.call_count, 2)
         self.assertEqual(stats.get("analysis_jobs_created"), 2)
-        self.assertEqual(stats.get("analysis_jobs_processed"), 2)
+        self.assertEqual(stats.get("analysis_jobs_processed"), 0)
 
 
 if __name__ == "__main__":

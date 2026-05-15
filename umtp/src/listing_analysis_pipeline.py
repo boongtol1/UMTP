@@ -12,9 +12,7 @@ try:
     from src.listing_page_parser import fetch_html, parse_joongna_listing_page
     from src.risk_analyzer import analyze_risk
     from src.spec_parser import parse_listing_title
-    from src.user_fair_price import fetch_user_fair_price
-    from src.user_watch_rules import compute_alert_drop_rate_percent
-    from src.watch_rule_matcher import matches_watch_rule
+    from src.user_fair_price import resolve_fair_price_for_user
 except ModuleNotFoundError:
     from analysis_log import save_success_log
     from analysis_jobs import (
@@ -29,9 +27,7 @@ except ModuleNotFoundError:
     from listing_page_parser import fetch_html, parse_joongna_listing_page
     from risk_analyzer import analyze_risk
     from spec_parser import parse_listing_title
-    from user_fair_price import fetch_user_fair_price
-    from user_watch_rules import compute_alert_drop_rate_percent
-    from watch_rule_matcher import matches_watch_rule
+    from user_fair_price import resolve_fair_price_for_user
 
 
 DEFAULT_USER_ID = "test_user"
@@ -90,72 +86,33 @@ def enqueue_analysis_for_product(product, watch_rules, trigger_reason):
     return create_analysis_jobs_for_rules(product, watch_rules, trigger_reason)
 
 
-def _get_watch_rule_by_id(watch_rule_id):
-    normalized_watch_rule_id = _normalize_optional_int(watch_rule_id)
-    if normalized_watch_rule_id is None:
-        return None
+def _resolve_price_rules(cursor, user_id, parsed_spec):
+    parse_success = bool(parsed_spec.get("parse_success")) if isinstance(parsed_spec, dict) else False
+    if not parse_success:
+        return None, None, None, "parse_failed", None
 
-    connection = None
-    cursor = None
+    normalized_user_id = _normalize_optional_text(user_id)
+    if normalized_user_id is None:
+        return None, None, None, "user_id_missing", None
+
     try:
-        connection = get_connection()
-        cursor = connection.cursor(dictionary=True)
-        try:
-            cursor.execute(
-                """
-                SELECT
-                    id,
-                    user_id,
-                    product_type,
-                    chip,
-                    screen_inch,
-                    ram_gb,
-                    ssd_gb,
-                    search_keyword,
-                    enabled,
-                    target_price_krw,
-                    fair_price_krw,
-                    alert_drop_rate_percent
-                FROM user_watch_rules
-                WHERE id = %s
-                LIMIT 1
-                """,
-                (normalized_watch_rule_id,),
-            )
-            return cursor.fetchone()
-        except Exception:
-            # watch_rules 제거 이후에도 과거 analysis_job 처리를 위해 안전하게 None 처리
-            return None
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if connection is not None and connection.is_connected():
-            connection.close()
+        resolved_fair_price = resolve_fair_price_for_user(cursor, normalized_user_id, parsed_spec)
+    except ValueError:
+        return None, None, None, "fair_price_spec_invalid", None
 
+    if resolved_fair_price is None:
+        return None, None, None, "fair_price_missing", None
 
-def _resolve_price_rules(cursor, user_id, parsed_spec, watch_rule):
-    watch_rule = watch_rule or {}
+    fair_price_krw = _normalize_optional_int(resolved_fair_price.get("fair_price_krw"))
+    alert_drop_rate_percent = _normalize_optional_float(
+        resolved_fair_price.get("alert_drop_rate_percent")
+    )
+    price_source = _normalize_optional_text(resolved_fair_price.get("source"))
 
-    fair_price_krw = _normalize_optional_int(watch_rule.get("fair_price_krw"))
-    target_price_krw = _normalize_optional_int(watch_rule.get("target_price_krw"))
-    alert_drop_rate_percent = _normalize_optional_float(watch_rule.get("alert_drop_rate_percent"))
+    if fair_price_krw is None or fair_price_krw <= 0 or alert_drop_rate_percent is None:
+        return None, None, None, "fair_price_missing", price_source
 
-    if alert_drop_rate_percent is None:
-        alert_drop_rate_percent = compute_alert_drop_rate_percent(target_price_krw, fair_price_krw)
-
-    if fair_price_krw is None:
-        normalized_user_id = _normalize_optional_text(user_id)
-        parse_success = bool(parsed_spec.get("parse_success")) if isinstance(parsed_spec, dict) else False
-        if normalized_user_id and parse_success:
-            user_fair_price = fetch_user_fair_price(cursor, normalized_user_id, parsed_spec)
-            if user_fair_price is not None:
-                fair_price_krw = _normalize_optional_int(user_fair_price.get("fair_price_krw"))
-                if alert_drop_rate_percent is None:
-                    alert_drop_rate_percent = _normalize_optional_float(
-                        user_fair_price.get("alert_drop_rate_percent")
-                    )
-
-    return fair_price_krw, target_price_krw, alert_drop_rate_percent
+    return fair_price_krw, None, alert_drop_rate_percent, None, price_source
 
 
 def _build_alert_message(title, listing_price_krw, fair_price_krw, drop_rate_percent, url):
@@ -466,11 +423,7 @@ def analyze_product_for_watch_rule(job):
     parsed_spec = parse_listing_title(parsing_source_text, self_check_fields=self_check_fields)
     risk_result = analyze_risk(parsing_source_text, self_check_fields=self_check_fields)
 
-    watch_rule = _get_watch_rule_by_id(watch_rule_id) if watch_rule_id is not None else None
-
-    matched_watch_rule = True
-    if watch_rule is not None:
-        matched_watch_rule = bool(parsed_spec.get("parse_success")) and matches_watch_rule(parsed_spec, watch_rule)
+    matched_watch_rule = bool(parsed_spec.get("parse_success"))
 
     connection = None
     cursor = None
@@ -478,33 +431,31 @@ def analyze_product_for_watch_rule(job):
         connection = get_connection()
         cursor = connection.cursor()
 
-        fair_price_krw, target_price_krw, alert_drop_rate_percent = _resolve_price_rules(
+        fair_price_krw, target_price_krw, alert_drop_rate_percent, price_error_reason, fair_price_source = _resolve_price_rules(
             cursor,
             user_id,
             parsed_spec,
-            watch_rule,
         )
 
         drop_rate_percent = None
         if fair_price_krw is not None and fair_price_krw > 0 and listing_price_krw is not None:
             drop_rate_percent = ((fair_price_krw - listing_price_krw) / fair_price_krw) * 100
 
-        price_condition_met = True
-        if target_price_krw is not None and listing_price_krw is not None:
-            price_condition_met = listing_price_krw <= target_price_krw
-
-        drop_condition_met = True
-        if alert_drop_rate_percent is not None and drop_rate_percent is not None:
-            drop_condition_met = drop_rate_percent >= alert_drop_rate_percent
-        elif alert_drop_rate_percent is not None and drop_rate_percent is None:
-            drop_condition_met = False
-
         is_alert_target = False
-        if matched_watch_rule:
-            has_price_reference = fair_price_krw is not None and fair_price_krw > 0
-            if has_price_reference and listing_price_krw is not None and price_condition_met and drop_condition_met:
-                if target_price_krw is not None or alert_drop_rate_percent is not None:
-                    is_alert_target = True
+        alert_skip_reason = price_error_reason
+        if (
+            matched_watch_rule
+            and fair_price_krw is not None
+            and fair_price_krw > 0
+            and alert_drop_rate_percent is not None
+            and listing_price_krw is not None
+            and drop_rate_percent is not None
+        ):
+            is_alert_target = drop_rate_percent >= alert_drop_rate_percent
+            if not is_alert_target:
+                alert_skip_reason = "drop_rate_below_threshold"
+        elif alert_skip_reason is None:
+            alert_skip_reason = "price_condition_missing"
 
         alert_create_result = {
             "created": False,
@@ -580,6 +531,8 @@ def analyze_product_for_watch_rule(job):
             "is_alert_target": is_alert_target,
             "alert_created": bool(alert_create_result.get("created")),
             "alert_event_id": alert_create_result.get("alert_id"),
+            "alert_skip_reason": alert_skip_reason,
+            "fair_price_source": fair_price_source,
         }
     except Exception:
         if connection is not None:

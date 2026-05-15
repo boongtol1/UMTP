@@ -300,16 +300,23 @@ def create_analysis_jobs_for_rules(product, watch_rules, trigger_reason):
             "skipped_jobs": skipped_jobs,
         }
 
+    unique_user_ids = []
+    seen_user_ids = set()
     for watch_rule in normalized_watch_rules:
         user_id = None
-        rule_id = None
         if isinstance(watch_rule, dict):
             user_id = watch_rule.get("user_id")
-            if watch_rule.get("watch_rule") and isinstance(watch_rule.get("watch_rule"), dict):
-                nested_rule = watch_rule.get("watch_rule")
+            nested_rule = watch_rule.get("watch_rule")
+            if isinstance(nested_rule, dict):
                 user_id = nested_rule.get("user_id") or user_id
-                rule_id = nested_rule.get("id")
-            rule_id = rule_id or watch_rule.get("id") or watch_rule.get("rule_id")
+
+        normalized_user_id = _normalize_optional_text(user_id)
+        if normalized_user_id is None or normalized_user_id in seen_user_ids:
+            continue
+        seen_user_ids.add(normalized_user_id)
+        unique_user_ids.append(normalized_user_id)
+
+    for user_id in unique_user_ids:
 
         result = create_analysis_job(
             source="joongna",
@@ -319,7 +326,7 @@ def create_analysis_jobs_for_rules(product, watch_rules, trigger_reason):
             price_krw=product.get("price"),
             search_keyword=product.get("search_keyword") or product.get("search_word"),
             user_id=user_id,
-            watch_rule_id=rule_id,
+            watch_rule_id=None,
             trigger_reason=trigger_reason,
         )
         if result.get("created"):

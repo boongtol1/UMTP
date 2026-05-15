@@ -112,9 +112,9 @@ def _build_single_user_keyword_targets(search_words, user_id):
     return targets
 
 
-def _build_keyword_targets_from_watch_rules(watch_rules):
+def _build_keyword_targets_from_user_fair_prices(watch_rules):
     keyword_targets = {}
-    unique_target_keys = set()
+    target_by_key = {}
 
     for rule in watch_rules:
         search_keyword = normalize_search_keyword(rule.get("search_keyword"))
@@ -122,22 +122,28 @@ def _build_keyword_targets_from_watch_rules(watch_rules):
         if not search_keyword or not user_id:
             continue
 
-        rule_id = rule.get("id")
-        target_key = (search_keyword.lower(), user_id, rule_id)
-        if target_key in unique_target_keys:
-            continue
-        unique_target_keys.add(target_key)
-
-        keyword_targets.setdefault(search_keyword, []).append(
-            {
+        setting_id = rule.get("id")
+        target_key = (search_keyword.lower(), user_id)
+        existing_target = target_by_key.get(target_key)
+        if existing_target is None:
+            existing_target = {
                 "user_id": user_id,
-                "rule_id": rule_id,
-                "setting_id": rule_id,
-                "watch_rule": rule,
+                "rule_id": None,
+                "setting_ids": [],
+                "watch_rule": None,
             }
-        )
+            target_by_key[target_key] = existing_target
+            keyword_targets.setdefault(search_keyword, []).append(existing_target)
+
+        if setting_id is not None and setting_id not in existing_target["setting_ids"]:
+            existing_target["setting_ids"].append(setting_id)
 
     return keyword_targets
+
+
+def _build_keyword_targets_from_watch_rules(watch_rules):
+    # Deprecated: watch_rule fanout은 사용하지 않고 user_fair_prices 기반 사용자 타겟만 유지
+    return _build_keyword_targets_from_user_fair_prices(watch_rules)
 
 
 def _resolve_poll_targets(search_words, user_id):
@@ -154,7 +160,7 @@ def _resolve_poll_targets(search_words, user_id):
         words = DEFAULT_SEARCH_WORDS
         return words, _build_single_user_keyword_targets(words, normalized_user_id), [], "fallback"
 
-    keyword_targets = _build_keyword_targets_from_watch_rules(due_rules)
+    keyword_targets = _build_keyword_targets_from_user_fair_prices(due_rules)
     if keyword_targets:
         words = list(keyword_targets.keys())
         return words, keyword_targets, due_rules, "settings"
@@ -163,7 +169,7 @@ def _resolve_poll_targets(search_words, user_id):
     return words, _build_single_user_keyword_targets(words, normalized_user_id), [], "fallback"
 
 
-def poll_once(user_id=None, search_words=None, *, inline_process=True, inline_process_limit=50):
+def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_process_limit=50):
     words, keyword_targets, due_rules, target_source = _resolve_poll_targets(search_words, user_id)
     stats = _build_poll_stats(words)
     stats["settings_due"] = len(due_rules)
@@ -196,17 +202,22 @@ def poll_once(user_id=None, search_words=None, *, inline_process=True, inline_pr
 
         marked_rule_ids = set()
         for target in targets:
-            rule_id = target.get("setting_id") or target.get("rule_id")
-            if rule_id is None or rule_id in marked_rule_ids:
-                continue
-            marked_rule_ids.add(rule_id)
+            setting_ids = target.get("setting_ids")
+            if not setting_ids:
+                fallback_setting_id = target.get("setting_id") or target.get("rule_id")
+                setting_ids = [fallback_setting_id] if fallback_setting_id is not None else []
 
-            try:
-                mark_watch_rule_polled(rule_id)
-                stats["settings_marked"] += 1
-            except Exception as exc:
-                stats["db_errors"] += 1
-                print(f"[polling] setting polled_at 갱신 실패 (setting_id={rule_id}): {exc}")
+            for setting_id in setting_ids:
+                if setting_id is None or setting_id in marked_rule_ids:
+                    continue
+                marked_rule_ids.add(setting_id)
+
+                try:
+                    mark_watch_rule_polled(setting_id)
+                    stats["settings_marked"] += 1
+                except Exception as exc:
+                    stats["db_errors"] += 1
+                    print(f"[polling] setting polled_at 갱신 실패 (setting_id={setting_id}): {exc}")
 
     try:
         try:

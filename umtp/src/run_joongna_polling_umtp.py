@@ -81,6 +81,7 @@ def main():
             stats = poll_once(
                 user_id=args.user_id,
                 search_words=args.search_words,
+                inline_process=False,
             )
             _print_summary(stats)
 

@@ -46,76 +46,35 @@ class _FakeConnection:
 
 
 class ListingAnalysisPipelineTest(unittest.TestCase):
-    def test_unmatched_watch_rule_does_not_create_alert(self):
-        fake_cursor = _FakeCursor()
-        fake_connection = _FakeConnection(fake_cursor)
+    def _build_job(self):
+        return {
+            "id": 1,
+            "product_id": "1001",
+            "url": "https://web.joongna.com/product/1001",
+            "user_id": "boongtol",
+            "watch_rule_id": 1,
+            "trigger_reason": "price_changed",
+            "search_keyword": "맥북",
+        }
 
-        with patch("src.listing_analysis_pipeline.fetch_html", return_value="<html></html>"):
-            with patch(
-                "src.listing_analysis_pipeline.parse_joongna_listing_page",
-                return_value={
-                    "title": "맥북에어 M2 16GB 512GB",
-                    "description": "테스트",
-                    "listing_price_krw": 600000,
-                    "self_check_fields": {},
-                },
-            ):
-                with patch(
-                    "src.listing_analysis_pipeline.parse_listing_title",
-                    return_value={
-                        "parse_success": True,
-                        "product_type": "MacBook Air",
-                        "chip": "M2",
-                        "screen_inch": 13,
-                        "ram_gb": 16,
-                        "ssd_gb": 512,
-                        "confidence_score": 100,
-                        "screen_inch_defaulted": False,
-                        "unit_valid": True,
-                        "unit_validation_reason": None,
-                    },
-                ):
-                    with patch(
-                        "src.listing_analysis_pipeline._get_watch_rule_by_id",
-                        return_value={
-                            "id": 1,
-                            "user_id": "boongtol",
-                            "product_type": "MacBook Air",
-                            "chip": "M1",
-                            "screen_inch": 13,
-                            "ram_gb": 8,
-                            "ssd_gb": 256,
-                            "fair_price_krw": 800000,
-                            "target_price_krw": 650000,
-                            "alert_drop_rate_percent": 18.75,
-                        },
-                    ):
-                        with patch("src.listing_analysis_pipeline.get_connection", return_value=fake_connection):
-                            with patch(
-                                "src.listing_analysis_pipeline.save_listing_analysis_result",
-                                return_value={"analysis_result_id": 1, "diff_ratio": 25.0},
-                            ):
-                                with patch(
-                                    "src.listing_analysis_pipeline.maybe_create_alert_event"
-                                ) as mock_create_alert:
-                                    result = analyze_product_for_watch_rule(
-                                        {
-                                            "id": 1,
-                                            "product_id": "1001",
-                                            "url": "https://web.joongna.com/product/1001",
-                                            "user_id": "boongtol",
-                                            "watch_rule_id": 1,
-                                            "trigger_reason": "price_changed",
-                                            "search_keyword": "맥북",
-                                        }
-                                    )
+    def _mock_parsing(self):
+        return patch(
+            "src.listing_analysis_pipeline.parse_listing_title",
+            return_value={
+                "parse_success": True,
+                "product_type": "MacBook Air",
+                "chip": "M1",
+                "screen_inch": 13,
+                "ram_gb": 8,
+                "ssd_gb": 256,
+                "confidence_score": 100,
+                "screen_inch_defaulted": False,
+                "unit_valid": True,
+                "unit_validation_reason": None,
+            },
+        )
 
-        self.assertTrue(result.get("ok"))
-        self.assertFalse(result.get("matched_watch_rule"))
-        self.assertFalse(result.get("alert_created"))
-        self.assertEqual(mock_create_alert.call_count, 0)
-
-    def test_matched_watch_rule_and_price_condition_creates_alert(self):
+    def test_fair_price_missing_does_not_create_alert(self):
         fake_cursor = _FakeCursor()
         fake_connection = _FakeConnection(fake_cursor)
 
@@ -129,34 +88,49 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
                     "self_check_fields": {},
                 },
             ):
-                with patch(
-                    "src.listing_analysis_pipeline.parse_listing_title",
-                    return_value={
-                        "parse_success": True,
-                        "product_type": "MacBook Air",
-                        "chip": "M1",
-                        "screen_inch": 13,
-                        "ram_gb": 8,
-                        "ssd_gb": 256,
-                        "confidence_score": 100,
-                        "screen_inch_defaulted": False,
-                        "unit_valid": True,
-                        "unit_validation_reason": None,
-                    },
-                ):
+                with self._mock_parsing():
                     with patch(
-                        "src.listing_analysis_pipeline._get_watch_rule_by_id",
+                        "src.listing_analysis_pipeline.resolve_fair_price_for_user",
+                        return_value=None,
+                    ):
+                        with patch("src.listing_analysis_pipeline.get_connection", return_value=fake_connection):
+                            with patch(
+                                "src.listing_analysis_pipeline.save_listing_analysis_result",
+                                return_value={"analysis_result_id": 1, "diff_ratio": 0.0},
+                            ):
+                                with patch("src.listing_analysis_pipeline.save_success_log"):
+                                    with patch(
+                                        "src.listing_analysis_pipeline.maybe_create_alert_event"
+                                    ) as mock_create_alert:
+                                        result = analyze_product_for_watch_rule(self._build_job())
+
+        self.assertTrue(result.get("ok"))
+        self.assertFalse(result.get("is_alert_target"))
+        self.assertFalse(result.get("alert_created"))
+        self.assertEqual(result.get("alert_skip_reason"), "fair_price_missing")
+        self.assertEqual(mock_create_alert.call_count, 0)
+
+    def test_user_override_price_can_create_alert(self):
+        fake_cursor = _FakeCursor()
+        fake_connection = _FakeConnection(fake_cursor)
+
+        with patch("src.listing_analysis_pipeline.fetch_html", return_value="<html></html>"):
+            with patch(
+                "src.listing_analysis_pipeline.parse_joongna_listing_page",
+                return_value={
+                    "title": "맥북에어 M1 8GB 256GB",
+                    "description": "테스트",
+                    "listing_price_krw": 600000,
+                    "self_check_fields": {},
+                },
+            ):
+                with self._mock_parsing():
+                    with patch(
+                        "src.listing_analysis_pipeline.resolve_fair_price_for_user",
                         return_value={
-                            "id": 1,
-                            "user_id": "boongtol",
-                            "product_type": "MacBook Air",
-                            "chip": "M1",
-                            "screen_inch": 13,
-                            "ram_gb": 8,
-                            "ssd_gb": 256,
                             "fair_price_krw": 800000,
-                            "target_price_krw": 650000,
-                            "alert_drop_rate_percent": 18.75,
+                            "alert_drop_rate_percent": 20.0,
+                            "source": "user_fair_prices",
                         },
                     ):
                         with patch("src.listing_analysis_pipeline.get_connection", return_value=fake_connection):
@@ -164,28 +138,59 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
                                 "src.listing_analysis_pipeline.save_listing_analysis_result",
                                 return_value={"analysis_result_id": 2, "diff_ratio": 25.0},
                             ):
-                                with patch(
-                                    "src.listing_analysis_pipeline.maybe_create_alert_event",
-                                    return_value={"created": True, "alert_id": 9},
-                                ) as mock_create_alert:
-                                    result = analyze_product_for_watch_rule(
-                                        {
-                                            "id": 2,
-                                            "product_id": "1002",
-                                            "url": "https://web.joongna.com/product/1002",
-                                            "user_id": "boongtol",
-                                            "watch_rule_id": 1,
-                                            "trigger_reason": "price_changed",
-                                            "search_keyword": "맥북",
-                                        }
-                                    )
+                                with patch("src.listing_analysis_pipeline.save_success_log"):
+                                    with patch(
+                                        "src.listing_analysis_pipeline.maybe_create_alert_event",
+                                        return_value={"created": True, "alert_id": 9},
+                                    ) as mock_create_alert:
+                                        result = analyze_product_for_watch_rule(self._build_job())
 
         self.assertTrue(result.get("ok"))
-        self.assertTrue(result.get("matched_watch_rule"))
         self.assertTrue(result.get("is_alert_target"))
         self.assertTrue(result.get("alert_created"))
         self.assertEqual(result.get("alert_event_id"), 9)
+        self.assertEqual(result.get("fair_price_source"), "user_fair_prices")
         self.assertEqual(mock_create_alert.call_count, 1)
+
+    def test_system_fallback_price_source_is_mac_fair_prices(self):
+        fake_cursor = _FakeCursor()
+        fake_connection = _FakeConnection(fake_cursor)
+
+        with patch("src.listing_analysis_pipeline.fetch_html", return_value="<html></html>"):
+            with patch(
+                "src.listing_analysis_pipeline.parse_joongna_listing_page",
+                return_value={
+                    "title": "맥북에어 M1 8GB 256GB",
+                    "description": "테스트",
+                    "listing_price_krw": 700000,
+                    "self_check_fields": {},
+                },
+            ):
+                with self._mock_parsing():
+                    with patch(
+                        "src.listing_analysis_pipeline.resolve_fair_price_for_user",
+                        return_value={
+                            "fair_price_krw": 800000,
+                            "alert_drop_rate_percent": 20.0,
+                            "source": "mac_fair_prices",
+                        },
+                    ):
+                        with patch("src.listing_analysis_pipeline.get_connection", return_value=fake_connection):
+                            with patch(
+                                "src.listing_analysis_pipeline.save_listing_analysis_result",
+                                return_value={"analysis_result_id": 2, "diff_ratio": 12.5},
+                            ):
+                                with patch("src.listing_analysis_pipeline.save_success_log"):
+                                    with patch(
+                                        "src.listing_analysis_pipeline.maybe_create_alert_event"
+                                    ) as mock_create_alert:
+                                        result = analyze_product_for_watch_rule(self._build_job())
+
+        self.assertTrue(result.get("ok"))
+        self.assertFalse(result.get("is_alert_target"))
+        self.assertEqual(result.get("fair_price_source"), "mac_fair_prices")
+        self.assertEqual(result.get("alert_skip_reason"), "drop_rate_below_threshold")
+        self.assertEqual(mock_create_alert.call_count, 0)
 
 
 if __name__ == "__main__":
