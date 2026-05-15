@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timezone
 
 
 UNKNOWN_COLUMN_ERRNO = 1054
@@ -54,6 +55,45 @@ def _coerce_text(value):
     return cleaned or None
 
 
+def _coerce_sort_date_datetime(value):
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = _coerce_text(value)
+        if text is None:
+            return None
+
+        normalized_text = text.replace("Z", "+00:00")
+        parsed = None
+        try:
+            parsed = datetime.fromisoformat(normalized_text)
+        except ValueError:
+            pass
+
+        if parsed is None:
+            for date_format in (
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d %H:%M",
+                "%Y/%m/%d %H:%M:%S",
+            ):
+                try:
+                    parsed = datetime.strptime(text, date_format)
+                    break
+                except ValueError:
+                    continue
+
+        if parsed is None:
+            return None
+
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return parsed.replace(microsecond=0)
+
+
 def _is_unknown_column_error(exc):
     if getattr(exc, "errno", None) == UNKNOWN_COLUMN_ERRNO:
         return True
@@ -76,6 +116,10 @@ def get_seen_product(cursor, product_id):
                 last_title,
                 last_price_krw,
                 last_refresh_key,
+                last_sort_date,
+                previous_sort_date,
+                sort_date_changed_count,
+                last_sort_date_changed_at,
                 last_change_reason,
                 last_seen_at,
                 last_analyzed_at,
@@ -98,10 +142,14 @@ def get_seen_product(cursor, product_id):
             "last_title": _coerce_text(row[4]),
             "last_price_krw": _coerce_price(row[5]),
             "last_refresh_key": _coerce_text(row[6]),
-            "last_change_reason": _coerce_text(row[7]),
-            "last_seen_at": row[8],
-            "last_analyzed_at": row[9],
-            "seen_count": row[10],
+            "last_sort_date": _coerce_sort_date_datetime(row[7]),
+            "previous_sort_date": _coerce_sort_date_datetime(row[8]),
+            "sort_date_changed_count": int(row[9]) if row[9] is not None else 0,
+            "last_sort_date_changed_at": row[10],
+            "last_change_reason": _coerce_text(row[11]),
+            "last_seen_at": row[12],
+            "last_analyzed_at": row[13],
+            "seen_count": row[14],
         }
     except Exception as exc:
         if not _is_unknown_column_error(exc):
@@ -133,6 +181,10 @@ def get_seen_product(cursor, product_id):
         "last_title": _coerce_text(legacy_row[2]),
         "last_price_krw": _coerce_price(legacy_row[3]),
         "last_refresh_key": None,
+        "last_sort_date": None,
+        "previous_sort_date": None,
+        "sort_date_changed_count": 0,
+        "last_sort_date_changed_at": None,
         "last_change_reason": None,
         "last_seen_at": legacy_row[4],
         "last_analyzed_at": None,
@@ -144,22 +196,27 @@ def should_analyze_seen_product(existing, current):
     if not existing:
         return True, "new_product"
 
-    existing_price = _coerce_price(existing.get("last_price_krw"))
-    if existing_price is None:
-        existing_price = _coerce_price(existing.get("price"))
-    current_price = _coerce_price(current.get("price"))
-    if existing_price != current_price:
-        return True, "price_changed"
+    current_sort_date = _coerce_sort_date_datetime(current.get("sort_date"))
+    existing_sort_date = _coerce_sort_date_datetime(existing.get("last_sort_date"))
+    if current_sort_date is not None and existing_sort_date is not None and current_sort_date != existing_sort_date:
+        return True, "sort_date_changed"
+
+    current_refresh_key = _coerce_text(current.get("refresh_key"))
+    existing_refresh_key = _coerce_text(existing.get("last_refresh_key"))
+    if current_refresh_key and current_refresh_key != existing_refresh_key:
+        return True, "refresh_key_changed"
 
     existing_title = _coerce_text(existing.get("last_title")) or _coerce_text(existing.get("title"))
     current_title = _coerce_text(current.get("title"))
     if existing_title != current_title:
         return True, "title_changed"
 
-    current_refresh_key = _coerce_text(current.get("refresh_key"))
-    existing_refresh_key = _coerce_text(existing.get("last_refresh_key"))
-    if current_refresh_key and current_refresh_key != existing_refresh_key:
-        return True, "refresh_key_changed"
+    existing_price = _coerce_price(existing.get("last_price_krw"))
+    if existing_price is None:
+        existing_price = _coerce_price(existing.get("price"))
+    current_price = _coerce_price(current.get("price"))
+    if existing_price != current_price:
+        return True, "price_changed"
 
     return False, "unchanged"
 
@@ -182,6 +239,7 @@ def upsert_seen_product_observation(
     product_url = _coerce_text(product.get("product_url")) or ""
     image_url = _coerce_text(product.get("image_url"))
     sort_date = _coerce_text(product.get("sort_date"))
+    sort_date_datetime = _coerce_sort_date_datetime(sort_date)
     normalized_status = _coerce_text(status)
     normalized_reason = _coerce_text(change_reason)
 
@@ -203,9 +261,17 @@ def upsert_seen_product_observation(
                 last_price_krw,
                 last_status,
                 last_refresh_key,
+                last_sort_date,
+                previous_sort_date,
+                sort_date_changed_count,
+                last_sort_date_changed_at,
                 last_change_reason
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, %s, %s, %s, %s, %s)
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s,
+                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1,
+                %s, %s, %s, %s, %s, NULL, 0, NULL, %s
+            )
             ON DUPLICATE KEY UPDATE
                 search_word = VALUES(search_word),
                 title = VALUES(title),
@@ -219,6 +285,32 @@ def upsert_seen_product_observation(
                 last_price_krw = VALUES(last_price_krw),
                 last_status = VALUES(last_status),
                 last_refresh_key = VALUES(last_refresh_key),
+                last_sort_date = CASE
+                    WHEN VALUES(last_sort_date) IS NOT NULL
+                         AND COALESCE(VALUES(last_change_reason), '') = 'sort_date_changed'
+                        THEN VALUES(last_sort_date)
+                    WHEN last_sort_date IS NULL AND VALUES(last_sort_date) IS NOT NULL
+                        THEN VALUES(last_sort_date)
+                    ELSE last_sort_date
+                END,
+                previous_sort_date = CASE
+                    WHEN VALUES(last_sort_date) IS NOT NULL
+                         AND COALESCE(VALUES(last_change_reason), '') = 'sort_date_changed'
+                        THEN last_sort_date
+                    ELSE previous_sort_date
+                END,
+                sort_date_changed_count = CASE
+                    WHEN VALUES(last_sort_date) IS NOT NULL
+                         AND COALESCE(VALUES(last_change_reason), '') = 'sort_date_changed'
+                        THEN COALESCE(sort_date_changed_count, 0) + 1
+                    ELSE COALESCE(sort_date_changed_count, 0)
+                END,
+                last_sort_date_changed_at = CASE
+                    WHEN VALUES(last_sort_date) IS NOT NULL
+                         AND COALESCE(VALUES(last_change_reason), '') = 'sort_date_changed'
+                        THEN CURRENT_TIMESTAMP
+                    ELSE last_sort_date_changed_at
+                END,
                 last_change_reason = VALUES(last_change_reason)
             """,
             (
@@ -233,6 +325,7 @@ def upsert_seen_product_observation(
                 price_krw,
                 normalized_status,
                 refresh_key,
+                sort_date_datetime,
                 normalized_reason,
             ),
         )
