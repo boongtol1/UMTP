@@ -104,7 +104,7 @@ def get_pending_alert_events(limit=20):
             SELECT
                 id,
                 user_id,
-                watch_rule_id,
+                NULL AS watch_rule_id,
                 analysis_job_id,
                 product_id,
                 url,
@@ -362,7 +362,7 @@ def list_alert_events_for_user(user_id, limit=200):
             SELECT
                 id,
                 user_id,
-                watch_rule_id,
+                NULL AS watch_rule_id,
                 analysis_job_id,
                 product_id,
                 url,

@@ -165,7 +165,7 @@ def maybe_create_alert_event(
     *,
     analysis_job_id,
     user_id,
-    watch_rule_id,
+    watch_rule_id=None,
     product_id,
     url,
     title,
@@ -196,7 +196,6 @@ def maybe_create_alert_event(
             """
             INSERT INTO alert_events (
                 user_id,
-                watch_rule_id,
                 analysis_job_id,
                 product_id,
                 url,
@@ -210,11 +209,10 @@ def maybe_create_alert_event(
                 status,
                 send_attempts
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 0)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 0)
             """,
             (
                 normalized_user_id,
-                _normalize_optional_int(watch_rule_id),
                 _normalize_optional_int(analysis_job_id),
                 normalized_product_id,
                 _normalize_optional_text(url),
@@ -252,7 +250,7 @@ def save_listing_analysis_result(
     cursor,
     *,
     analysis_job_id,
-    watch_rule_id,
+    watch_rule_id=None,
     trigger_reason,
     search_keyword,
     title,
@@ -260,7 +258,7 @@ def save_listing_analysis_result(
     listing_price_krw,
     fair_price_krw,
     is_alert_target,
-    matched_watch_rule,
+    matched_watch_rule=None,
     alert_created,
 ):
     parsed_spec = parsed_spec or {}
@@ -284,7 +282,6 @@ def save_listing_analysis_result(
             """
             INSERT INTO listing_analysis_results (
                 analysis_job_id,
-                watch_rule_id,
                 trigger_reason,
                 search_keyword,
                 title,
@@ -298,14 +295,12 @@ def save_listing_analysis_result(
                 diff_amount_krw,
                 diff_ratio,
                 is_alert_target,
-                matched_watch_rule,
                 alert_created
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 _normalize_optional_int(analysis_job_id),
-                _normalize_optional_int(watch_rule_id),
                 _normalize_optional_text(trigger_reason),
                 _normalize_optional_text(search_keyword),
                 normalized_title,
@@ -319,7 +314,6 @@ def save_listing_analysis_result(
                 diff_amount_krw,
                 round(diff_ratio, 2),
                 bool(is_alert_target),
-                bool(matched_watch_rule),
                 bool(alert_created),
             ),
         )
@@ -402,7 +396,6 @@ def analyze_product_for_watch_rule(job):
 
     job_id = _normalize_optional_int(job.get("id"))
     user_id = _normalize_optional_text(job.get("user_id"))
-    watch_rule_id = _normalize_optional_int(job.get("watch_rule_id"))
     trigger_reason = _normalize_optional_text(job.get("trigger_reason"))
     product_id = _normalize_optional_text(job.get("product_id"))
     url = _normalize_optional_text(job.get("url"))
@@ -468,7 +461,6 @@ def analyze_product_for_watch_rule(job):
                 cursor,
                 analysis_job_id=job_id,
                 user_id=user_id,
-                watch_rule_id=watch_rule_id,
                 product_id=product_id,
                 url=url,
                 title=title,
@@ -489,7 +481,6 @@ def analyze_product_for_watch_rule(job):
         result_save = save_listing_analysis_result(
             cursor,
             analysis_job_id=job_id,
-            watch_rule_id=watch_rule_id,
             trigger_reason=trigger_reason,
             search_keyword=search_keyword,
             title=title,
@@ -520,7 +511,7 @@ def analyze_product_for_watch_rule(job):
         return {
             "ok": True,
             "analysis_job_id": job_id,
-            "watch_rule_id": watch_rule_id,
+            "watch_rule_id": None,
             "product_id": product_id,
             "url": url,
             "title": title,

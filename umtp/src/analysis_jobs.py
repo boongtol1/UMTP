@@ -107,7 +107,6 @@ def find_analysis_job_by_identity(user_id, product_id):
 
 def find_recent_duplicate_job(product_id, watch_rule_id, trigger_reason, within_seconds=300):
     normalized_product_id = _normalize_product_id(product_id)
-    normalized_watch_rule_id = _normalize_optional_int(watch_rule_id, "watch_rule_id")
     normalized_trigger_reason = _normalize_optional_text(trigger_reason)
     normalized_within_seconds = _normalize_within_seconds(within_seconds)
 
@@ -128,10 +127,6 @@ def find_recent_duplicate_job(product_id, watch_rule_id, trigger_reason, within_
             FROM analysis_jobs
             WHERE product_id = %s
               AND (
-                    (watch_rule_id IS NULL AND %s IS NULL)
-                 OR watch_rule_id = %s
-              )
-              AND (
                     (trigger_reason IS NULL AND %s IS NULL)
                  OR trigger_reason = %s
               )
@@ -142,8 +137,6 @@ def find_recent_duplicate_job(product_id, watch_rule_id, trigger_reason, within_
             """,
             (
                 normalized_product_id,
-                normalized_watch_rule_id,
-                normalized_watch_rule_id,
                 normalized_trigger_reason,
                 normalized_trigger_reason,
                 normalized_within_seconds,
@@ -177,7 +170,7 @@ def create_analysis_job(
     normalized_price_krw = _normalize_optional_int(price_krw, "price_krw")
     normalized_search_keyword = _normalize_optional_text(search_keyword)
     normalized_user_id = _normalize_optional_text(user_id)
-    normalized_watch_rule_id = _normalize_optional_int(watch_rule_id, "watch_rule_id")
+    _normalize_optional_int(watch_rule_id, "watch_rule_id")
     normalized_trigger_reason = _normalize_optional_text(trigger_reason)
 
     identity_job = find_analysis_job_by_identity(normalized_user_id, normalized_product_id)
@@ -194,7 +187,7 @@ def create_analysis_job(
     if normalized_user_id is None or normalized_product_id is None:
         existing = find_recent_duplicate_job(
             normalized_product_id,
-            normalized_watch_rule_id,
+            watch_rule_id,
             normalized_trigger_reason,
             within_seconds=dedupe_within_seconds,
         )
@@ -223,11 +216,10 @@ def create_analysis_job(
                     price_krw,
                     search_keyword,
                     user_id,
-                    watch_rule_id,
                     trigger_reason,
                     status
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending')
                 """,
                 (
                     normalized_source,
@@ -237,7 +229,6 @@ def create_analysis_job(
                     normalized_price_krw,
                     normalized_search_keyword,
                     normalized_user_id,
-                    normalized_watch_rule_id,
                     normalized_trigger_reason,
                 ),
             )
@@ -286,7 +277,6 @@ def create_analysis_jobs_for_rules(product, watch_rules, trigger_reason):
             price_krw=product.get("price"),
             search_keyword=product.get("search_keyword") or product.get("search_word"),
             user_id=product.get("user_id"),
-            watch_rule_id=product.get("watch_rule_id"),
             trigger_reason=trigger_reason,
         )
         if result.get("created"):
@@ -326,7 +316,6 @@ def create_analysis_jobs_for_rules(product, watch_rules, trigger_reason):
             price_krw=product.get("price"),
             search_keyword=product.get("search_keyword") or product.get("search_word"),
             user_id=user_id,
-            watch_rule_id=None,
             trigger_reason=trigger_reason,
         )
         if result.get("created"):
@@ -360,7 +349,7 @@ def get_pending_analysis_jobs(limit=20):
                 price_krw,
                 search_keyword,
                 user_id,
-                watch_rule_id,
+                NULL AS watch_rule_id,
                 trigger_reason,
                 status,
                 error_message,
@@ -492,7 +481,7 @@ def get_analysis_job(job_id):
                 price_krw,
                 search_keyword,
                 user_id,
-                watch_rule_id,
+                NULL AS watch_rule_id,
                 trigger_reason,
                 status,
                 error_message,
