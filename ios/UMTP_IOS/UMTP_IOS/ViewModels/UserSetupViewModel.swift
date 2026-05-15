@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 @MainActor
@@ -6,7 +7,7 @@ final class UserSetupViewModel: ObservableObject {
 
     private let sessionService: UserSessionService
 
-    init(sessionService: UserSessionService = .shared) {
+    init(sessionService: UserSessionService) {
         self.sessionService = sessionService
     }
 

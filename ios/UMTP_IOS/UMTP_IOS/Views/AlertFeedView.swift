@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AlertFeedView: View {
-    @StateObject private var viewModel = AlertFeedViewModel()
+    @StateObject private var viewModel = AlertFeedViewModel(pollingService: AlertPollingService())
 
     var body: some View {
         NavigationStack {

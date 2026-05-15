@@ -2,7 +2,7 @@ import SwiftUI
 
 struct UserSetupView: View {
     @EnvironmentObject private var appState: AppState
-    @StateObject private var viewModel = UserSetupViewModel()
+    @StateObject private var viewModel = UserSetupViewModel(sessionService: .shared)
 
     var body: some View {
         VStack(spacing: 16) {

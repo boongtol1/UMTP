@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 @MainActor
@@ -6,7 +7,7 @@ final class AlertFeedViewModel: ObservableObject {
 
     private let pollingService: AlertPollingService
 
-    init(pollingService: AlertPollingService = AlertPollingService()) {
+    init(pollingService: AlertPollingService) {
         self.pollingService = pollingService
     }
 
