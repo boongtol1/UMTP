@@ -99,7 +99,10 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.7 polling 규칙: 검색어는 후보 수집용이며 최종 알림 대상은 스펙 파싱 결과 + 사용자 설정 공정가/알림기준으로 결정합니다.
 - 1.8 진행 현황: polling은 감지된 매물을 `analysis_jobs`에 enqueue하고, analysis worker가 pending job을 처리해 `listing_analysis_results` 및 `alert_events`를 생성합니다.
 - 1.8 알림 구조: notification worker가 `alert_events` pending을 읽어 Telegram 전송(`sent`) 또는 앱 피드 전용 상태(`app_only`)로 처리합니다.
-- 1.8 운영 구조: MVP에서는 polling 직후 inline analysis 처리도 가능하지만, `run_analysis_worker_umtp.py`와 `run_notification_worker_umtp.py`를 별도 프로세스로 분리할 수 있습니다.
+- 1.8 운영 구조: polling은 enqueue 전용이며, analysis는 `run_analysis_worker_umtp.py`, Telegram 전송은 `run_notification_worker_umtp.py` 전용 worker로 처리합니다.
+- identity 정책: `analysis_jobs`/`alert_events`의 중복 기준은 `(user_id, product_id)`입니다.
+- Telegram 발송 기준: 새 `alert_events` insert 성공 시 1회만 발송됩니다.
+- deprecated: `watch_rule_id`는 보존되지만 더 이상 알림 identity 기준이 아니며, `user_watch_rules` fanout은 사용하지 않습니다.
 - 1.9 진행 현황: Android 설정 화면에서 사용자는 차이비율을 직접 입력하지 않고 `내 기준 적정 가격`과 `내가 사고 싶은 가격`만 입력합니다.
 - 1.9 자동 계산: 앱이 할인 정도를 읽기 전용 설명으로 표시하고, 최종 기준은 서버 응답 `alert_drop_rate_percent`를 사용합니다.
 - 1.9 검색어 UX: 검색어를 직접 입력하거나 추천 검색어를 불러와 선택할 수 있습니다.
@@ -771,6 +774,7 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_user_fair_prices_polling_
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_analysis_jobs.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_or_alter_alert_events.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_listing_analysis_results_pipeline.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_identity_user_product.sql
 ```
 
 #### 2) 실행 방법
@@ -794,6 +798,11 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 
 - 중고나라 Search API polling 기반으로 `m1~m5맥북에어` 검색 결과를 조회합니다.
 - polling 대상 선정은 `user_fair_prices(enabled=true)`를 사용합니다.
+- analysis identity는 `(user_id, product_id)`입니다. 같은 사용자/같은 매물 enqueue가 반복되어도 `analysis_jobs`는 1개만 유지됩니다.
+- alert identity는 `(user_id, product_id)`입니다. 같은 사용자/같은 매물은 `alert_events` 1개만 생성됩니다.
+- Telegram 발송 기준은 job 완료가 아니라 `alert_events` 신규 insert 성공입니다.
+- 공정가/알림 기준은 `user_fair_prices` override 우선, 없으면 `mac_fair_prices` fallback 순서입니다.
+- 두 테이블 모두 기준값이 없으면 alert를 만들지 않고 `fair_price_missing`으로 처리합니다.
 - 설정 저장 시 `enabled=true`이면 `force_poll=true`, `last_poll_requested_at=NOW()`, `last_polled_at=NULL`이 되어 즉시 due 대상이 됩니다.
 - polling worker는 due 설정을 읽어 검색하며, 같은 검색어를 여러 사용자가 켜도 Search API는 검색어당 1회만 호출합니다.
 - `POST /user-fair-prices/upsert`에서 `search_keyword`를 비우면 스펙 기반 기본 검색어(예: `m1맥북에어`)를 자동 생성합니다.
@@ -805,11 +814,12 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - 완전히 동일한 상태(`unchanged`)면 `last_seen_at`, `seen_count`만 갱신하고 중복 분석/중복 알림을 막습니다.
 - Search API 응답의 `url` 필드는 이미지 URL로 저장하며, 실제 매물 URL은 `https://web.joongna.com/product/{seq}`로 생성합니다.
 - 같은 검색어를 쓰는 여러 설정/user는 검색 결과를 공유합니다.
-- 새 매물 URL은 기존 UMTP rule-based 분석(`analyze_url_for_user`)으로 재사용합니다.
 - 재분석 이유는 `joongna_seen_products.last_change_reason`에서 확인합니다.
 - CLI `--search-word` 실행은 `force_poll` 상태를 false로 바꾸지 않으며, DB 즉시요청 상태는 유지됩니다.
 - 개별 API 실패/JSON 구조 변경/개별 매물 분석 실패가 있어도 polling 루프는 계속 동작합니다.
 - `/alerts?user_id=...` API는 `alert_events`를 최신순(`created_at DESC`)으로 반환하며 Android 알림 피드에서 사용할 수 있습니다.
+- `watch_rule_id` 컬럼은 deprecated 메타데이터로 유지하며 drop하지 않습니다.
+- `user_watch_rules` fanout 기반 job 생성은 현재 구조에서 사용하지 않습니다.
 
 #### 4) Docker 분리 실행 예시
 
@@ -833,6 +843,33 @@ docker logs -f umtp-polling
 docker logs -f umtp-analysis
 docker logs -f umtp-notification
 ```
+
+컨테이너 역할:
+- `umtp-api`: Android/iOS API 서버(FastAPI)
+- `umtp-polling`(market-watcher): 중고나라 polling + `analysis_jobs` enqueue 전용
+- `umtp-analysis`(analysis-worker): `analysis_jobs` pending 처리 전용
+- `umtp-notification`(notification-worker): `alert_events` pending Telegram/app 상태 처리 전용
+
+#### 5) 검증 체크리스트
+
+```bash
+# 1) 중복 enqueue: 같은 product_id 반복 enqueue 시 analysis_jobs 1건 유지
+python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
+
+# 2) analysis worker 처리
+python src/run_analysis_worker_umtp.py --once
+
+# 3) notification worker 처리 (중복 Telegram 방지)
+python src/run_notification_worker_umtp.py --once
+```
+
+검증 포인트:
+- 같은 `user_id + product_id`를 여러 번 enqueue해도 `analysis_jobs`는 1개만 존재
+- 같은 `user_id + product_id`는 `alert_events` 1개만 생성
+- analysis worker 2개/notification worker 2개 동시 실행에서도 Telegram은 1회만 전송
+- 공정가 조회는 `user_fair_prices` override 우선
+- override가 없으면 `mac_fair_prices` fallback 사용
+- 둘 다 없으면 `fair_price_missing`으로 alert 미생성
 
 
 ---
