@@ -11,7 +11,10 @@ try:
         process_pending_analysis_jobs,
     )
     from src.search_keyword_utils import dedupe_keywords_keep_order, normalize_search_keyword
-    from src.user_watch_rules import get_due_watch_rules, mark_watch_rule_polled
+    from src.user_settings_service import (
+        get_due_user_fair_price_polling_targets as get_due_watch_rules,
+        mark_user_fair_price_polled as mark_watch_rule_polled,
+    )
 except ModuleNotFoundError:
     from db import get_connection
     from joongna_search_client import search_joongna_products
@@ -25,7 +28,10 @@ except ModuleNotFoundError:
         process_pending_analysis_jobs,
     )
     from search_keyword_utils import dedupe_keywords_keep_order, normalize_search_keyword
-    from user_watch_rules import get_due_watch_rules, mark_watch_rule_polled
+    from user_settings_service import (
+        get_due_user_fair_price_polling_targets as get_due_watch_rules,
+        mark_user_fair_price_polled as mark_watch_rule_polled,
+    )
 
 
 DEFAULT_SEARCH_WORDS = [
@@ -65,8 +71,8 @@ def _build_poll_stats(search_words):
         "analysis_success": 0,
         "analysis_duplicate": 0,
         "analysis_failed": 0,
-        "watch_rules_due": 0,
-        "watch_rules_marked": 0,
+        "settings_due": 0,
+        "settings_marked": 0,
         "analysis_jobs_created": 0,
         "analysis_jobs_skipped_duplicate": 0,
         "analysis_jobs_processed": 0,
@@ -126,6 +132,7 @@ def _build_keyword_targets_from_watch_rules(watch_rules):
             {
                 "user_id": user_id,
                 "rule_id": rule_id,
+                "setting_id": rule_id,
                 "watch_rule": rule,
             }
         )
@@ -143,14 +150,14 @@ def _resolve_poll_targets(search_words, user_id):
     try:
         due_rules = get_due_watch_rules(user_id=normalized_user_id)
     except Exception as exc:
-        print(f"[polling] user_watch_rules 조회 실패, DEFAULT_SEARCH_WORDS로 fallback: {exc}")
+        print(f"[polling] user_fair_prices(enabled) 조회 실패, DEFAULT_SEARCH_WORDS로 fallback: {exc}")
         words = DEFAULT_SEARCH_WORDS
         return words, _build_single_user_keyword_targets(words, normalized_user_id), [], "fallback"
 
     keyword_targets = _build_keyword_targets_from_watch_rules(due_rules)
     if keyword_targets:
         words = list(keyword_targets.keys())
-        return words, keyword_targets, due_rules, "watch_rules"
+        return words, keyword_targets, due_rules, "settings"
 
     words = DEFAULT_SEARCH_WORDS
     return words, _build_single_user_keyword_targets(words, normalized_user_id), [], "fallback"
@@ -159,7 +166,7 @@ def _resolve_poll_targets(search_words, user_id):
 def poll_once(user_id=None, search_words=None, *, inline_process=True, inline_process_limit=50):
     words, keyword_targets, due_rules, target_source = _resolve_poll_targets(search_words, user_id)
     stats = _build_poll_stats(words)
-    stats["watch_rules_due"] = len(due_rules)
+    stats["settings_due"] = len(due_rules)
 
     connection = None
     cursor = None
@@ -184,22 +191,22 @@ def poll_once(user_id=None, search_words=None, *, inline_process=True, inline_pr
             connection = None
 
     def mark_related_rules_polled(targets):
-        if target_source != "watch_rules":
+        if target_source != "settings":
             return
 
         marked_rule_ids = set()
         for target in targets:
-            rule_id = target.get("rule_id")
+            rule_id = target.get("setting_id") or target.get("rule_id")
             if rule_id is None or rule_id in marked_rule_ids:
                 continue
             marked_rule_ids.add(rule_id)
 
             try:
                 mark_watch_rule_polled(rule_id)
-                stats["watch_rules_marked"] += 1
+                stats["settings_marked"] += 1
             except Exception as exc:
                 stats["db_errors"] += 1
-                print(f"[polling] watch rule polled_at 갱신 실패 (rule_id={rule_id}): {exc}")
+                print(f"[polling] setting polled_at 갱신 실패 (setting_id={rule_id}): {exc}")
 
     try:
         try:
@@ -312,9 +319,9 @@ def poll_once(user_id=None, search_words=None, *, inline_process=True, inline_pr
             finally:
                 if search_completed_for_word:
                     mark_related_rules_polled(targets_for_word)
-                elif target_source == "watch_rules" and targets_for_word:
+                elif target_source == "settings" and targets_for_word:
                     print(
-                        f"[{search_word}] Search API 실패로 watch rule polled_at 갱신 생략 "
+                        f"[{search_word}] Search API 실패로 setting polled_at 갱신 생략 "
                         "(force_poll 유지)"
                     )
     finally:

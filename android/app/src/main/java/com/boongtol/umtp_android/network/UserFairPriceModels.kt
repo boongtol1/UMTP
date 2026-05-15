@@ -43,6 +43,13 @@ data class UserFairPriceItem(
 
     val effective_fair_price_krw: Int? = null,
     val effective_alert_drop_rate_percent: Double? = null,
+    val custom_search_keyword: String? = null,
+    val recommended_search_keyword: String? = null,
+    val effective_search_keyword: String? = null,
+    val poll_interval_seconds: Int? = null,
+    val force_poll: Boolean? = null,
+    val last_polled_at: String? = null,
+    val last_poll_requested_at: String? = null,
     val has_user_override: Boolean = false
 )
 
@@ -63,11 +70,14 @@ data class UserFairPriceUpsertRequest(
     val ssd_gb: Int,
     val fair_price_krw: Int,
     val alert_drop_rate_percent: Double,
-    val enabled: Boolean
+    val enabled: Boolean,
+    val search_keyword: String? = null,
+    val poll_interval_seconds: Int = 60
 )
 
 data class UserFairPriceUpsertResponse(
     val ok: Boolean,
     val message: String? = null,
-    val reason: String? = null
+    val reason: String? = null,
+    val immediate_poll_requested: Boolean? = null
 )

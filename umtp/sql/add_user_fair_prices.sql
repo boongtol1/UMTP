@@ -10,7 +10,14 @@ CREATE TABLE IF NOT EXISTS user_fair_prices (
   ssd_gb INT NOT NULL,
   fair_price_krw INT NOT NULL,
   alert_drop_rate_percent DECIMAL(5,2) NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  search_keyword VARCHAR(255) NULL,
+  poll_interval_seconds INT NOT NULL DEFAULT 60,
+  force_poll BOOLEAN NOT NULL DEFAULT FALSE,
+  last_poll_requested_at TIMESTAMP NULL,
+  last_polled_at TIMESTAMP NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_user_fair_price_spec (
     user_id,
     product_type,
@@ -18,7 +25,9 @@ CREATE TABLE IF NOT EXISTS user_fair_prices (
     screen_inch,
     ram_gb,
     ssd_gb
-  )
+  ),
+  KEY idx_user_fair_prices_due (enabled, last_polled_at),
+  KEY idx_user_fair_prices_force_poll (force_poll)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT INTO user_fair_prices (
@@ -29,7 +38,13 @@ INSERT INTO user_fair_prices (
   ram_gb,
   ssd_gb,
   fair_price_krw,
-  alert_drop_rate_percent
+  alert_drop_rate_percent,
+  enabled,
+  search_keyword,
+  poll_interval_seconds,
+  force_poll,
+  last_poll_requested_at,
+  last_polled_at
 )
 VALUES (
   'test_user',
@@ -39,8 +54,20 @@ VALUES (
   8,
   256,
   550000,
-  20
+  20,
+  TRUE,
+  'm1맥북에어',
+  60,
+  TRUE,
+  CURRENT_TIMESTAMP,
+  NULL
 )
 ON DUPLICATE KEY UPDATE
   fair_price_krw = VALUES(fair_price_krw),
-  alert_drop_rate_percent = VALUES(alert_drop_rate_percent);
+  alert_drop_rate_percent = VALUES(alert_drop_rate_percent),
+  enabled = VALUES(enabled),
+  search_keyword = VALUES(search_keyword),
+  poll_interval_seconds = VALUES(poll_interval_seconds),
+  force_poll = VALUES(force_poll),
+  last_poll_requested_at = VALUES(last_poll_requested_at),
+  last_polled_at = VALUES(last_polled_at);

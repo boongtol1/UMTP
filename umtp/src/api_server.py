@@ -7,16 +7,9 @@ from pydantic import BaseModel, Field
 
 from src.analysis_service import analyze_url_for_user
 from src.notification_worker import list_alert_events_for_user
-from src.user_watch_rules import (
-    delete_user_watch_rule,
-    get_recommended_watch_keywords,
-    list_user_watch_rules,
-    request_immediate_poll,
-    set_watch_rule_enabled,
-    upsert_user_watch_rule,
-)
 from src.user_settings_service import (
     get_all_macbook_air_units_sorted,
+    get_recommended_setting_keywords,
     get_user_fair_price_settings,
     register_user,
     upsert_user_fair_price_setting,
@@ -75,36 +68,8 @@ class UserFairPriceUpsertRequest(BaseModel):
     fair_price_krw: int = Field(..., gt=0)
     alert_drop_rate_percent: float = Field(..., ge=0, le=100)
     enabled: bool
-
-
-class UserWatchRuleUpsertRequest(BaseModel):
-    user_id: str = Field(..., min_length=1, max_length=100)
-    product_type: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    chip: Optional[str] = Field(default=None, min_length=1, max_length=20)
-    screen_inch: Optional[int] = None
-    ram_gb: Optional[int] = None
-    ssd_gb: Optional[int] = None
     search_keyword: Optional[str] = Field(default=None, max_length=255)
-    enabled: bool = True
     poll_interval_seconds: int = Field(default=60, ge=1)
-    target_price_krw: Optional[int] = None
-    fair_price_krw: Optional[int] = None
-
-
-class UserWatchRuleSetEnabledRequest(BaseModel):
-    user_id: str = Field(..., min_length=1, max_length=100)
-    search_keyword: str = Field(..., min_length=1, max_length=255)
-    enabled: bool
-
-
-class UserWatchRuleDeleteRequest(BaseModel):
-    user_id: str = Field(..., min_length=1, max_length=100)
-    search_keyword: str = Field(..., min_length=1, max_length=255)
-
-
-class UserWatchRuleRequestPollNowRequest(BaseModel):
-    user_id: str = Field(..., min_length=1, max_length=100)
-    search_keyword: str = Field(..., min_length=1, max_length=255)
 
 
 @app.get("/health")
@@ -214,6 +179,8 @@ def user_fair_prices_upsert(request: UserFairPriceUpsertRequest):
             fair_price_krw=request.fair_price_krw,
             alert_drop_rate_percent=request.alert_drop_rate_percent,
             enabled=request.enabled,
+            search_keyword=request.search_keyword,
+            poll_interval_seconds=request.poll_interval_seconds,
         )
     except ValueError:
         return {"ok": False, "reason": "invalid_user_id"}
@@ -221,159 +188,6 @@ def user_fair_prices_upsert(request: UserFairPriceUpsertRequest):
         return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
     except Exception as exc:
         return {"ok": False, "reason": f"사용자 공정가 설정 저장 실패: {exc}"}
-
-
-@app.get("/user-watch-rules")
-def user_watch_rules(user_id: str):
-    normalized_user_id = _normalize_user_id(user_id)
-    if not normalized_user_id:
-        return {
-            "ok": False,
-            "reason": "invalid_user_id",
-            "message": "user_id를 확인해주세요.",
-            "items": [],
-        }
-
-    try:
-        resolved_user_id = _ensure_user_registered(normalized_user_id, source="api/user-watch-rules")
-        items = list_user_watch_rules(resolved_user_id)
-        return {
-            "ok": True,
-            "user_id": resolved_user_id,
-            "items": items,
-        }
-    except ValueError:
-        return {
-            "ok": False,
-            "reason": "invalid_user_id",
-            "message": "user_id를 확인해주세요.",
-            "items": [],
-        }
-    except RuntimeError as exc:
-        return {
-            "ok": False,
-            "reason": f"사용자 등록 실패: {exc}",
-            "message": f"사용자 등록 실패: {exc}",
-            "user_id": normalized_user_id,
-            "items": [],
-        }
-    except Exception as exc:
-        return {
-            "ok": False,
-            "reason": f"감시 조건 조회 실패: {exc}",
-            "message": f"감시 조건 조회 실패: {exc}",
-            "user_id": normalized_user_id,
-            "items": [],
-        }
-
-
-@app.post("/user-watch-rules/upsert")
-def user_watch_rules_upsert(request: UserWatchRuleUpsertRequest):
-    try:
-        resolved_user_id = _ensure_user_registered(request.user_id, source="api/user-watch-rules/upsert")
-        return upsert_user_watch_rule(
-            user_id=resolved_user_id,
-            product_type=request.product_type,
-            chip=request.chip,
-            screen_inch=request.screen_inch,
-            ram_gb=request.ram_gb,
-            ssd_gb=request.ssd_gb,
-            search_keyword=request.search_keyword,
-            enabled=request.enabled,
-            poll_interval_seconds=request.poll_interval_seconds,
-            target_price_krw=request.target_price_krw,
-            fair_price_krw=request.fair_price_krw,
-        )
-    except RuntimeError as exc:
-        return {
-            "ok": False,
-            "reason": f"사용자 등록 실패: {exc}",
-            "message": f"사용자 등록 실패: {exc}",
-        }
-    except ValueError as exc:
-        return {"ok": False, "reason": str(exc), "message": str(exc)}
-    except Exception as exc:
-        return {
-            "ok": False,
-            "reason": f"감시 조건 저장 실패: {exc}",
-            "message": f"감시 조건 저장 실패: {exc}",
-        }
-
-
-@app.post("/user-watch-rules/set-enabled")
-def user_watch_rules_set_enabled(request: UserWatchRuleSetEnabledRequest):
-    try:
-        resolved_user_id = _ensure_user_registered(request.user_id, source="api/user-watch-rules/set-enabled")
-        return set_watch_rule_enabled(
-            user_id=resolved_user_id,
-            search_keyword=request.search_keyword,
-            enabled=request.enabled,
-        )
-    except RuntimeError as exc:
-        return {
-            "ok": False,
-            "reason": f"사용자 등록 실패: {exc}",
-            "message": f"사용자 등록 실패: {exc}",
-        }
-    except ValueError as exc:
-        return {"ok": False, "reason": str(exc), "message": str(exc)}
-    except Exception as exc:
-        return {
-            "ok": False,
-            "reason": f"감시 조건 상태 변경 실패: {exc}",
-            "message": f"감시 조건 상태 변경 실패: {exc}",
-        }
-
-
-@app.post("/user-watch-rules/delete")
-def user_watch_rules_delete(request: UserWatchRuleDeleteRequest):
-    try:
-        resolved_user_id = _ensure_user_registered(request.user_id, source="api/user-watch-rules/delete")
-        return delete_user_watch_rule(
-            user_id=resolved_user_id,
-            search_keyword=request.search_keyword,
-        )
-    except RuntimeError as exc:
-        return {
-            "ok": False,
-            "reason": f"사용자 등록 실패: {exc}",
-            "message": f"사용자 등록 실패: {exc}",
-        }
-    except ValueError as exc:
-        return {"ok": False, "reason": str(exc), "message": str(exc)}
-    except Exception as exc:
-        return {
-            "ok": False,
-            "reason": f"감시 조건 삭제 실패: {exc}",
-            "message": f"감시 조건 삭제 실패: {exc}",
-        }
-
-
-@app.post("/user-watch-rules/request-poll-now")
-def user_watch_rules_request_poll_now(request: UserWatchRuleRequestPollNowRequest):
-    try:
-        resolved_user_id = _ensure_user_registered(
-            request.user_id,
-            source="api/user-watch-rules/request-poll-now",
-        )
-        return request_immediate_poll(
-            user_id=resolved_user_id,
-            search_keyword=request.search_keyword,
-        )
-    except RuntimeError as exc:
-        return {
-            "ok": False,
-            "reason": f"사용자 등록 실패: {exc}",
-            "message": f"사용자 등록 실패: {exc}",
-        }
-    except ValueError as exc:
-        return {"ok": False, "reason": str(exc), "message": str(exc)}
-    except Exception as exc:
-        return {
-            "ok": False,
-            "reason": f"즉시 검색 요청 실패: {exc}",
-            "message": f"즉시 검색 요청 실패: {exc}",
-        }
 
 
 @app.get("/alerts")
@@ -411,15 +225,15 @@ def alerts(user_id: str, limit: int = 200):
         }
 
 
-@app.get("/user-watch-rules/recommended-keywords")
-def user_watch_rules_recommended_keywords(
+@app.get("/user-fair-prices/recommended-keywords")
+def user_fair_prices_recommended_keywords(
     product_type: str,
     chip: str,
     ram_gb: Optional[int] = None,
     ssd_gb: Optional[int] = None,
 ):
     try:
-        items = get_recommended_watch_keywords(
+        items = get_recommended_setting_keywords(
             product_type=product_type,
             chip=chip,
             ram_gb=ram_gb,

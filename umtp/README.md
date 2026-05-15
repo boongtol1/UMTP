@@ -27,9 +27,9 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 1.2 | 위험 키워드 점수화 + 교환글 탐지 + 주의 알림 | `uvicorn src.api_server:app --reload` |
 | 1.3 | 중고나라 Search API polling + 끌올/가격변경 감지 분석 | `python src/run_joongna_polling_umtp.py --once` |
 | 1.4 | 사용자별 MacBook Air 공정가/차이비율 설정 API | `uvicorn src.api_server:app --reload` |
-| 1.5 | user_watch_rules 기반 polling 대상 설정 | `python src/run_joongna_polling_umtp.py --once` |
-| 1.6 | 감시 조건 저장 즉시 polling 요청(force_poll) | `python src/run_joongna_polling_umtp.py --once --user-id boongtol` |
-| 1.7 | Android 사용자 지정 검색어 감시 조건 설정 | `uvicorn src.api_server:app --reload` |
+| 1.5 | user_fair_prices(enabled) 기반 polling 대상 설정 | `python src/run_joongna_polling_umtp.py --once` |
+| 1.6 | 설정 저장 즉시 polling 요청(force_poll) | `python src/run_joongna_polling_umtp.py --once --user-id boongtol` |
+| 1.7 | Android 사용자 지정 검색어 설정 | `uvicorn src.api_server:app --reload` |
 | 1.8 | analysis_jobs + notification worker 기반 파이프라인 | `python src/run_analysis_worker_umtp.py --once` |
 | 1.9 | Android 쉬운 감시 조건 UI | `cd ../android && ./gradlew :app:assembleDebug` |
 
@@ -88,22 +88,22 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.4 초안: Telegram 기능은 삭제하지 않고 기존 동작을 그대로 유지합니다.
 - 1.4 초안: 이번 패치는 FCM/앱 푸시 자체를 구현하지 않습니다.
 - 1.4 초안: 이번 패치는 Android UI를 구현하지 않습니다.
-- 1.5 진행 현황: `user_watch_rules` 기반 polling 대상 설정 구조를 추가했습니다.
-- 1.5 역할 분리: `user_fair_prices`는 사용자별 공정가 저장용, `user_watch_rules`는 polling worker 감시 조건 저장용입니다.
-- 1.5 polling 규칙: `--search-word`가 있으면 최우선 사용, 없으면 due `user_watch_rules`, due rule이 없으면 `DEFAULT_SEARCH_WORDS`를 사용합니다.
-- 1.6 진행 현황: 감시 조건 저장 시 `force_poll=true`로 즉시 polling 요청하는 구조를 추가했습니다.
+- 1.5 진행 현황: `user_fair_prices(enabled)` 기반 polling 대상 설정 구조를 추가했습니다.
+- 1.5 역할 분리 변경: 감시 조건 테이블(`user_watch_rules`)을 분리하지 않고 `user_fair_prices`에 검색어/폴링 상태 컬럼을 함께 사용합니다.
+- 1.5 polling 규칙: `--search-word`가 있으면 최우선 사용, 없으면 due `user_fair_prices(enabled)`를 사용하며 due 대상이 없으면 `DEFAULT_SEARCH_WORDS`를 사용합니다.
+- 1.6 진행 현황: 설정 저장 시 `force_poll=true`로 즉시 polling 요청하는 구조를 추가했습니다.
 - 1.6 polling 규칙: `force_poll=true` 또는 `last_polled_at IS NULL`이면 즉시 검색하고, 검색 완료 후 `force_poll=false`와 `last_polled_at=NOW()`로 갱신합니다.
 - 1.6 CLI 규칙: `--search-word` 수동 실행은 DB `force_poll` 요청 상태를 소비하지 않습니다.
-- 1.7 진행 현황: Android 앱에서 검색어/공정가/알림가격을 직접 저장하고 `user_watch_rules` 기반 polling 대상으로 즉시 반영할 수 있습니다.
-- 1.7 백엔드 API: `GET /user-watch-rules/recommended-keywords`, `POST /user-watch-rules/upsert`, `POST /user-watch-rules/request-poll-now`.
-- 1.7 polling 규칙: 검색어는 후보 수집용이며 최종 분석/알림 대상은 `spec_parser` 결과와 `watch_rule` 조건(`product_type/chip/screen/ram/ssd`) 매칭 후 결정합니다.
+- 1.7 진행 현황: Android 앱에서 검색어/공정가/알림기준을 설정에 직접 저장하고 `user_fair_prices(enabled)` 기반 polling 대상으로 즉시 반영할 수 있습니다.
+- 1.7 백엔드 API: `GET /user-fair-prices/recommended-keywords`, `POST /user-fair-prices/upsert`.
+- 1.7 polling 규칙: 검색어는 후보 수집용이며 최종 알림 대상은 스펙 파싱 결과 + 사용자 설정 공정가/알림기준으로 결정합니다.
 - 1.8 진행 현황: polling은 감지된 매물을 `analysis_jobs`에 enqueue하고, analysis worker가 pending job을 처리해 `listing_analysis_results` 및 `alert_events`를 생성합니다.
 - 1.8 알림 구조: notification worker가 `alert_events` pending을 읽어 Telegram 전송(`sent`) 또는 앱 피드 전용 상태(`app_only`)로 처리합니다.
 - 1.8 운영 구조: MVP에서는 polling 직후 inline analysis 처리도 가능하지만, `run_analysis_worker_umtp.py`와 `run_notification_worker_umtp.py`를 별도 프로세스로 분리할 수 있습니다.
 - 1.9 진행 현황: Android 감시 조건 화면에서 사용자는 차이비율을 직접 입력하지 않고 `내 기준 적정 가격`과 `알림 받을 가격`만 입력합니다.
 - 1.9 자동 계산: 앱이 할인 정도를 읽기 전용 설명으로 표시하고, 최종 기준은 서버 응답 `alert_drop_rate_percent`를 사용합니다.
 - 1.9 검색어 UX: 검색어를 직접 입력하거나 추천 검색어를 불러와 선택할 수 있습니다.
-- 1.9 저장 동작: 저장 시 `user_watch_rules`에 반영되고 즉시 검색 요청(`force_poll`)이 걸리며, UI에서는 `검색/알림/감시 조건` 표현을 사용합니다.
+- 1.9 저장 동작: 저장 시 `user_fair_prices`에 반영되고 즉시 검색 요청(`force_poll`)이 걸리며, 설정 토글 자체가 감시 on/off 역할을 합니다.
 
 ## 빠른 시작
 
@@ -767,8 +767,7 @@ mysql -u <DB_USER> -p < sql/add_risk_exchange_columns.sql
 ```bash
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_joongna_seen_products.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_joongna_seen_products_refresh_detection.sql
-mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_user_watch_rules.sql
-mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_user_watch_rules_immediate_polling.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_user_fair_prices_polling_keywords.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_analysis_jobs.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_or_alter_alert_events.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_listing_analysis_results_pipeline.sql
@@ -794,19 +793,18 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 #### 3) 동작 규칙
 
 - 중고나라 Search API polling 기반으로 `m1~m5맥북에어` 검색 결과를 조회합니다.
-- `user_fair_prices`는 사용자별 공정가 저장용으로 유지하고, polling 대상 선정은 `user_watch_rules`를 사용합니다.
-- 앱/API에서 감시 조건을 저장하면 `enabled=true`, `last_polled_at=NULL`로 저장되어 다음 polling에서 즉시 due 대상이 됩니다.
-- 앱/API에서 감시 조건을 저장하면 `force_poll=true`, `last_poll_requested_at=NOW()`로 즉시 검색 요청 상태가 됩니다.
-- polling worker는 due watch rule을 읽어 검색하며, 같은 검색어를 여러 사용자가 켜도 Search API는 검색어당 1회만 호출합니다.
-- `POST /user-watch-rules/upsert`에서 `search_keyword`를 비우면 스펙 기반 기본 검색어(예: `m1맥북에어`)를 자동 생성합니다.
-- `GET /user-watch-rules/recommended-keywords`로 Android 앱에서 추천 검색어를 받아 선택할 수 있습니다.
-- polling worker는 `force_poll=true`인 rule을 우선 due로 처리하고, 검색 완료 후 `force_poll=false`, `last_polled_at=NOW()`로 갱신합니다.
+- polling 대상 선정은 `user_fair_prices(enabled=true)`를 사용합니다.
+- 설정 저장 시 `enabled=true`이면 `force_poll=true`, `last_poll_requested_at=NOW()`, `last_polled_at=NULL`이 되어 즉시 due 대상이 됩니다.
+- polling worker는 due 설정을 읽어 검색하며, 같은 검색어를 여러 사용자가 켜도 Search API는 검색어당 1회만 호출합니다.
+- `POST /user-fair-prices/upsert`에서 `search_keyword`를 비우면 스펙 기반 기본 검색어(예: `m1맥북에어`)를 자동 생성합니다.
+- `GET /user-fair-prices/recommended-keywords`로 Android 앱에서 추천 검색어를 받아 선택할 수 있습니다.
+- polling worker는 `force_poll=true`인 설정을 우선 due로 처리하고, 검색 완료 후 `force_poll=false`, `last_polled_at=NOW()`로 갱신합니다.
 - `joongna_seen_products`는 단순 중복 차단이 아니라 마지막 관측 상태 저장용으로 사용합니다.
 - 같은 `product_id/seq`라도 가격/제목/`refresh_key`가 바뀌면 재분석합니다.
 - Search API에서 끌올 시각 필드를 안정적으로 찾을 수 없으면 가격/제목 변경만으로도 재분석합니다.
 - 완전히 동일한 상태(`unchanged`)면 `last_seen_at`, `seen_count`만 갱신하고 중복 분석/중복 알림을 막습니다.
 - Search API 응답의 `url` 필드는 이미지 URL로 저장하며, 실제 매물 URL은 `https://web.joongna.com/product/{seq}`로 생성합니다.
-- 같은 검색어를 쓰는 여러 rule/user는 검색 결과를 공유하되, 최종 분석 대상은 rule별 스펙 매칭(`watch_rule_matcher`)과 가격 조건(`target_price_krw`)을 통과한 경우로 제한합니다.
+- 같은 검색어를 쓰는 여러 설정/user는 검색 결과를 공유합니다.
 - 새 매물 URL은 기존 UMTP rule-based 분석(`analyze_url_for_user`)으로 재사용합니다.
 - 재분석 이유는 `joongna_seen_products.last_change_reason`에서 확인합니다.
 - CLI `--search-word` 실행은 `force_poll` 상태를 false로 바꾸지 않으며, DB 즉시요청 상태는 유지됩니다.
@@ -851,9 +849,11 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_users_table.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/add_users_device_id_column.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/drop_users_nickname_column.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/add_user_fair_price_settings_columns.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_user_fair_prices_polling_keywords.sql
 ```
 
 `sql/add_user_fair_price_settings_columns.sql`은 `enabled`, `updated_at` 컬럼 추가를 시도합니다.
+`sql/alter_user_fair_prices_polling_keywords.sql`은 `search_keyword`, `poll_interval_seconds`, `force_poll`, `last_poll_requested_at`, `last_polled_at` 컬럼과 인덱스를 추가합니다.
 MySQL 환경에서 `ADD COLUMN IF NOT EXISTS`가 제한되면, 컬럼 존재 여부를 먼저 확인한 뒤 수동 실행하세요.
 `sql/add_users_device_id_column.sql`은 `users.device_id` 컬럼과 unique index를 안전하게 추가합니다.
 `sql/drop_users_nickname_column.sql`은 users 테이블의 `nickname` 컬럼이 남아 있을 때만 삭제합니다.
@@ -903,17 +903,27 @@ curl -X POST http://127.0.0.1:8000/user-fair-prices/upsert \
     "ssd_gb": 256,
     "fair_price_krw": 600000,
     "alert_drop_rate_percent": 15,
-    "enabled": true
+    "enabled": true,
+    "search_keyword": "m1맥북에어",
+    "poll_interval_seconds": 60
   }'
+```
+
+추천 검색어 조회:
+
+```bash
+curl "http://127.0.0.1:8000/user-fair-prices/recommended-keywords?product_type=MacBook%20Air&chip=M1&ram_gb=8&ssd_gb=256"
 ```
 
 #### 4) 동작 규칙
 
 - `GET /macbook-air-units`: 104개 MacBook Air 단위 조합을 `chip -> screen_inch -> ram_gb -> ssd_gb` 순으로 반환합니다.
 - `GET /user-fair-prices`: 전체 단위 목록 기준으로 system/user/effective 값을 함께 반환합니다.
+- 각 설정 항목은 `custom_search_keyword`, `recommended_search_keyword`, `effective_search_keyword`를 함께 반환합니다.
 - user override가 없는 단위는 `enabled=false`를 기본값으로 반환합니다.
 - `POST /users/register`: `device_id`가 이미 등록되어 있으면 저장된 기존 `user_id`로 로그인 처리합니다.
 - `POST /user-fair-prices/upsert`: `user_id + product_type + chip + screen_inch + ram_gb + ssd_gb` 복합 키 기준 upsert를 수행합니다.
+- `enabled=true` 저장 시 해당 설정 행이 즉시 polling 대상(`force_poll=true`)이 됩니다.
 - 유효하지 않은 조합은 `invalid_macbook_air_unit`으로 거부합니다.
 - 기존 `/analyze-url` 요청 형식은 변경하지 않습니다.
 - polling 흐름과 Android Notification Listener 관련 내용은 이번 패치에서 크게 변경하지 않습니다.

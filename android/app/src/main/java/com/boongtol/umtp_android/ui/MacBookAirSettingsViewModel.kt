@@ -48,21 +48,6 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _savingItemKey = MutableStateFlow<String?>(null)
     val savingItemKey: StateFlow<String?> = _savingItemKey.asStateFlow()
 
-    private val _recommendedKeywords = MutableStateFlow<List<String>>(emptyList())
-    val recommendedKeywords: StateFlow<List<String>> = _recommendedKeywords.asStateFlow()
-
-    private val _watchRuleSaving = MutableStateFlow(false)
-    val watchRuleSaving: StateFlow<Boolean> = _watchRuleSaving.asStateFlow()
-
-    private val _watchRuleRequestingNow = MutableStateFlow(false)
-    val watchRuleRequestingNow: StateFlow<Boolean> = _watchRuleRequestingNow.asStateFlow()
-
-    private val _watchRuleLastAlertDropRatePercent = MutableStateFlow<Double?>(null)
-    val watchRuleLastAlertDropRatePercent: StateFlow<Double?> = _watchRuleLastAlertDropRatePercent.asStateFlow()
-
-    private val _watchRules = MutableStateFlow<List<WatchRuleItem>>(emptyList())
-    val watchRules: StateFlow<List<WatchRuleItem>> = _watchRules.asStateFlow()
-
     init {
         _userId.value?.let {
             loadInitialData(it)
@@ -80,7 +65,6 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 }
                 
                 loadUserSettings(uid)
-                loadUserWatchRules(uid)
                 fetchAlerts(uid)
             } catch (e: Exception) {
                 _errorMessage.value = "데이터 로딩 에러: ${e.localizedMessage}"
@@ -127,22 +111,6 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                         )
                     )
                 }
-            }
-        }
-    }
-
-    fun loadUserWatchRules(uid: String) {
-        viewModelScope.launch {
-            try {
-                val response = UmtpApiClient.apiService.getUserWatchRules(uid)
-                if (response.ok) {
-                    _watchRules.value = response.items
-                } else {
-                    _watchRules.value = emptyList()
-                }
-            } catch (e: Exception) {
-                // Keep screen responsive even when network fails.
-                _watchRules.value = emptyList()
             }
         }
     }
@@ -202,7 +170,8 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         unit: MacBookAirUnit,
         fairPrice: Int,
         dropRate: Int,
-        enabled: Boolean
+        enabled: Boolean,
+        searchKeyword: String?
     ) {
         val uid = _userId.value ?: return
         val itemKey = "${unit.chip}-${unit.screen_inch}-${unit.ram_gb}-${unit.ssd_gb}"
@@ -219,11 +188,17 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     ssd_gb = unit.ssd_gb,
                     fair_price_krw = fairPrice,
                     alert_drop_rate_percent = dropRate.toDouble(),
-                    enabled = enabled
+                    enabled = enabled,
+                    search_keyword = searchKeyword?.trim()?.ifEmpty { null },
+                    poll_interval_seconds = 60
                 )
                 val response = UmtpApiClient.apiService.upsertUserFairPrice(request)
                 if (response.ok) {
-                    _toastMessage.value = "저장 완료"
+                    _toastMessage.value = if (response.immediate_poll_requested == true) {
+                        "저장 완료 (즉시 검색 요청됨)"
+                    } else {
+                        "저장 완료"
+                    }
                     loadUserSettings(uid)
                 } else {
                     _toastMessage.value = "저장 실패: ${response.message ?: response.reason}"
@@ -238,89 +213,6 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
 
     fun clearToastMessage() {
         _toastMessage.value = null
-    }
-
-    fun fetchRecommendedKeywords(
-        productType: String,
-        chip: String,
-        ramGb: Int?,
-        ssdGb: Int?
-    ) {
-        viewModelScope.launch {
-            try {
-                val response = UmtpApiClient.apiService.getRecommendedKeywords(
-                    productType = productType,
-                    chip = chip,
-                    ramGb = ramGb,
-                    ssdGb = ssdGb
-                )
-                if (response.ok) {
-                    _recommendedKeywords.value = response.items
-                } else {
-                    _recommendedKeywords.value = emptyList()
-                    _toastMessage.value = "추천 검색어 조회 실패: ${response.reason ?: "unknown"}"
-                }
-            } catch (e: Exception) {
-                _recommendedKeywords.value = emptyList()
-                _toastMessage.value = buildNetworkErrorMessage("추천 검색어 조회 실패", e)
-            }
-        }
-    }
-
-    fun upsertWatchRule(request: WatchRuleUpsertRequest) {
-        viewModelScope.launch {
-            _watchRuleSaving.value = true
-            try {
-                val response = UmtpApiClient.apiService.upsertWatchRule(request)
-                if (response.ok) {
-                    _watchRuleLastAlertDropRatePercent.value = response.alert_drop_rate_percent
-                    val immediateRequested = response.immediate_poll_requested == true
-                    loadUserWatchRules(request.user_id)
-                    _toastMessage.value = if (immediateRequested) {
-                        "감시 조건이 저장됐어요. 곧 검색이 시작됩니다. (즉시 검색 요청됨)"
-                    } else {
-                        "감시 조건이 저장됐어요. 곧 검색이 시작됩니다."
-                    }
-                } else {
-                    _toastMessage.value = "저장 실패: ${response.message ?: response.reason ?: "unknown"}"
-                }
-            } catch (e: Exception) {
-                _toastMessage.value = buildNetworkErrorMessage("감시 조건 저장 실패", e)
-            } finally {
-                _watchRuleSaving.value = false
-            }
-        }
-    }
-
-    fun requestWatchRulePollNow(userId: String, searchKeyword: String) {
-        val normalizedUserId = userId.trim()
-        val normalizedSearchKeyword = searchKeyword.trim()
-        if (normalizedUserId.isEmpty() || normalizedSearchKeyword.isEmpty()) {
-            _toastMessage.value = "user_id와 검색어를 확인하세요."
-            return
-        }
-
-        viewModelScope.launch {
-            _watchRuleRequestingNow.value = true
-            try {
-                val response = UmtpApiClient.apiService.requestPollNow(
-                    RequestPollNowRequest(
-                        user_id = normalizedUserId,
-                        search_keyword = normalizedSearchKeyword
-                    )
-                )
-                if (response.ok) {
-                    loadUserWatchRules(normalizedUserId)
-                    _toastMessage.value = "즉시 검색 요청 완료"
-                } else {
-                    _toastMessage.value = "즉시 검색 요청 실패: ${response.message ?: response.reason ?: "unknown"}"
-                }
-            } catch (e: Exception) {
-                _toastMessage.value = buildNetworkErrorMessage("즉시 검색 요청 실패", e)
-            } finally {
-                _watchRuleRequestingNow.value = false
-            }
-        }
     }
 
     private fun buildNetworkErrorMessage(prefix: String, error: Exception): String {

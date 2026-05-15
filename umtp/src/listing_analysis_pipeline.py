@@ -90,28 +90,32 @@ def _get_watch_rule_by_id(watch_rule_id):
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
-        cursor.execute(
-            """
-            SELECT
-                id,
-                user_id,
-                product_type,
-                chip,
-                screen_inch,
-                ram_gb,
-                ssd_gb,
-                search_keyword,
-                enabled,
-                target_price_krw,
-                fair_price_krw,
-                alert_drop_rate_percent
-            FROM user_watch_rules
-            WHERE id = %s
-            LIMIT 1
-            """,
-            (normalized_watch_rule_id,),
-        )
-        return cursor.fetchone()
+        try:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    product_type,
+                    chip,
+                    screen_inch,
+                    ram_gb,
+                    ssd_gb,
+                    search_keyword,
+                    enabled,
+                    target_price_krw,
+                    fair_price_krw,
+                    alert_drop_rate_percent
+                FROM user_watch_rules
+                WHERE id = %s
+                LIMIT 1
+                """,
+                (normalized_watch_rule_id,),
+            )
+            return cursor.fetchone()
+        except Exception:
+            # watch_rules 제거 이후에도 과거 analysis_job 처리를 위해 안전하게 None 처리
+            return None
     finally:
         if cursor is not None:
             cursor.close()

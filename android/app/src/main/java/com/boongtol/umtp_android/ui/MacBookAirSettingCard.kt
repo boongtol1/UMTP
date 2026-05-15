@@ -22,7 +22,7 @@ fun MacBookAirSettingCard(
     unit: MacBookAirUnit,
     userSetting: UserFairPriceItem?,
     isSaving: Boolean,
-    onSave: (fairPrice: Int, dropRate: Int, enabled: Boolean) -> Unit
+    onSave: (fairPrice: Int, dropRate: Int, enabled: Boolean, searchKeyword: String?) -> Unit
 ) {
     var fairPriceText by remember(userSetting) { 
         mutableStateOf(userSetting?.user_fair_price_krw?.toString() ?: userSetting?.system_fair_price_krw?.toString() ?: "") 
@@ -35,6 +35,9 @@ fun MacBookAirSettingCard(
         )
     }
     var enabled by remember(userSetting) { mutableStateOf(userSetting?.enabled ?: false) }
+    var searchKeywordText by remember(userSetting) {
+        mutableStateOf(userSetting?.custom_search_keyword ?: userSetting?.effective_search_keyword ?: "")
+    }
 
     val numberFormat = NumberFormat.getNumberInstance(Locale.KOREA)
 
@@ -76,8 +79,20 @@ fun MacBookAirSettingCard(
                 valueColor = if (userSetting?.has_user_override == true) Color(0xFF388E3C) else Color.Unspecified
             )
             InfoRow(label = "알림 기준", value = formatDropRateForDisplay(userSetting?.effective_alert_drop_rate_percent))
+            InfoRow(label = "추천 검색어", value = userSetting?.recommended_search_keyword ?: "-")
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = searchKeywordText,
+                onValueChange = { searchKeywordText = it },
+                label = { Text("커스텀 검색어", fontSize = 12.sp) },
+                placeholder = { Text(userSetting?.recommended_search_keyword ?: "예: m1맥북에어", fontSize = 12.sp) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -108,7 +123,7 @@ fun MacBookAirSettingCard(
                     val price = fairPriceText.toIntOrNull() ?: 0
                     val rate = dropRateText.toIntOrNull() ?: 0
                     if (price > 0 && rate in 0..100) {
-                        onSave(price, rate, enabled)
+                        onSave(price, rate, enabled, searchKeywordText.trim().ifEmpty { null })
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),

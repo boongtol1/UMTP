@@ -34,26 +34,11 @@ interface UmtpApiService {
         @Query("user_id") userId: String
     ): AlertsResponse
 
-    @GET("user-watch-rules/recommended-keywords")
+    @GET("user-fair-prices/recommended-keywords")
     suspend fun getRecommendedKeywords(
         @Query("product_type") productType: String,
         @Query("chip") chip: String,
         @Query("ram_gb") ramGb: Int?,
         @Query("ssd_gb") ssdGb: Int?
     ): RecommendedKeywordsResponse
-
-    @GET("user-watch-rules")
-    suspend fun getUserWatchRules(
-        @Query("user_id") userId: String
-    ): WatchRuleListResponse
-
-    @POST("user-watch-rules/upsert")
-    suspend fun upsertWatchRule(
-        @Body request: WatchRuleUpsertRequest
-    ): WatchRuleUpsertResponse
-
-    @POST("user-watch-rules/request-poll-now")
-    suspend fun requestPollNow(
-        @Body request: RequestPollNowRequest
-    ): RequestPollNowResponse
 }

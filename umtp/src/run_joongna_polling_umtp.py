@@ -41,7 +41,7 @@ def parse_args():
     parser.add_argument(
         "--user-id",
         default=None,
-        help="watch rule user_id 필터(미지정 시 전체 due enabled rule 대상)",
+        help="설정 user_id 필터(미지정 시 전체 due enabled 설정 대상)",
     )
     return parser.parse_args()
 
@@ -62,7 +62,7 @@ def _print_summary(stats):
         f"price_condition_skip={stats.get('skipped_price_condition', 0)}, "
         f"search_errors={stats.get('search_errors', 0)}, "
         f"db_errors={stats.get('db_errors', 0)}, "
-        f"watch_rules_due={stats.get('watch_rules_due', 0)}"
+        f"settings_due={stats.get('settings_due', stats.get('watch_rules_due', 0))}"
     )
 
 
