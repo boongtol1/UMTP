@@ -76,6 +76,58 @@ def _fetch_user_fair_price_row(cursor, user_id, parsed_spec):
     return cursor.fetchone()
 
 
+def _has_enabled_user_target(cursor, user_id, parsed_spec):
+    try:
+        cursor.execute(
+            """
+            SELECT 1
+            FROM user_fair_prices
+            WHERE user_id = %s
+              AND product_type = %s
+              AND chip = %s
+              AND screen_inch = %s
+              AND ram_gb = %s
+              AND ssd_gb = %s
+              AND enabled = TRUE
+            LIMIT 1
+            """,
+            (
+                user_id,
+                parsed_spec["product_type"],
+                parsed_spec["chip"],
+                parsed_spec["screen_inch"],
+                parsed_spec["ram_gb"],
+                parsed_spec["ssd_gb"],
+            ),
+        )
+    except Exception as exc:
+        if "unknown column" not in str(exc).lower() or "enabled" not in str(exc).lower():
+            raise
+        cursor.execute(
+            """
+            SELECT 1
+            FROM user_fair_prices
+            WHERE user_id = %s
+              AND product_type = %s
+              AND chip = %s
+              AND screen_inch = %s
+              AND ram_gb = %s
+              AND ssd_gb = %s
+            LIMIT 1
+            """,
+            (
+                user_id,
+                parsed_spec["product_type"],
+                parsed_spec["chip"],
+                parsed_spec["screen_inch"],
+                parsed_spec["ram_gb"],
+                parsed_spec["ssd_gb"],
+            ),
+        )
+
+    return cursor.fetchone() is not None
+
+
 def _fetch_system_fair_price_row(cursor, parsed_spec):
     cursor.execute(
         """
@@ -117,9 +169,18 @@ def fetch_user_fair_price(cursor, user_id, parsed_spec):
     }
 
 
+def is_user_fair_price_target_enabled(cursor, user_id, parsed_spec):
+    normalized_user_id = _normalize_user_id(user_id)
+    _require_spec_fields(parsed_spec)
+    return _has_enabled_user_target(cursor, normalized_user_id, parsed_spec)
+
+
 def resolve_fair_price_for_user(cursor, user_id, parsed_spec):
     normalized_user_id = _normalize_user_id(user_id)
     _require_spec_fields(parsed_spec)
+
+    if not _has_enabled_user_target(cursor, normalized_user_id, parsed_spec):
+        return None
 
     user_row = _fetch_user_fair_price_row(cursor, normalized_user_id, parsed_spec)
     if user_row:

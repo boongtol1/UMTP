@@ -104,10 +104,20 @@ class WatchRuleImmediatePollingTest(unittest.TestCase):
         self.assertIn("force_poll = FALSE", executed_query)
 
     def test_cli_search_mode_does_not_consume_force_poll(self):
-        with patch("src.joongna_polling_service.get_connection", side_effect=RuntimeError("db down")):
-            with patch("src.joongna_polling_service.search_joongna_products", return_value=[]):
-                with patch("src.joongna_polling_service.mark_watch_rule_polled") as mock_mark_polled:
-                    poll_once(user_id="boongtol", search_words=["m2맥북에어"])
+        with patch(
+            "src.joongna_polling_service.get_due_watch_rules",
+            return_value=[
+                {
+                    "id": 1,
+                    "user_id": "boongtol",
+                    "search_keyword": "m2맥북에어",
+                }
+            ],
+        ):
+            with patch("src.joongna_polling_service.get_connection", side_effect=RuntimeError("db down")):
+                with patch("src.joongna_polling_service.search_joongna_products", return_value=[]):
+                    with patch("src.joongna_polling_service.mark_watch_rule_polled") as mock_mark_polled:
+                        poll_once(user_id="boongtol", search_words=["m2맥북에어"])
 
         self.assertEqual(mock_mark_polled.call_count, 0)
 

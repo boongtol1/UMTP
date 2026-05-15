@@ -112,6 +112,32 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(stats.get("analysis_jobs_created"), 2)
         self.assertEqual(stats.get("analysis_jobs_processed"), 0)
 
+    def test_poll_once_skips_when_no_enabled_targets(self):
+        with patch("src.joongna_polling_service.get_due_watch_rules", return_value=[]):
+            with patch("src.joongna_polling_service.search_joongna_products") as mock_search:
+                stats = poll_once()
+
+        self.assertEqual(stats.get("settings_due"), 0)
+        self.assertEqual(stats.get("analysis_jobs_created"), 0)
+        self.assertEqual(mock_search.call_count, 0)
+
+    def test_poll_once_cli_word_filters_to_enabled_targets_only(self):
+        due_rules = [
+            {
+                "id": 1,
+                "user_id": "boongtol",
+                "search_keyword": "m1맥북에어",
+            }
+        ]
+
+        with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+            with patch("src.joongna_polling_service.search_joongna_products") as mock_search:
+                stats = poll_once(search_words=["m3맥북에어"])
+
+        self.assertEqual(stats.get("settings_due"), 1)
+        self.assertEqual(stats.get("fetched_items"), 0)
+        self.assertEqual(mock_search.call_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

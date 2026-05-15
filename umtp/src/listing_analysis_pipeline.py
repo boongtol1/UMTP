@@ -12,7 +12,7 @@ try:
     from src.listing_page_parser import fetch_html, parse_joongna_listing_page
     from src.risk_analyzer import analyze_risk
     from src.spec_parser import parse_listing_title
-    from src.user_fair_price import resolve_fair_price_for_user
+    from src.user_fair_price import is_user_fair_price_target_enabled, resolve_fair_price_for_user
 except ModuleNotFoundError:
     from analysis_log import save_success_log
     from analysis_jobs import (
@@ -27,10 +27,7 @@ except ModuleNotFoundError:
     from listing_page_parser import fetch_html, parse_joongna_listing_page
     from risk_analyzer import analyze_risk
     from spec_parser import parse_listing_title
-    from user_fair_price import resolve_fair_price_for_user
-
-
-DEFAULT_USER_ID = "test_user"
+    from user_fair_price import is_user_fair_price_target_enabled, resolve_fair_price_for_user
 DUPLICATE_ENTRY_ERROR_CODE = 1062
 
 
@@ -96,6 +93,9 @@ def _resolve_price_rules(cursor, user_id, parsed_spec):
         return None, None, None, "user_id_missing", None
 
     try:
+        if not is_user_fair_price_target_enabled(cursor, normalized_user_id, parsed_spec):
+            return None, None, None, "user_target_disabled", None
+
         resolved_fair_price = resolve_fair_price_for_user(cursor, normalized_user_id, parsed_spec)
     except ValueError:
         return None, None, None, "fair_price_spec_invalid", None
@@ -401,7 +401,7 @@ def analyze_product_for_watch_rule(job):
         raise ValueError("invalid_job")
 
     job_id = _normalize_optional_int(job.get("id"))
-    user_id = _normalize_optional_text(job.get("user_id")) or DEFAULT_USER_ID
+    user_id = _normalize_optional_text(job.get("user_id"))
     watch_rule_id = _normalize_optional_int(job.get("watch_rule_id"))
     trigger_reason = _normalize_optional_text(job.get("trigger_reason"))
     product_id = _normalize_optional_text(job.get("product_id"))
@@ -410,6 +410,8 @@ def analyze_product_for_watch_rule(job):
 
     if not url:
         raise ValueError("analysis_job_url_missing")
+    if user_id is None:
+        raise ValueError("analysis_job_user_id_missing")
 
     html = fetch_html(url)
     parsed_page = parse_joongna_listing_page(html)

@@ -94,19 +94,23 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
             ):
                 with self._mock_parsing():
                     with patch(
-                        "src.listing_analysis_pipeline.resolve_fair_price_for_user",
-                        return_value=None,
+                        "src.listing_analysis_pipeline.is_user_fair_price_target_enabled",
+                        return_value=True,
                     ):
-                        with patch("src.listing_analysis_pipeline.get_connection", return_value=fake_connection):
-                            with patch(
-                                "src.listing_analysis_pipeline.save_listing_analysis_result",
-                                return_value={"analysis_result_id": 1, "diff_ratio": 0.0},
-                            ):
-                                with patch("src.listing_analysis_pipeline.save_success_log"):
-                                    with patch(
-                                        "src.listing_analysis_pipeline.maybe_create_alert_event"
-                                    ) as mock_create_alert:
-                                        result = analyze_product_for_watch_rule(self._build_job())
+                        with patch(
+                            "src.listing_analysis_pipeline.resolve_fair_price_for_user",
+                            return_value=None,
+                        ):
+                            with patch("src.listing_analysis_pipeline.get_connection", return_value=fake_connection):
+                                with patch(
+                                    "src.listing_analysis_pipeline.save_listing_analysis_result",
+                                    return_value={"analysis_result_id": 1, "diff_ratio": 0.0},
+                                ):
+                                    with patch("src.listing_analysis_pipeline.save_success_log"):
+                                        with patch(
+                                            "src.listing_analysis_pipeline.maybe_create_alert_event"
+                                        ) as mock_create_alert:
+                                            result = analyze_product_for_watch_rule(self._build_job())
 
         self.assertTrue(result.get("ok"))
         self.assertFalse(result.get("is_alert_target"))
@@ -130,24 +134,28 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
             ):
                 with self._mock_parsing():
                     with patch(
-                        "src.listing_analysis_pipeline.resolve_fair_price_for_user",
-                        return_value={
-                            "fair_price_krw": 800000,
-                            "alert_drop_rate_percent": 20.0,
-                            "source": "user_fair_prices",
-                        },
+                        "src.listing_analysis_pipeline.is_user_fair_price_target_enabled",
+                        return_value=True,
                     ):
-                        with patch("src.listing_analysis_pipeline.get_connection", return_value=fake_connection):
-                            with patch(
-                                "src.listing_analysis_pipeline.save_listing_analysis_result",
-                                return_value={"analysis_result_id": 2, "diff_ratio": 25.0},
-                            ):
-                                with patch("src.listing_analysis_pipeline.save_success_log"):
-                                    with patch(
-                                        "src.listing_analysis_pipeline.maybe_create_alert_event",
-                                        return_value={"created": True, "alert_id": 9},
-                                    ) as mock_create_alert:
-                                        result = analyze_product_for_watch_rule(self._build_job())
+                        with patch(
+                            "src.listing_analysis_pipeline.resolve_fair_price_for_user",
+                            return_value={
+                                "fair_price_krw": 800000,
+                                "alert_drop_rate_percent": 20.0,
+                                "source": "user_fair_prices",
+                            },
+                        ):
+                            with patch("src.listing_analysis_pipeline.get_connection", return_value=fake_connection):
+                                with patch(
+                                    "src.listing_analysis_pipeline.save_listing_analysis_result",
+                                    return_value={"analysis_result_id": 2, "diff_ratio": 25.0},
+                                ):
+                                    with patch("src.listing_analysis_pipeline.save_success_log"):
+                                        with patch(
+                                            "src.listing_analysis_pipeline.maybe_create_alert_event",
+                                            return_value={"created": True, "alert_id": 9},
+                                        ) as mock_create_alert:
+                                            result = analyze_product_for_watch_rule(self._build_job())
 
         self.assertTrue(result.get("ok"))
         self.assertTrue(result.get("is_alert_target"))
@@ -172,17 +180,57 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
             ):
                 with self._mock_parsing():
                     with patch(
-                        "src.listing_analysis_pipeline.resolve_fair_price_for_user",
-                        return_value={
-                            "fair_price_krw": 800000,
-                            "alert_drop_rate_percent": 20.0,
-                            "source": "mac_fair_prices",
-                        },
+                        "src.listing_analysis_pipeline.is_user_fair_price_target_enabled",
+                        return_value=True,
+                    ):
+                        with patch(
+                            "src.listing_analysis_pipeline.resolve_fair_price_for_user",
+                            return_value={
+                                "fair_price_krw": 800000,
+                                "alert_drop_rate_percent": 20.0,
+                                "source": "mac_fair_prices",
+                            },
+                        ):
+                            with patch("src.listing_analysis_pipeline.get_connection", return_value=fake_connection):
+                                with patch(
+                                    "src.listing_analysis_pipeline.save_listing_analysis_result",
+                                    return_value={"analysis_result_id": 2, "diff_ratio": 12.5},
+                                ):
+                                    with patch("src.listing_analysis_pipeline.save_success_log"):
+                                        with patch(
+                                            "src.listing_analysis_pipeline.maybe_create_alert_event"
+                                        ) as mock_create_alert:
+                                            result = analyze_product_for_watch_rule(self._build_job())
+
+        self.assertTrue(result.get("ok"))
+        self.assertFalse(result.get("is_alert_target"))
+        self.assertEqual(result.get("fair_price_source"), "mac_fair_prices")
+        self.assertEqual(result.get("alert_skip_reason"), "drop_rate_below_threshold")
+        self.assertEqual(mock_create_alert.call_count, 0)
+
+    def test_disabled_toggle_never_creates_alert(self):
+        fake_cursor = _FakeCursor()
+        fake_connection = _FakeConnection(fake_cursor)
+
+        with patch("src.listing_analysis_pipeline.fetch_html", return_value="<html></html>"):
+            with patch(
+                "src.listing_analysis_pipeline.parse_joongna_listing_page",
+                return_value={
+                    "title": "맥북에어 M1 8GB 256GB",
+                    "description": "테스트",
+                    "listing_price_krw": 600000,
+                    "self_check_fields": {},
+                },
+            ):
+                with self._mock_parsing():
+                    with patch(
+                        "src.listing_analysis_pipeline.is_user_fair_price_target_enabled",
+                        return_value=False,
                     ):
                         with patch("src.listing_analysis_pipeline.get_connection", return_value=fake_connection):
                             with patch(
                                 "src.listing_analysis_pipeline.save_listing_analysis_result",
-                                return_value={"analysis_result_id": 2, "diff_ratio": 12.5},
+                                return_value={"analysis_result_id": 3, "diff_ratio": 0.0},
                             ):
                                 with patch("src.listing_analysis_pipeline.save_success_log"):
                                     with patch(
@@ -192,8 +240,8 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
 
         self.assertTrue(result.get("ok"))
         self.assertFalse(result.get("is_alert_target"))
-        self.assertEqual(result.get("fair_price_source"), "mac_fair_prices")
-        self.assertEqual(result.get("alert_skip_reason"), "drop_rate_below_threshold")
+        self.assertFalse(result.get("alert_created"))
+        self.assertEqual(result.get("alert_skip_reason"), "user_target_disabled")
         self.assertEqual(mock_create_alert.call_count, 0)
 
     def test_process_analysis_job_skips_when_not_pending(self):
@@ -207,6 +255,13 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
         self.assertTrue(result.get("skipped"))
         self.assertEqual(result.get("reason"), "job_not_pending")
         self.assertEqual(mock_analyze.call_count, 0)
+
+    def test_analyze_job_without_user_id_fails(self):
+        job = self._build_job()
+        job["user_id"] = None
+
+        with self.assertRaises(ValueError):
+            analyze_product_for_watch_rule(job)
 
     def test_process_pending_analysis_jobs_counts_skipped(self):
         jobs = [{"id": 11, "product_id": "1002"}]

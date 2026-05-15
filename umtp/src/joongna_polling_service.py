@@ -31,23 +31,11 @@ except ModuleNotFoundError:
         mark_user_fair_price_polled as mark_watch_rule_polled,
     )
 
-
-DEFAULT_SEARCH_WORDS = [
-    "m1맥북에어",
-    "m2맥북에어",
-    "m3맥북에어",
-    "m4맥북에어",
-    "m5맥북에어",
-]
-DEFAULT_USER_ID = "test_user"
-
-
 def _normalize_search_words(search_words):
     if not search_words:
-        return DEFAULT_SEARCH_WORDS
+        return []
 
-    normalized = dedupe_keywords_keep_order(search_words)
-    return normalized or DEFAULT_SEARCH_WORDS
+    return dedupe_keywords_keep_order(search_words)
 
 
 def _normalize_optional_user_id(user_id):
@@ -93,23 +81,6 @@ def _build_observed_product(search_word, item):
     }
 
 
-def _build_single_user_keyword_targets(search_words, user_id):
-    resolved_user_id = _normalize_optional_user_id(user_id) or DEFAULT_USER_ID
-    targets = {}
-    for search_word in search_words:
-        normalized_search_word = normalize_search_keyword(search_word)
-        if not normalized_search_word:
-            continue
-        targets[normalized_search_word] = [
-            {
-                "user_id": resolved_user_id,
-                "rule_id": None,
-                "watch_rule": None,
-            }
-        ]
-    return targets
-
-
 def _build_keyword_targets_from_user_fair_prices(watch_rules):
     keyword_targets = {}
     target_by_key = {}
@@ -147,30 +118,45 @@ def _build_keyword_targets_from_watch_rules(watch_rules):
 def _resolve_poll_targets(search_words, user_id):
     normalized_user_id = _normalize_optional_user_id(user_id)
 
-    if search_words:
-        words = _normalize_search_words(search_words)
-        return words, _build_single_user_keyword_targets(words, normalized_user_id), [], "cli"
-
     try:
         due_rules = get_due_watch_rules(user_id=normalized_user_id)
     except Exception as exc:
-        print(f"[polling] user_fair_prices(enabled) 조회 실패, DEFAULT_SEARCH_WORDS로 fallback: {exc}")
-        words = DEFAULT_SEARCH_WORDS
-        return words, _build_single_user_keyword_targets(words, normalized_user_id), [], "fallback"
+        print(f"[polling] user_fair_prices(enabled) 조회 실패, polling 스킵: {exc}")
+        return [], {}, [], "settings_error"
 
     keyword_targets = _build_keyword_targets_from_user_fair_prices(due_rules)
+
+    if search_words:
+        requested_words = _normalize_search_words(search_words)
+        requested_word_set = set()
+        for word in requested_words:
+            normalized = normalize_search_keyword(word)
+            if normalized:
+                requested_word_set.add(normalized.lower())
+
+        filtered_targets = {}
+        for keyword, targets in keyword_targets.items():
+            if keyword.lower() in requested_word_set:
+                filtered_targets[keyword] = targets
+
+        words = list(filtered_targets.keys())
+        return words, filtered_targets, due_rules, "cli"
+
     if keyword_targets:
         words = list(keyword_targets.keys())
         return words, keyword_targets, due_rules, "settings"
 
-    words = DEFAULT_SEARCH_WORDS
-    return words, _build_single_user_keyword_targets(words, normalized_user_id), [], "fallback"
+    return [], {}, due_rules, "settings_empty"
 
 
 def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_process_limit=50):
     words, keyword_targets, due_rules, target_source = _resolve_poll_targets(search_words, user_id)
     stats = _build_poll_stats(words)
     stats["settings_due"] = len(due_rules)
+
+    if not words:
+        print("[polling] enabled 토글 대상 검색어가 없어 이번 주기는 스킵합니다.")
+        return stats
 
     connection = None
     cursor = None

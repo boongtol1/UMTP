@@ -798,6 +798,8 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 
 - 중고나라 Search API polling 기반으로 `m1~m5맥북에어` 검색 결과를 조회합니다.
 - polling 대상 선정은 `user_fair_prices(enabled=true)`를 사용합니다.
+- `enabled=true` 대상이 없으면 polling은 검색 자체를 실행하지 않고 스킵합니다.
+- `DEFAULT_SEARCH_WORDS(m1~m5맥북에어)` + `test_user` fallback 검색은 제거되었습니다.
 - analysis identity는 `(user_id, product_id)`입니다. 같은 사용자/같은 매물 enqueue가 반복되어도 `analysis_jobs`는 1개만 유지됩니다.
 - alert identity는 `(user_id, product_id)`입니다. 같은 사용자/같은 매물은 `alert_events` 1개만 생성됩니다.
 - Telegram 발송 기준은 job 완료가 아니라 `alert_events` 신규 insert 성공입니다.
