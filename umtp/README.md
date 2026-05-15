@@ -776,6 +776,7 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_analysis_jobs.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_or_alter_alert_events.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_listing_analysis_results_pipeline.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_identity_user_product.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_joongna_sort_date_tracking.sql
 ```
 
 #### 2) 실행 방법
@@ -798,11 +799,15 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 #### 3) 동작 규칙
 
 - 중고나라 Search API polling 기반으로 `m1~m5맥북에어` 검색 결과를 조회합니다.
+- Search API `sort=RECENT_SORT` 응답의 `sortDate`를 수집합니다.
 - polling 대상 선정은 `user_fair_prices(enabled=true)`를 사용합니다.
 - `enabled=true` 대상이 없으면 polling은 검색 자체를 실행하지 않고 스킵합니다.
 - `DEFAULT_SEARCH_WORDS(m1~m5맥북에어)` + `test_user` fallback 검색은 제거되었습니다.
 - analysis identity는 `(user_id, product_id)`입니다. 같은 사용자/같은 매물 enqueue가 반복되어도 `analysis_jobs`는 1개만 유지됩니다.
 - alert identity는 `(user_id, product_id)`입니다. 같은 사용자/같은 매물은 `alert_events` 1개만 생성됩니다.
+- 같은 `seq(product_id)`의 `sortDate`가 바뀌면 `sort_date_changed`로 판단하고 재분석 enqueue합니다.
+- `sortDate` 변경 원인은 끌올/수정/재노출일 수 있으며, UMTP에서는 공통으로 "다시 최신순으로 올라온 매물"로 처리합니다.
+- `productPositionNo`/rank 기반 끌올 추정은 사용하지 않습니다.
 - Telegram 발송 기준은 job 완료가 아니라 `alert_events` 신규 insert 성공입니다.
 - Telegram 발송은 `user_id`별 알림 토글(enabled=true)일 때만 허용됩니다.
 - `users.telegram_chat_id`가 있으면 해당 사용자 채팅으로 발송하고, 없으면 앱 피드 상태만 갱신(`app_only`)합니다.
@@ -816,7 +821,6 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - polling worker는 `force_poll=true`인 설정을 우선 due로 처리하고, 검색 완료 후 `force_poll=false`, `last_polled_at=NOW()`로 갱신합니다.
 - `joongna_seen_products`는 단순 중복 차단이 아니라 마지막 관측 상태 저장용으로 사용합니다.
 - 같은 `product_id/seq`라도 가격/제목/`refresh_key`가 바뀌면 재분석합니다.
-- Search API에서 끌올 시각 필드를 안정적으로 찾을 수 없으면 가격/제목 변경만으로도 재분석합니다.
 - 완전히 동일한 상태(`unchanged`)면 `last_seen_at`, `seen_count`만 갱신하고 중복 분석/중복 알림을 막습니다.
 - Search API 응답의 `url` 필드는 이미지 URL로 저장하며, 실제 매물 URL은 `https://web.joongna.com/product/{seq}`로 생성합니다.
 - 같은 검색어를 쓰는 여러 설정/user는 검색 결과를 공유합니다.
