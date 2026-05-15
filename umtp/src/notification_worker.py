@@ -195,6 +195,7 @@ def mark_alert_event_sending(alert_id):
                 send_attempts = COALESCE(send_attempts, 0) + 1,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = %s
+              AND status = 'pending'
             """,
             (normalized_alert_id,),
         )
@@ -268,7 +269,17 @@ def process_pending_alert_events(limit=20):
         alert_id = _normalize_alert_id(alert.get("id"))
 
         try:
-            mark_alert_event_sending(alert_id)
+            claimed = mark_alert_event_sending(alert_id)
+            if not claimed:
+                stats["results"].append(
+                    {
+                        "ok": True,
+                        "alert_id": alert_id,
+                        "status": "skipped_not_pending",
+                    }
+                )
+                continue
+
             send_result = send_alert_event(alert)
             stats["results"].append(send_result)
 

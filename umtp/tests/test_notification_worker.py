@@ -65,6 +65,20 @@ class NotificationWorkerTest(unittest.TestCase):
         self.assertEqual(stats.get("sent"), 1)
         self.assertEqual(mock_mark_failed.call_count, 1)
 
+    def test_process_pending_alert_events_skips_when_not_claimed(self):
+        pending_alerts = [{"id": 11, "message": "A"}]
+
+        with patch("src.notification_worker.get_pending_alert_events", return_value=pending_alerts):
+            with patch("src.notification_worker.mark_alert_event_sending", return_value=False):
+                with patch("src.notification_worker.send_alert_event") as mock_send_alert:
+                    stats = process_pending_alert_events(limit=20)
+
+        self.assertEqual(stats.get("fetched"), 1)
+        self.assertEqual(stats.get("sent"), 0)
+        self.assertEqual(stats.get("failed"), 0)
+        self.assertEqual(mock_send_alert.call_count, 0)
+        self.assertEqual(stats.get("results")[0].get("status"), "skipped_not_pending")
+
 
 if __name__ == "__main__":
     unittest.main()
