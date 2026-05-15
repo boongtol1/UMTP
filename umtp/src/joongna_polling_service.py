@@ -45,6 +45,24 @@ def _normalize_optional_user_id(user_id):
     return cleaned or None
 
 
+def parse_sort_date(item):
+    if not isinstance(item, dict):
+        return None
+
+    raw_value = item.get("sort_date")
+    if raw_value is None:
+        raw_value = item.get("sortDate")
+    if raw_value is None:
+        return None
+
+    if isinstance(raw_value, str):
+        cleaned = raw_value.strip()
+    else:
+        cleaned = str(raw_value).strip()
+
+    return cleaned or None
+
+
 def _build_poll_stats(search_words):
     return {
         "search_words": search_words,
@@ -76,7 +94,7 @@ def _build_observed_product(search_word, item):
         "price": item.get("price"),
         "product_url": item.get("product_url"),
         "image_url": item.get("image_url"),
-        "sort_date": item.get("sort_date"),
+        "sort_date": parse_sort_date(item),
         "refresh_key": item.get("refresh_key"),
     }
 
