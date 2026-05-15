@@ -31,6 +31,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 | 1.6 | 감시 조건 저장 즉시 polling 요청(force_poll) | `python src/run_joongna_polling_umtp.py --once --user-id boongtol` |
 | 1.7 | Android 사용자 지정 검색어 감시 조건 설정 | `uvicorn src.api_server:app --reload` |
 | 1.8 | analysis_jobs + notification worker 기반 파이프라인 | `python src/run_analysis_worker_umtp.py --once` |
+| 1.9 | Android 쉬운 감시 조건 UI | `cd ../android && ./gradlew :app:assembleDebug` |
 
 ## 주요 변경 요약
 
@@ -99,6 +100,10 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.8 진행 현황: polling은 감지된 매물을 `analysis_jobs`에 enqueue하고, analysis worker가 pending job을 처리해 `listing_analysis_results` 및 `alert_events`를 생성합니다.
 - 1.8 알림 구조: notification worker가 `alert_events` pending을 읽어 Telegram 전송(`sent`) 또는 앱 피드 전용 상태(`app_only`)로 처리합니다.
 - 1.8 운영 구조: MVP에서는 polling 직후 inline analysis 처리도 가능하지만, `run_analysis_worker_umtp.py`와 `run_notification_worker_umtp.py`를 별도 프로세스로 분리할 수 있습니다.
+- 1.9 진행 현황: Android 감시 조건 화면에서 사용자는 차이비율을 직접 입력하지 않고 `내 기준 적정 가격`과 `알림 받을 가격`만 입력합니다.
+- 1.9 자동 계산: 앱이 할인 정도를 읽기 전용 설명으로 표시하고, 최종 기준은 서버 응답 `alert_drop_rate_percent`를 사용합니다.
+- 1.9 검색어 UX: 검색어를 직접 입력하거나 추천 검색어를 불러와 선택할 수 있습니다.
+- 1.9 저장 동작: 저장 시 `user_watch_rules`에 반영되고 즉시 검색 요청(`force_poll`)이 걸리며, UI에서는 `검색/알림/감시 조건` 표현을 사용합니다.
 
 ## 빠른 시작
 
