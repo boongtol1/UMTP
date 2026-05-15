@@ -8,7 +8,6 @@ try:
     )
     from src.listing_analysis_pipeline import (
         enqueue_analysis_for_product,
-        process_pending_analysis_jobs,
     )
     from src.search_keyword_utils import dedupe_keywords_keep_order, normalize_search_keyword
     from src.user_settings_service import (
@@ -25,7 +24,6 @@ except ModuleNotFoundError:
     )
     from listing_analysis_pipeline import (
         enqueue_analysis_for_product,
-        process_pending_analysis_jobs,
     )
     from search_keyword_utils import dedupe_keywords_keep_order, normalize_search_keyword
     from user_settings_service import (
@@ -342,14 +340,6 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
             connection.close()
 
     if inline_process:
-        try:
-            pipeline_stats = process_pending_analysis_jobs(limit=inline_process_limit)
-            stats["analysis_jobs_processed"] = pipeline_stats.get("done", 0)
-            stats["analysis_jobs_process_failed"] = pipeline_stats.get("failed", 0)
-            stats["analysis_success"] = pipeline_stats.get("done", 0)
-            stats["analysis_failed"] = pipeline_stats.get("failed", 0)
-        except Exception as exc:
-            stats["db_errors"] += 1
-            print(f"[polling] inline analysis worker 처리 실패: {exc}")
+        print("[polling] inline_process=True 요청이 들어왔지만 enqueue-only 정책으로 무시합니다.")
 
     return stats

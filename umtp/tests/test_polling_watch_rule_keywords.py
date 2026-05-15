@@ -96,16 +96,12 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
                 with patch("src.joongna_polling_service.get_connection", side_effect=RuntimeError("db down")):
                     with patch("src.joongna_polling_service.mark_watch_rule_polled") as mock_mark_polled:
                         with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
-                            with patch(
-                                "src.joongna_polling_service.process_pending_analysis_jobs",
-                                return_value={"done": 2, "failed": 0},
-                            ):
-                                mock_enqueue.return_value = {
-                                    "ok": True,
-                                    "created_jobs": [{"job_id": 1}, {"job_id": 2}],
-                                    "skipped_jobs": [],
-                                }
-                                stats = poll_once()
+                            mock_enqueue.return_value = {
+                                "ok": True,
+                                "created_jobs": [{"job_id": 1}, {"job_id": 2}],
+                                "skipped_jobs": [],
+                            }
+                            stats = poll_once()
 
         self.assertEqual(mock_enqueue.call_count, 1)
         enqueue_args = mock_enqueue.call_args.args
