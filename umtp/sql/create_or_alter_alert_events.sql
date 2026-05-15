@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS alert_events (
   KEY idx_alert_events_user (user_id),
   KEY idx_alert_events_status (status),
   KEY idx_alert_events_created_at (created_at),
-  KEY idx_alert_events_product (product_id)
+  KEY idx_alert_events_product (product_id),
+  UNIQUE KEY uq_alert_events_user_product (user_id, product_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET @target_db = DATABASE();
@@ -307,3 +308,17 @@ SET @sql_idx_product = IF(
 PREPARE stmt_idx_product FROM @sql_idx_product;
 EXECUTE stmt_idx_product;
 DEALLOCATE PREPARE stmt_idx_product;
+
+SELECT COUNT(*) INTO @has_uq_user_product
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND INDEX_NAME = 'uq_alert_events_user_product';
+SET @sql_uq_user_product = IF(
+  @has_uq_user_product = 0,
+  'ALTER TABLE alert_events ADD UNIQUE KEY uq_alert_events_user_product (user_id, product_id)',
+  'SELECT \"uq_alert_events_user_product exists\"'
+);
+PREPARE stmt_uq_user_product FROM @sql_uq_user_product;
+EXECUTE stmt_uq_user_product;
+DEALLOCATE PREPARE stmt_uq_user_product;
