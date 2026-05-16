@@ -50,6 +50,11 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - `user_fair_prices`는 사용자별 공정가(`fair_price_krw`)와 알림 기준(`alert_drop_rate_percent`)을 관리합니다.
 - `user_fair_prices.target_buy_price_krw`는 GENERATED STORED 컬럼이며 `ROUND(fair_price_krw * (1 - alert_drop_rate_percent / 100))`로 자동 계산됩니다.
 - 예: 공정가 `1,000,000원`, 차이비율 `20.50%`이면 목표 구매가(`target_buy_price_krw`)는 `795,000원`입니다.
+- `alert_drop_rate_percent`는 `-100.00% ~ 100.00%`를 허용합니다. 양수는 공정가보다 낮은 목표가, 음수는 공정가보다 높은 목표가를 의미합니다.
+- `user_fair_prices.alert_price_direction` 기본값은 `BELOW_OR_EQUAL`이며, `ABOVE_OR_EQUAL`도 지원합니다.
+- 알림 비교 규칙: `BELOW_OR_EQUAL`은 `listing_price_krw <= target_buy_price_krw`, `ABOVE_OR_EQUAL`은 `listing_price_krw >= target_buy_price_krw`입니다.
+- 예1: 공정가 `1,000,000원`, 차이비율 `20%` -> 목표가 `800,000원`, `BELOW_OR_EQUAL`이면 `800,000원 이하`만 알림입니다.
+- 예2: 공정가 `1,000,000원`, 차이비율 `-10%` -> 목표가 `1,100,000원`, `ABOVE_OR_EQUAL`이면 `1,100,000원 이상`만 알림입니다.
 - 0.8 서비스 계층: `analysis_service.py`에서 URL 분석과 `ok/ reason` 실패 응답을 처리합니다.
 - 0.8 알림은 `notifier.py`의 `print()` 기반 가짜 알림으로 처리합니다.
 - 0.8은 Android Notification Listener 앱 자체를 구현하지 않고 `curl` 요청으로 URL 전달 상황을 흉내냅니다.
