@@ -14,6 +14,9 @@ import kotlinx.coroutines.launch
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) : ViewModel() {
 
@@ -48,6 +51,15 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _savingItemKey = MutableStateFlow<String?>(null)
     val savingItemKey: StateFlow<String?> = _savingItemKey.asStateFlow()
 
+    private val _isRefreshingSettings = MutableStateFlow(false)
+    val isRefreshingSettings: StateFlow<Boolean> = _isRefreshingSettings.asStateFlow()
+
+    private val _settingsRefreshStatusMessage = MutableStateFlow<String?>(null)
+    val settingsRefreshStatusMessage: StateFlow<String?> = _settingsRefreshStatusMessage.asStateFlow()
+
+    private val _lastSettingsRefreshLabel = MutableStateFlow<String?>(null)
+    val lastSettingsRefreshLabel: StateFlow<String?> = _lastSettingsRefreshLabel.asStateFlow()
+
     init {
         _userId.value?.let {
             loadInitialData(it)
@@ -64,7 +76,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     _units.value = unitsResponse.units
                 }
                 
-                loadUserSettings(uid)
+                refreshUserSettings(showFeedback = false, explicitUserId = uid)
                 fetchAlerts(uid)
             } catch (e: Exception) {
                 _errorMessage.value = "데이터 로딩 에러: ${e.localizedMessage}"
@@ -75,14 +87,37 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     }
 
     fun loadUserSettings(uid: String) {
+        refreshUserSettings(showFeedback = false, explicitUserId = uid)
+    }
+
+    fun refreshUserSettings(showFeedback: Boolean = true, explicitUserId: String? = null) {
+        val uid = explicitUserId ?: _userId.value ?: return
+        if (_isRefreshingSettings.value) {
+            return
+        }
         viewModelScope.launch {
+            _isRefreshingSettings.value = true
+            if (showFeedback) {
+                _settingsRefreshStatusMessage.value = "새로고침 중..."
+            }
             try {
                 val response = UmtpApiClient.apiService.getUserFairPrices(uid)
                 if (response.ok) {
                     _userSettings.value = response.items
+                    _lastSettingsRefreshLabel.value = "마지막 새로고침: ${formatRefreshTimeLabel(System.currentTimeMillis())}"
+                    if (showFeedback) {
+                        _settingsRefreshStatusMessage.value = "방금 새로고침됨"
+                    }
+                } else if (showFeedback) {
+                    _settingsRefreshStatusMessage.value =
+                        "새로고침 실패: ${response.message ?: response.reason ?: "서버 응답 오류"}"
                 }
             } catch (e: Exception) {
-                // Ignore background refresh errors
+                if (showFeedback) {
+                    _settingsRefreshStatusMessage.value = buildNetworkErrorMessage("새로고침 실패", e)
+                }
+            } finally {
+                _isRefreshingSettings.value = false
             }
         }
     }
@@ -175,7 +210,8 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         desiredPrice: Int,
         alertPriceDirection: String,
         enabled: Boolean,
-        searchKeyword: String?
+        searchKeyword: String?,
+        boundPrice: Int?
     ) {
         val uid = _userId.value ?: return
         val itemKey = "${unit.chip}-${unit.screen_inch}-${unit.ram_gb}-${unit.ssd_gb}"
@@ -190,10 +226,19 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             _toastMessage.value = "시장가와의 차이(%)는 -100.00% ~ 100.00% 범위여야 합니다."
             return
         }
+        if (boundPrice != null && boundPrice < 0) {
+            _toastMessage.value = "최소/최대 가격은 0원 이상이어야 합니다."
+            return
+        }
 
         viewModelScope.launch {
             _savingItemKey.value = itemKey
             try {
+                val normalizedDirection = normalizeAlertDirection(alertPriceDirection)
+                val boundsRequest = buildAlertBoundsRequest(
+                    alertPriceDirection = normalizedDirection,
+                    boundPriceKrw = boundPrice,
+                )
                 val request = UserFairPriceUpsertRequest(
                     user_id = uid,
                     product_type = unit.product_type,
@@ -203,7 +248,9 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     ssd_gb = unit.ssd_gb,
                     fair_price_krw = fairPrice,
                     alert_drop_rate_percent = dropRatePercent,
-                    alert_price_direction = alertPriceDirection,
+                    alert_price_direction = normalizedDirection,
+                    min_price_krw = boundsRequest.min_price_krw,
+                    max_price_krw = boundsRequest.max_price_krw,
                     enabled = enabled,
                     search_keyword = searchKeyword?.trim()?.ifEmpty { null },
                     poll_interval_seconds = 60
@@ -215,7 +262,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     } else {
                         "저장 완료"
                     }
-                    loadUserSettings(uid)
+                    refreshUserSettings(showFeedback = false, explicitUserId = uid)
                 } else {
                     _toastMessage.value = "저장 실패: ${response.message ?: response.reason}"
                 }
@@ -239,5 +286,10 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             else -> error.localizedMessage ?: "알 수 없는 네트워크 오류"
         }
         return "$prefix: $reason 서버 주소(${UmtpApiClient.baseUrl})를 확인해주세요."
+    }
+
+    private fun formatRefreshTimeLabel(epochMillis: Long): String {
+        val formatter = SimpleDateFormat("HH:mm", Locale.KOREA)
+        return formatter.format(Date(epochMillis))
     }
 }

@@ -26,7 +26,8 @@ fun MacBookAirSettingCard(
         desiredPrice: Int,
         alertPriceDirection: String,
         enabled: Boolean,
-        searchKeyword: String?
+        searchKeyword: String?,
+        boundPrice: Int?
     ) -> Unit
 ) {
     var fairPriceText by remember(userSetting) { 
@@ -44,16 +45,25 @@ fun MacBookAirSettingCard(
     }
     var alertPriceDirection by remember(userSetting) {
         mutableStateOf(
-            normalizeAlertPriceDirection(
+            normalizeAlertDirection(
                 userSetting?.user_alert_price_direction ?: userSetting?.effective_alert_price_direction
             )
         )
+    }
+    var minPriceText by remember(userSetting) {
+        mutableStateOf(userSetting?.user_min_price_krw?.toString() ?: "")
+    }
+    var maxPriceText by remember(userSetting) {
+        mutableStateOf(userSetting?.user_max_price_krw?.toString() ?: "")
     }
 
     val marketPriceLabel = buildMarketPriceLabel(userId)
     val fairPriceInput = fairPriceText.toIntOrNull()
     val desiredPriceInput = desiredPriceText.toIntOrNull()
     val computedDropRate = calculateDropRatePercent(fairPriceInput, desiredPriceInput)
+    val isAboveDirection = alertPriceDirection == ABOVE_OR_EQUAL_DIRECTION
+    val boundPriceText = if (isAboveDirection) maxPriceText else minPriceText
+    val boundPriceInput = boundPriceText.toIntOrNull()
 
     Card(
         modifier = Modifier
@@ -180,26 +190,64 @@ fun MacBookAirSettingCard(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(
-                        selected = alertPriceDirection == BELOW_OR_EQUAL,
-                        onClick = { alertPriceDirection = BELOW_OR_EQUAL }
+                        selected = alertPriceDirection == BELOW_OR_EQUAL_DIRECTION,
+                        onClick = { alertPriceDirection = BELOW_OR_EQUAL_DIRECTION }
                     )
                     Text("이하 알림")
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(
-                        selected = alertPriceDirection == ABOVE_OR_EQUAL,
-                        onClick = { alertPriceDirection = ABOVE_OR_EQUAL }
+                        selected = alertPriceDirection == ABOVE_OR_EQUAL_DIRECTION,
+                        onClick = { alertPriceDirection = ABOVE_OR_EQUAL_DIRECTION }
                     )
                     Text("이상 알림")
                 }
             }
             Text(
-                text = if (alertPriceDirection == ABOVE_OR_EQUAL) {
+                text = if (isAboveDirection) {
                     "이 가격 이상이면 알림을 받습니다."
                 } else {
                     "이 가격 이하이면 알림을 받습니다."
                 },
                 style = MaterialTheme.typography.bodySmall
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = boundPriceText,
+                onValueChange = {
+                    if (it.all { char -> char.isDigit() }) {
+                        if (isAboveDirection) {
+                            maxPriceText = it
+                        } else {
+                            minPriceText = it
+                        }
+                    }
+                },
+                label = {
+                    Text(
+                        if (isAboveDirection) "최대 가격 (원)" else "최소 가격 (원)",
+                        fontSize = 12.sp
+                    )
+                },
+                placeholder = {
+                    Text(
+                        if (isAboveDirection) "예: 900000" else "예: 300000",
+                        fontSize = 12.sp
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true
+            )
+            Text(
+                text = if (isAboveDirection) {
+                    "이 가격 이하인 매물만 알림을 받습니다."
+                } else {
+                    "이 가격 이상인 매물만 알림을 받습니다."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray,
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -222,6 +270,7 @@ fun MacBookAirSettingCard(
                             alertPriceDirection,
                             enabled,
                             searchKeywordText.trim().ifEmpty { null },
+                            boundPriceInput,
                         )
                     }
                 },
@@ -252,16 +301,6 @@ private fun calculateDesiredPrice(fairPrice: Int?, dropRate: Double?): Int? {
     val desired = fairPrice.toDouble() * (1.0 - (dropRate / 100.0))
     return desired.roundToInt().coerceAtLeast(0)
 }
-
-private fun normalizeAlertPriceDirection(raw: String?): String {
-    return when (raw?.trim()?.uppercase()) {
-        ABOVE_OR_EQUAL -> ABOVE_OR_EQUAL
-        else -> BELOW_OR_EQUAL
-    }
-}
-
-private const val BELOW_OR_EQUAL = "BELOW_OR_EQUAL"
-private const val ABOVE_OR_EQUAL = "ABOVE_OR_EQUAL"
 
 @Composable
 private fun InfoRow(label: String, value: String, valueColor: Color = Color.Unspecified) {
