@@ -53,7 +53,7 @@ class UserFairPriceTest(unittest.TestCase):
     def test_fetch_user_fair_price_reads_target_and_direction(self):
         with patch(
             "src.user_fair_price._fetch_user_fair_price_row",
-            return_value=(1000000, -10.0, 1100000, "ABOVE_OR_EQUAL"),
+            return_value=(1000000, -10.0, 1100000, "ABOVE_OR_EQUAL", None, 1100000),
         ):
             result = fetch_user_fair_price(cursor=object(), user_id="boongtol", parsed_spec=self._spec())
 
@@ -61,6 +61,8 @@ class UserFairPriceTest(unittest.TestCase):
         self.assertEqual(result.get("alert_drop_rate_percent"), -10.0)
         self.assertEqual(result.get("target_buy_price_krw"), 1100000)
         self.assertEqual(result.get("alert_price_direction"), "ABOVE_OR_EQUAL")
+        self.assertIsNone(result.get("min_price_krw"))
+        self.assertEqual(result.get("max_price_krw"), 1100000)
 
     def test_resolve_fair_price_defaults_direction_to_below(self):
         with patch("src.user_fair_price._has_enabled_user_target", return_value=True):
@@ -76,6 +78,8 @@ class UserFairPriceTest(unittest.TestCase):
 
         self.assertEqual(result.get("target_buy_price_krw"), 795000)
         self.assertEqual(result.get("alert_price_direction"), "BELOW_OR_EQUAL")
+        self.assertIsNone(result.get("min_price_krw"))
+        self.assertIsNone(result.get("max_price_krw"))
 
 
 if __name__ == "__main__":

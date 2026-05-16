@@ -401,6 +401,62 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
         self.assertEqual(result.get("alert_price_direction"), "BELOW_OR_EQUAL")
         self.assertEqual(create_alert_call_count, 1)
 
+    def test_below_or_equal_with_min_price_bound_excludes_too_low_listing(self):
+        result, create_alert_call_count = self._run_pipeline_for_price_rule(
+            listing_price_krw=290000,
+            resolved_fair_price={
+                "fair_price_krw": 1000000,
+                "alert_drop_rate_percent": 20.00,
+                "target_buy_price_krw": 800000,
+                "alert_price_direction": "BELOW_OR_EQUAL",
+                "min_price_krw": 300000,
+                "max_price_krw": None,
+                "source": "user_fair_prices",
+            },
+        )
+
+        self.assertTrue(result.get("ok"))
+        self.assertFalse(result.get("is_alert_target"))
+        self.assertEqual(result.get("alert_skip_reason"), "below_min_price_bound")
+        self.assertEqual(create_alert_call_count, 0)
+
+    def test_above_or_equal_with_max_price_bound_excludes_too_high_listing(self):
+        result, create_alert_call_count = self._run_pipeline_for_price_rule(
+            listing_price_krw=910000,
+            resolved_fair_price={
+                "fair_price_krw": 1000000,
+                "alert_drop_rate_percent": -10.00,
+                "target_buy_price_krw": 900000,
+                "alert_price_direction": "ABOVE_OR_EQUAL",
+                "min_price_krw": None,
+                "max_price_krw": 900000,
+                "source": "user_fair_prices",
+            },
+        )
+
+        self.assertTrue(result.get("ok"))
+        self.assertFalse(result.get("is_alert_target"))
+        self.assertEqual(result.get("alert_skip_reason"), "above_max_price_bound")
+        self.assertEqual(create_alert_call_count, 0)
+
+    def test_null_bounds_keep_direction_behavior(self):
+        result, create_alert_call_count = self._run_pipeline_for_price_rule(
+            listing_price_krw=790000,
+            resolved_fair_price={
+                "fair_price_krw": 1000000,
+                "alert_drop_rate_percent": 20.50,
+                "target_buy_price_krw": 795000,
+                "alert_price_direction": "BELOW_OR_EQUAL",
+                "min_price_krw": None,
+                "max_price_krw": None,
+                "source": "user_fair_prices",
+            },
+        )
+
+        self.assertTrue(result.get("ok"))
+        self.assertTrue(result.get("is_alert_target"))
+        self.assertEqual(create_alert_call_count, 1)
+
     def test_process_analysis_job_skips_when_not_pending(self):
         job = {"id": 10, "product_id": "1001"}
 

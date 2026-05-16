@@ -57,6 +57,8 @@ class UserSettingsTargetBuyPriceTest(unittest.TestCase):
             "alert_drop_rate_percent": 20.50,
             "target_buy_price_krw": 795000,
             "alert_price_direction": "ABOVE_OR_EQUAL",
+            "min_price_krw": None,
+            "max_price_krw": 900000,
             "last_polled_at": None,
             "last_poll_requested_at": None,
             "created_at": None,
@@ -66,6 +68,8 @@ class UserSettingsTargetBuyPriceTest(unittest.TestCase):
         item = _poll_target_row_to_dict(row)
         self.assertEqual(item.get("target_buy_price_krw"), 795000)
         self.assertEqual(item.get("alert_price_direction"), "ABOVE_OR_EQUAL")
+        self.assertIsNone(item.get("min_price_krw"))
+        self.assertEqual(item.get("max_price_krw"), 900000)
 
     def test_upsert_query_does_not_write_generated_target_column(self):
         fake_cursor = _FakeCursor()
@@ -122,6 +126,7 @@ class UserSettingsTargetBuyPriceTest(unittest.TestCase):
                         alert_drop_rate_percent=-10.00,
                         enabled=True,
                         alert_price_direction="ABOVE_OR_EQUAL",
+                        max_price_krw=1100000,
                         search_keyword="m2맥북에어",
                         poll_interval_seconds=60,
                     )
@@ -129,6 +134,39 @@ class UserSettingsTargetBuyPriceTest(unittest.TestCase):
         self.assertTrue(result.get("ok"))
         self.assertEqual(result.get("item", {}).get("target_buy_price_krw"), 1100000)
         self.assertEqual(result.get("item", {}).get("alert_price_direction"), "ABOVE_OR_EQUAL")
+        self.assertIsNone(result.get("item", {}).get("min_price_krw"))
+        self.assertEqual(result.get("item", {}).get("max_price_krw"), 1100000)
+
+    def test_upsert_normalizes_bounds_by_direction(self):
+        fake_cursor = _FakeCursor()
+        fake_connection = _FakeConnection(fake_cursor)
+
+        with patch("src.user_settings_service.get_connection", return_value=fake_connection):
+            with patch("src.user_settings_service.is_valid_macbook_air_unit", return_value=True):
+                with patch(
+                    "src.user_settings_service._resolve_setting_search_keyword",
+                    return_value="m2맥북에어",
+                ):
+                    result = upsert_user_fair_price_setting(
+                        user_id="boongtol",
+                        product_type="MacBook Air",
+                        chip="M2",
+                        screen_inch=13,
+                        ram_gb=8,
+                        ssd_gb=256,
+                        fair_price_krw=1000000,
+                        alert_drop_rate_percent=20.0,
+                        enabled=True,
+                        alert_price_direction="BELOW_OR_EQUAL",
+                        min_price_krw=300000,
+                        max_price_krw=900000,
+                        search_keyword="m2맥북에어",
+                        poll_interval_seconds=60,
+                    )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("item", {}).get("min_price_krw"), 300000)
+        self.assertIsNone(result.get("item", {}).get("max_price_krw"))
 
     def test_upsert_rejects_invalid_alert_price_direction(self):
         result = upsert_user_fair_price_setting(

@@ -59,6 +59,8 @@ class ApiServerUserRegistrationTest(unittest.TestCase):
             fair_price_krw=1000000,
             alert_drop_rate_percent=-10.0,
             alert_price_direction="ABOVE_OR_EQUAL",
+            min_price_krw=None,
+            max_price_krw=1100000,
             enabled=True,
             search_keyword="m2맥북에어",
             poll_interval_seconds=60,
@@ -71,6 +73,8 @@ class ApiServerUserRegistrationTest(unittest.TestCase):
         mock_upsert_setting.assert_called_once()
         self.assertEqual(mock_upsert_setting.call_args.kwargs.get("alert_drop_rate_percent"), -10.0)
         self.assertEqual(mock_upsert_setting.call_args.kwargs.get("alert_price_direction"), "ABOVE_OR_EQUAL")
+        self.assertIsNone(mock_upsert_setting.call_args.kwargs.get("min_price_krw"))
+        self.assertEqual(mock_upsert_setting.call_args.kwargs.get("max_price_krw"), 1100000)
 
     @patch("src.api_server.register_user", return_value={"ok": False, "reason": "duplicate_device_conflict"})
     def test_user_fair_prices_returns_registration_failure(self, mock_register_user):
