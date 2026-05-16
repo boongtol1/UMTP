@@ -22,7 +22,13 @@ fun MacBookAirSettingCard(
     unit: MacBookAirUnit,
     userSetting: UserFairPriceItem?,
     isSaving: Boolean,
-    onSave: (fairPrice: Int, desiredPrice: Int, enabled: Boolean, searchKeyword: String?) -> Unit
+    onSave: (
+        fairPrice: Int,
+        desiredPrice: Int,
+        alertPriceDirection: String,
+        enabled: Boolean,
+        searchKeyword: String?
+    ) -> Unit
 ) {
     var fairPriceText by remember(userSetting) { 
         mutableStateOf(userSetting?.user_fair_price_krw?.toString() ?: userSetting?.system_fair_price_krw?.toString() ?: "") 
@@ -36,6 +42,13 @@ fun MacBookAirSettingCard(
         val dropRate = userSetting?.user_alert_drop_rate_percent ?: userSetting?.effective_alert_drop_rate_percent
         val initialDesiredPrice = calculateDesiredPrice(fair, dropRate)
         mutableStateOf(initialDesiredPrice?.toString() ?: "")
+    }
+    var alertPriceDirection by remember(userSetting) {
+        mutableStateOf(
+            normalizeAlertPriceDirection(
+                userSetting?.user_alert_price_direction ?: userSetting?.effective_alert_price_direction
+            )
+        )
     }
 
     val numberFormat = NumberFormat.getNumberInstance(Locale.KOREA)
@@ -128,6 +141,41 @@ fun MacBookAirSettingCard(
                 style = MaterialTheme.typography.bodySmall
             )
 
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "알림 방향",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = alertPriceDirection == BELOW_OR_EQUAL,
+                        onClick = { alertPriceDirection = BELOW_OR_EQUAL }
+                    )
+                    Text("이하 알림")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = alertPriceDirection == ABOVE_OR_EQUAL,
+                        onClick = { alertPriceDirection = ABOVE_OR_EQUAL }
+                    )
+                    Text("이상 알림")
+                }
+            }
+            Text(
+                text = if (alertPriceDirection == ABOVE_OR_EQUAL) {
+                    "이 가격 이상이면 알림을 받습니다."
+                } else {
+                    "이 가격 이하이면 알림을 받습니다."
+                },
+                style = MaterialTheme.typography.bodySmall
+            )
+
             Spacer(modifier = Modifier.height(16.dp))
 
             Button(
@@ -135,7 +183,13 @@ fun MacBookAirSettingCard(
                     val price = fairPriceText.toIntOrNull() ?: 0
                     val desiredPrice = desiredPriceText.toIntOrNull() ?: 0
                     if (price > 0 && desiredPrice > 0) {
-                        onSave(price, desiredPrice, enabled, searchKeywordText.trim().ifEmpty { null })
+                        onSave(
+                            price,
+                            desiredPrice,
+                            alertPriceDirection,
+                            enabled,
+                            searchKeywordText.trim().ifEmpty { null },
+                        )
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -172,6 +226,16 @@ private fun calculateDesiredPrice(fairPrice: Int?, dropRate: Double?): Int? {
     val desired = fairPrice.toDouble() * (1.0 - (dropRate / 100.0))
     return desired.roundToInt().coerceAtLeast(0)
 }
+
+private fun normalizeAlertPriceDirection(raw: String?): String {
+    return when (raw?.trim()?.uppercase()) {
+        ABOVE_OR_EQUAL -> ABOVE_OR_EQUAL
+        else -> BELOW_OR_EQUAL
+    }
+}
+
+private const val BELOW_OR_EQUAL = "BELOW_OR_EQUAL"
+private const val ABOVE_OR_EQUAL = "ABOVE_OR_EQUAL"
 
 @Composable
 private fun InfoRow(label: String, value: String, valueColor: Color = Color.Unspecified) {

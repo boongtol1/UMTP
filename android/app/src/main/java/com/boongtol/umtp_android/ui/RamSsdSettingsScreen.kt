@@ -23,7 +23,7 @@ fun RamSsdSettingsScreen(
     units: List<MacBookAirUnit>,
     userSettings: List<UserFairPriceItem>,
     savingItemKey: String?,
-    onSave: (MacBookAirUnit, Int, Int, Boolean, String?) -> Unit,
+    onSave: (MacBookAirUnit, Int, Int, String, Boolean, String?) -> Unit,
     onBack: () -> Unit
 ) {
     Scaffold(
@@ -62,8 +62,8 @@ fun RamSsdSettingsScreen(
                         unit = unit,
                         userSetting = setting,
                         isSaving = savingItemKey == itemKey,
-                        onSave = { fairPrice, desiredPrice, enabled, searchKeyword ->
-                            onSave(unit, fairPrice, desiredPrice, enabled, searchKeyword)
+                        onSave = { fairPrice, desiredPrice, alertPriceDirection, enabled, searchKeyword ->
+                            onSave(unit, fairPrice, desiredPrice, alertPriceDirection, enabled, searchKeyword)
                         }
                     )
                 }

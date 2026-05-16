@@ -173,6 +173,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         unit: MacBookAirUnit,
         fairPrice: Int,
         desiredPrice: Int,
+        alertPriceDirection: String,
         enabled: Boolean,
         searchKeyword: String?
     ) {
@@ -183,12 +184,12 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             _toastMessage.value = "공정가와 희망 구매가는 1원 이상이어야 합니다."
             return
         }
-        if (desiredPrice > fairPrice) {
-            _toastMessage.value = "희망 구매가는 공정가 이하로 입력해주세요."
-            return
-        }
 
         val dropRatePercent = ((fairPrice - desiredPrice).toDouble() / fairPrice.toDouble()) * 100.0
+        if (dropRatePercent < -100.0 || dropRatePercent > 100.0) {
+            _toastMessage.value = "차이비율은 -100.00% ~ 100.00% 범위여야 합니다."
+            return
+        }
 
         viewModelScope.launch {
             _savingItemKey.value = itemKey
@@ -202,6 +203,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     ssd_gb = unit.ssd_gb,
                     fair_price_krw = fairPrice,
                     alert_drop_rate_percent = dropRatePercent,
+                    alert_price_direction = alertPriceDirection,
                     enabled = enabled,
                     search_keyword = searchKeyword?.trim()?.ifEmpty { null },
                     poll_interval_seconds = 60

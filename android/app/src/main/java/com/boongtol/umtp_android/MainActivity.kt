@@ -102,8 +102,15 @@ fun MainTabScreen(viewModel: MacBookAirSettingsViewModel, userId: String) {
                     units = units,
                     userSettings = userSettings,
                     savingItemKey = savingItemKey,
-                    onUpsert = { unit, fairPrice, desiredPrice, enabled, searchKeyword ->
-                        viewModel.upsertItem(unit, fairPrice, desiredPrice, enabled, searchKeyword)
+                    onUpsert = { unit, fairPrice, desiredPrice, alertPriceDirection, enabled, searchKeyword ->
+                        viewModel.upsertItem(
+                            unit,
+                            fairPrice,
+                            desiredPrice,
+                            alertPriceDirection,
+                            enabled,
+                            searchKeyword,
+                        )
                     }
                 )
             }
@@ -117,7 +124,7 @@ fun SettingsNavigator(
     units: List<com.boongtol.umtp_android.network.MacBookAirUnit>,
     userSettings: List<com.boongtol.umtp_android.network.UserFairPriceItem>,
     savingItemKey: String?,
-    onUpsert: (com.boongtol.umtp_android.network.MacBookAirUnit, Int, Int, Boolean, String?) -> Unit
+    onUpsert: (com.boongtol.umtp_android.network.MacBookAirUnit, Int, Int, String, Boolean, String?) -> Unit
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.ChipList) }
 
