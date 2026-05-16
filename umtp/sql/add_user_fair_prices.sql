@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS user_fair_prices (
   ssd_gb INT NOT NULL,
   fair_price_krw INT NOT NULL,
   alert_drop_rate_percent DECIMAL(5,2) NOT NULL,
+  alert_price_direction VARCHAR(32) NOT NULL DEFAULT 'BELOW_OR_EQUAL',
   target_buy_price_krw INT
     GENERATED ALWAYS AS (
       ROUND(
@@ -47,6 +48,7 @@ INSERT INTO user_fair_prices (
   ssd_gb,
   fair_price_krw,
   alert_drop_rate_percent,
+  alert_price_direction,
   enabled,
   search_keyword,
   poll_interval_seconds,
@@ -63,6 +65,7 @@ VALUES (
   256,
   550000,
   20,
+  'BELOW_OR_EQUAL',
   TRUE,
   'm1맥북에어',
   60,
@@ -73,6 +76,7 @@ VALUES (
 ON DUPLICATE KEY UPDATE
   fair_price_krw = VALUES(fair_price_krw),
   alert_drop_rate_percent = VALUES(alert_drop_rate_percent),
+  alert_price_direction = VALUES(alert_price_direction),
   enabled = VALUES(enabled),
   search_keyword = VALUES(search_keyword),
   poll_interval_seconds = VALUES(poll_interval_seconds),
