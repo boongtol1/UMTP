@@ -15,6 +15,7 @@ UMTP(Used Market Tracker Project)의 Android 클라이언트 앱입니다.
 | MVP-G | 앱 내부 사용자 ID 기반 구조 | ✅ 완료 |
 | MVP-H | 사용자별 MacBook Air 설정 트리 UI | ✅ 완료 |
 | MVP-I | 기기당 단일 user_id + 앱 내부 거래 알림 피드 | ✅ 완료 |
+| MVP-J | FCM 서버 푸시 알림 | ✅ 완료 |
 
 ### MVP-A: 수동 URL 전송
 사용자가 직접 중고나라 매물 URL을 입력하여 서버에 분석을 요청하고 결과를 확인하는 단계입니다. (현재 메인 화면에서 제외됨)
@@ -66,6 +67,13 @@ UMTP(Used Market Tracker Project)의 Android 클라이언트 앱입니다.
 - Retrofit2, OkHttp3 (Logging Interceptor)
 - Kotlin Coroutines
 - Material 3
+- Firebase Cloud Messaging (FCM)
+
+### Firebase Push 알림 설정
+- 이 앱은 Firebase Cloud Messaging을 사용합니다.
+- `app/google-services.json` 파일이 필요합니다. (보안상 저장소에는 포함되지 않음)
+- 사용자 ID 등록 시 FCM 토큰이 자동으로 서버에 등록됩니다.
+- 알림 클릭 시 해당 매물의 상세 정보로 이동합니다.
 
 ### 서버 주소 설정
 - 기본 서버 주소는 `http://183.111.181.122:8000/` 입니다.
