@@ -24,7 +24,9 @@ data class MacBookAirUnit(
 
 data class MacBookAirUnitsResponse(
     val ok: Boolean,
-    val units: List<MacBookAirUnit> = emptyList()
+    val units: List<MacBookAirUnit> = emptyList(),
+    val message: String? = null,
+    val reason: String? = null
 )
 
 data class UserFairPriceItem(

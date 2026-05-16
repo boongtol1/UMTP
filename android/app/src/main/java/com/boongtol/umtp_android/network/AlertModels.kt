@@ -40,4 +40,6 @@ data class TradeTypeFlags(
 data class AlertsResponse(
     val ok: Boolean,
     val items: List<AlertItem> = emptyList(),
+    val message: String? = null,
+    val reason: String? = null,
 )
