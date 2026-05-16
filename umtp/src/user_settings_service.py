@@ -238,7 +238,7 @@ def _fetch_user_overrides_map(cursor, user_id):
         cursor.execute(
             """
             SELECT product_type, chip, screen_inch, ram_gb, ssd_gb,
-                   fair_price_krw, alert_drop_rate_percent, enabled,
+                   fair_price_krw, alert_drop_rate_percent, target_buy_price_krw, enabled,
                    search_keyword, force_poll, poll_interval_seconds,
                    last_polled_at, last_poll_requested_at
             FROM user_fair_prices
@@ -297,6 +297,7 @@ def _fetch_user_overrides_map(cursor, user_id):
         user_map[key] = {
             "fair_price_krw": _safe_int(row.get("fair_price_krw")),
             "alert_drop_rate_percent": _safe_float(row.get("alert_drop_rate_percent")),
+            "target_buy_price_krw": _safe_int(row.get("target_buy_price_krw")),
             "enabled": _safe_bool(row.get("enabled"), default=True),
             "search_keyword": _normalize_optional_search_keyword(row.get("search_keyword")),
             "force_poll": _safe_bool(row.get("force_poll"), default=False),
@@ -347,6 +348,7 @@ def get_user_fair_price_settings(user_id):
         user_alert_drop_rate_percent = (
             user_item.get("alert_drop_rate_percent") if has_user_override else None
         )
+        user_target_buy_price_krw = user_item.get("target_buy_price_krw") if has_user_override else None
         enabled = user_item.get("enabled", True) if has_user_override else False
         custom_search_keyword = user_item.get("search_keyword") if has_user_override else None
         recommended_search_keyword = _build_recommended_search_keyword(
@@ -369,9 +371,11 @@ def get_user_fair_price_settings(user_id):
         if has_user_override:
             effective_fair_price_krw = user_fair_price_krw
             effective_alert_drop_rate_percent = user_alert_drop_rate_percent
+            effective_target_buy_price_krw = user_target_buy_price_krw
         else:
             effective_fair_price_krw = system_fair_price_krw
             effective_alert_drop_rate_percent = system_alert_drop_rate_percent
+            effective_target_buy_price_krw = None
 
         items.append(
             {
@@ -384,9 +388,11 @@ def get_user_fair_price_settings(user_id):
                 "system_alert_drop_rate_percent": system_alert_drop_rate_percent,
                 "user_fair_price_krw": user_fair_price_krw,
                 "user_alert_drop_rate_percent": user_alert_drop_rate_percent,
+                "user_target_buy_price_krw": user_target_buy_price_krw,
                 "enabled": bool(enabled),
                 "effective_fair_price_krw": effective_fair_price_krw,
                 "effective_alert_drop_rate_percent": effective_alert_drop_rate_percent,
+                "effective_target_buy_price_krw": effective_target_buy_price_krw,
                 "custom_search_keyword": custom_search_keyword,
                 "recommended_search_keyword": recommended_search_keyword,
                 "effective_search_keyword": effective_search_keyword,
@@ -786,6 +792,7 @@ def _poll_target_row_to_dict(row):
         "poll_interval_seconds": _safe_int(row.get("poll_interval_seconds")) or DEFAULT_POLL_INTERVAL_SECONDS,
         "fair_price_krw": _safe_int(row.get("fair_price_krw")),
         "alert_drop_rate_percent": _safe_float(row.get("alert_drop_rate_percent")),
+        "target_buy_price_krw": _safe_int(row.get("target_buy_price_krw")),
         "last_polled_at": row.get("last_polled_at"),
         "last_poll_requested_at": row.get("last_poll_requested_at"),
         "created_at": row.get("created_at"),
@@ -869,6 +876,7 @@ def get_due_user_fair_price_polling_targets(user_id=None):
                     poll_interval_seconds,
                     fair_price_krw,
                     alert_drop_rate_percent,
+                    target_buy_price_krw,
                     last_polled_at,
                     last_poll_requested_at,
                     created_at,

@@ -10,6 +10,14 @@ CREATE TABLE IF NOT EXISTS user_fair_prices (
   ssd_gb INT NOT NULL,
   fair_price_krw INT NOT NULL,
   alert_drop_rate_percent DECIMAL(5,2) NOT NULL,
+  target_buy_price_krw INT
+    GENERATED ALWAYS AS (
+      ROUND(
+        fair_price_krw * (
+          1 - (alert_drop_rate_percent / 100)
+        )
+      )
+    ) STORED,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   search_keyword VARCHAR(255) NULL,
   poll_interval_seconds INT NOT NULL DEFAULT 60,

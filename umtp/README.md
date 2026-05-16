@@ -48,6 +48,8 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 향후에는 중고장터 키워드 알림에서 전달된 URL을 자동 분석하는 구조로 확장할 예정입니다.
 - 0.8 초안: `sql/add_user_fair_prices.sql`로 사용자별 공정가 테이블을 추가합니다.
 - `user_fair_prices`는 사용자별 공정가(`fair_price_krw`)와 알림 기준(`alert_drop_rate_percent`)을 관리합니다.
+- `user_fair_prices.target_buy_price_krw`는 GENERATED STORED 컬럼이며 `ROUND(fair_price_krw * (1 - alert_drop_rate_percent / 100))`로 자동 계산됩니다.
+- 예: 공정가 `1,000,000원`, 차이비율 `20.50%`이면 목표 구매가(`target_buy_price_krw`)는 `795,000원`입니다.
 - 0.8 서비스 계층: `analysis_service.py`에서 URL 분석과 `ok/ reason` 실패 응답을 처리합니다.
 - 0.8 알림은 `notifier.py`의 `print()` 기반 가짜 알림으로 처리합니다.
 - 0.8은 Android Notification Listener 앱 자체를 구현하지 않고 `curl` 요청으로 URL 전달 상황을 흉내냅니다.
@@ -775,6 +777,7 @@ mysql -u <DB_USER> -p < sql/add_risk_exchange_columns.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_joongna_seen_products.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_joongna_seen_products_refresh_detection.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_user_fair_prices_polling_keywords.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_target_buy_price_generated_column.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_analysis_jobs.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_or_alter_alert_events.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_listing_analysis_results_pipeline.sql
