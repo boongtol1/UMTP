@@ -8,10 +8,34 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.notification_worker import process_pending_alert_events, send_alert_event  # noqa: E402
+from src.notification_worker import (  # noqa: E402
+    _build_telegram_message,
+    process_pending_alert_events,
+    send_alert_event,
+)
 
 
 class NotificationWorkerTest(unittest.TestCase):
+    def test_build_telegram_message_keeps_default_format(self):
+        message = _build_telegram_message(
+            {
+                "title": "맥북에어 m2 기본형",
+                "price_krw": 650000,
+                "fair_price_krw": 800000,
+                "drop_rate_percent": 18.75,
+                "trigger_reason": "new_product",
+                "url": "https://web.joongna.com/product/1001",
+            }
+        )
+
+        self.assertIn("[UMTP 알림]", message)
+        self.assertIn("맥북에어 m2 기본형", message)
+        self.assertIn("현재가: 650,000원", message)
+        self.assertIn("공정가: 800,000원", message)
+        self.assertIn("저평가율: 18.75%", message)
+        self.assertIn("트리거: new_product", message)
+        self.assertIn("https://web.joongna.com/product/1001", message)
+
     def test_send_alert_event_app_only_when_alerts_disabled(self):
         with patch(
             "src.notification_worker.resolve_user_alert_delivery_policy",

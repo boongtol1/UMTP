@@ -54,6 +54,32 @@ class ApiServerUserRegistrationTest(unittest.TestCase):
         self.assertIn("사용자 등록 실패", response.get("reason", ""))
         mock_register_user.assert_called_once_with(user_id="boongtol")
 
+    @patch(
+        "src.api_server.list_alert_events_for_user",
+        return_value=[
+            {
+                "id": 1,
+                "user_id": "boongtol",
+                "title": "맥북에어 m2 기본형",
+                "listing_price_krw": 600000,
+                "fair_price_krw": 800000,
+                "diff_ratio": 25.0,
+                "is_alert_target": True,
+                "product_url": "https://web.joongna.com/product/1",
+                "created_at": "2026-05-16T00:00:00",
+            }
+        ],
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_alerts_registers_user_before_listing_events(self, mock_register_user, mock_list_alerts):
+        response = api_server.alerts(" boongtol ", limit=10)
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("user_id"), "boongtol")
+        self.assertEqual(len(response.get("items", [])), 1)
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_list_alerts.assert_called_once_with("boongtol", limit=10)
+
 
 if __name__ == "__main__":
     unittest.main()

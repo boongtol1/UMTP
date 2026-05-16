@@ -244,6 +244,57 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
         self.assertEqual(result.get("alert_skip_reason"), "user_target_disabled")
         self.assertEqual(mock_create_alert.call_count, 0)
 
+    def test_base_model_keyword_parsed_listing_creates_alert(self):
+        fake_cursor = _FakeCursor()
+        fake_connection = _FakeConnection(fake_cursor)
+
+        with patch("src.listing_analysis_pipeline.fetch_html", return_value="<html></html>"):
+            with patch(
+                "src.listing_analysis_pipeline.parse_joongna_listing_page",
+                return_value={
+                    "title": "맥북에어 m2 기본형",
+                    "description": "테스트",
+                    "listing_price_krw": 600000,
+                    "self_check_fields": {},
+                },
+            ):
+                with patch(
+                    "src.listing_analysis_pipeline.is_user_fair_price_target_enabled",
+                    return_value=True,
+                ):
+                    with patch(
+                        "src.listing_analysis_pipeline.resolve_fair_price_for_user",
+                        return_value={
+                            "fair_price_krw": 800000,
+                            "alert_drop_rate_percent": 20.0,
+                            "source": "user_fair_prices",
+                        },
+                    ):
+                        with patch("src.listing_analysis_pipeline.get_connection", return_value=fake_connection):
+                            with patch(
+                                "src.listing_analysis_pipeline.save_listing_analysis_result",
+                                return_value={"analysis_result_id": 4, "diff_ratio": 25.0},
+                            ) as mock_save_result:
+                                with patch("src.listing_analysis_pipeline.save_success_log"):
+                                    with patch(
+                                        "src.listing_analysis_pipeline.maybe_create_alert_event",
+                                        return_value={"created": True, "alert_id": 31},
+                                    ) as mock_create_alert:
+                                        result = analyze_product_for_watch_rule(self._build_job())
+
+        self.assertTrue(result.get("ok"))
+        self.assertTrue(result.get("is_alert_target"))
+        self.assertTrue(result.get("alert_created"))
+        self.assertEqual(result.get("alert_event_id"), 31)
+        self.assertEqual(mock_create_alert.call_count, 1)
+
+        parsed_spec = mock_save_result.call_args.kwargs.get("parsed_spec")
+        self.assertTrue(parsed_spec.get("parse_success"))
+        self.assertEqual(parsed_spec.get("product_type"), "MacBook Air")
+        self.assertEqual(parsed_spec.get("chip"), "M2")
+        self.assertEqual(parsed_spec.get("ram_gb"), 8)
+        self.assertEqual(parsed_spec.get("ssd_gb"), 256)
+
     def test_process_analysis_job_skips_when_not_pending(self):
         job = {"id": 10, "product_id": "1001"}
 
