@@ -29,6 +29,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
+import android.content.Intent
+import com.boongtol.umtp_android.fcm.PushTokenManager
 import com.boongtol.umtp_android.network.WatchRuleItem
 import com.boongtol.umtp_android.network.WatchRuleUpsertRequest
 import java.text.NumberFormat
@@ -50,6 +62,34 @@ fun WatchRuleSettingsScreen(
     onRequestPollNow: (userId: String, searchKeyword: String) -> Unit,
     onRefreshWatchRules: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pushTokenManager = remember { PushTokenManager(context) }
+    var fcmToken by remember { mutableStateOf("조회 중...") }
+    var isPushTokenRegistered by remember { mutableStateOf(false) }
+    var hasNotificationPermission by remember { mutableStateOf(false) }
+
+    val userPreferences = remember { com.boongtol.umtp_android.user.UserPreferences(context) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasNotificationPermission = isGranted
+    }
+
+    LaunchedEffect(Unit) {
+        fcmToken = pushTokenManager.getFreshToken() ?: "토큰 없음"
+        isPushTokenRegistered = userPreferences.isPushTokenRegistered()
+        hasNotificationPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
     val chipOptions = listOf("M1", "M2", "M3", "M4", "M5")
     val screenOptions = listOf(13, 15)
     val ramOptions = listOf(8, 16, 24, 32)
@@ -298,6 +338,84 @@ fun WatchRuleSettingsScreen(
                 }
                 HorizontalDivider()
             }
+        }
+
+        HorizontalDivider()
+
+        Text("푸시 알림 설정 (디버그)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        
+        Text("권한 상태: ${if (hasNotificationPermission) "허용됨" else "거부됨"}", style = MaterialTheme.typography.bodySmall)
+        Text("서버 등록 상태: ${if (isPushTokenRegistered) "완료" else "미등록"}", style = MaterialTheme.typography.bodySmall)
+
+        if (!hasNotificationPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Button(onClick = { permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }) {
+                Text("알림 권한 요청")
+            }
+        }
+
+        Text("FCM 토큰: ${if (fcmToken.length > 20) fcmToken.take(10) + "..." + fcmToken.takeLast(10) else fcmToken}", style = MaterialTheme.typography.bodySmall)
+        
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { 
+                    scope.launch {
+                        fcmToken = pushTokenManager.getFreshToken() ?: "토큰 없음"
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("토큰 확인", style = MaterialTheme.typography.labelSmall)
+            }
+            Button(
+                onClick = { 
+                    pushTokenManager.registerTokenToServerIfNeeded() 
+                    // Refresh status after a short delay
+                    scope.launch {
+                        kotlinx.coroutines.delay(1000)
+                        isPushTokenRegistered = userPreferences.isPushTokenRegistered()
+                    }
+                },
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("서버 등록", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+
+        Button(
+            onClick = {
+                // Local test notification
+                val notificationManager = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val channel = android.app.NotificationChannel(
+                        "umtp_alerts_channel",
+                        "UMTP 매물 알림",
+                        android.app.NotificationManager.IMPORTANCE_HIGH
+                    )
+                    notificationManager.createNotificationChannel(channel)
+                }
+
+                val testIntent = Intent(context, com.boongtol.umtp_android.MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    putExtra("alert_id", "test_123")
+                }
+                val pendingIntent = android.app.PendingIntent.getActivity(
+                    context, 0, testIntent, 
+                    android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                )
+
+                val builder = androidx.core.app.NotificationCompat.Builder(context, "umtp_alerts_channel")
+                    .setSmallIcon(com.boongtol.umtp_android.R.drawable.ic_launcher_foreground)
+                    .setContentTitle("테스트 알림")
+                    .setContentText("이것은 UMTP 푸시 테스트 알림입니다.")
+                    .setAutoCancel(true)
+                    .setContentIntent(pendingIntent)
+                    .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+
+                notificationManager.notify(999, builder.build())
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("테스트 알림 표시")
         }
     }
 }
