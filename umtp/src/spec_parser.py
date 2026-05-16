@@ -29,11 +29,19 @@ TB_TO_GB_MAP = {
     "4테라": 4096,
 }
 
+BASE_MODEL_KEYWORD_PATTERN = re.compile(r"(?<![가-힣])(기본형|깡통)(?![가-힣])")
+
 
 def _normalize_text(text):
     if not isinstance(text, str):
         return ""
     return " ".join(text.split()).strip()
+
+
+def contains_base_model_keyword(text):
+    if not isinstance(text, str) or not text.strip():
+        return False
+    return BASE_MODEL_KEYWORD_PATTERN.search(text) is not None
 
 
 def _normalize_self_check_fields(self_check_fields):
