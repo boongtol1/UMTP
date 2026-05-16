@@ -1,11 +1,18 @@
 package com.boongtol.umtp_android
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -14,16 +21,24 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.boongtol.umtp_android.fcm.PushTokenManager
 import com.boongtol.umtp_android.ui.*
 import com.boongtol.umtp_android.ui.theme.UMTP_ANDROIDTheme
 import com.boongtol.umtp_android.user.UserPreferences
 
 class MainActivity : ComponentActivity() {
+    private var pushTokenManager: PushTokenManager? = null
+    private val _deepLinkAlertId = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
         val userPreferences = UserPreferences(this)
+        pushTokenManager = PushTokenManager(this)
+
+        handleIntent(intent)
 
         enableEdgeToEdge()
         setContent {
@@ -35,13 +50,42 @@ class MainActivity : ComponentActivity() {
                 val userId by viewModel.userId.collectAsState()
                 val isLoading by viewModel.isLoading.collectAsState()
                 val toastMessage by viewModel.toastMessage.collectAsState()
+                val deepLinkAlertId by _deepLinkAlertId
                 
                 val context = LocalContext.current
+
+                val permissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { isGranted ->
+                    if (isGranted) {
+                        Log.d("MainActivity", "Notification permission granted")
+                    } else {
+                        Log.d("MainActivity", "Notification permission denied")
+                    }
+                }
+
+                LaunchedEffect(Unit) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        if (ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.POST_NOTIFICATIONS
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
+                }
                 
                 LaunchedEffect(toastMessage) {
                     toastMessage?.let {
                         Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
                         viewModel.clearToastMessage()
+                    }
+                }
+
+                LaunchedEffect(userId) {
+                    if (userId != null) {
+                        pushTokenManager?.checkAndRegisterToken()
                     }
                 }
 
@@ -57,21 +101,54 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                 } else {
-                    MainTabScreen(viewModel, userId!!)
+                    MainTabScreen(
+                        viewModel = viewModel, 
+                        userId = userId!!,
+                        initialAlertId = deepLinkAlertId,
+                        onAlertNavigated = { _deepLinkAlertId.value = null }
+                    )
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        val alertId = intent?.getStringExtra("alert_id")
+        if (alertId != null) {
+            _deepLinkAlertId.value = alertId
+            Log.d("MainActivity", "Received Alert ID via Push: $alertId")
         }
     }
 }
 
 @Composable
-fun MainTabScreen(viewModel: MacBookAirSettingsViewModel, userId: String) {
+fun MainTabScreen(
+    viewModel: MacBookAirSettingsViewModel, 
+    userId: String,
+    initialAlertId: String? = null,
+    onAlertNavigated: () -> Unit = {}
+) {
     var selectedTab by remember { mutableIntStateOf(0) }
     
     val alerts by viewModel.alerts.collectAsState()
     val units by viewModel.units.collectAsState()
     val userSettings by viewModel.userSettings.collectAsState()
     val savingItemKey by viewModel.savingItemKey.collectAsState()
+
+    var targetAlertId by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(initialAlertId) {
+        if (initialAlertId != null) {
+            targetAlertId = initialAlertId
+            selectedTab = 0
+            onAlertNavigated()
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -95,7 +172,9 @@ fun MainTabScreen(viewModel: MacBookAirSettingsViewModel, userId: String) {
             when (selectedTab) {
                 0 -> AlertFeedScreen(
                     alerts = alerts,
-                    onRefresh = { viewModel.fetchAlerts(userId) }
+                    onRefresh = { viewModel.fetchAlerts(userId) },
+                    initialTargetAlertId = targetAlertId,
+                    onTargetAlertFound = { targetAlertId = null }
                 )
                 1 -> SettingsNavigator(
                     userId = userId,

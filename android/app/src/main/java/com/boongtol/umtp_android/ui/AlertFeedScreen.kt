@@ -25,6 +25,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,10 +44,28 @@ import com.boongtol.umtp_android.network.TradeTypeFlags
 fun AlertFeedScreen(
     alerts: List<AlertItem>,
     onRefresh: () -> Unit,
+    initialTargetAlertId: String? = null,
+    onTargetAlertFound: () -> Unit = {},
 ) {
     var readIds by remember { mutableStateOf(setOf<Long>()) }
     var expandedIds by remember { mutableStateOf(setOf<Long>()) }
     val context = LocalContext.current
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+    LaunchedEffect(initialTargetAlertId, alerts) {
+        if (initialTargetAlertId != null && alerts.isNotEmpty()) {
+            val targetId = initialTargetAlertId.toLongOrNull()
+            if (targetId != null) {
+                val index = alerts.indexOfFirst { it.id == targetId }
+                if (index != -1) {
+                    expandedIds = expandedIds + targetId
+                    readIds = readIds + targetId
+                    listState.animateScrollToItem(index)
+                    onTargetAlertFound()
+                }
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -75,6 +94,7 @@ fun AlertFeedScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
+            state = listState,
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
