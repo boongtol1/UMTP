@@ -29,6 +29,12 @@ interface UmtpApiService {
         @Body request: UserRegisterRequest
     ): UserRegisterResponse
 
+    @POST("users/{user_id}/push-token")
+    suspend fun registerPushToken(
+        @retrofit2.http.Path("user_id") userId: String,
+        @Body request: PushTokenRequest
+    ): PushTokenResponse
+
     @GET("alerts")
     suspend fun getAlerts(
         @Query("user_id") userId: String
