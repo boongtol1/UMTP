@@ -726,6 +726,9 @@ mysql -u <DB_USER> -p < sql/add_parser_confidence_columns.sql
 - 부족한 항목만 `numeric_candidate_extractor.py`로 제목+본문 숫자 후보를 보조 파싱합니다.
 - 숫자 후보 분리 규칙: 화면 `13/15`, RAM `8/16/24/32`, SSD `256/512/1024/2048/4096`.
 - `1/2/4`는 단독 숫자로 SSD 후보에 넣지 않고 `1TB/2TB/4TB`(`t/테라`)일 때만 `1024/2048/4096`으로 변환합니다.
+- MacBook Air 제목/본문에 정확히 `기본형` 또는 `깡통` 표현이 있고 칩이 파싱되면, RAM/SSD 누락 시 최소 스펙 fallback을 적용합니다.
+- 최소 스펙 fallback은 hardcoded 값이 아니라 `macbook_air_units.py`의 유효 조합 테이블에서 `chip + screen` 기준 최소 valid RAM/SSD를 계산해 사용합니다.
+- RAM/SSD 숫자가 명시된 경우 명시값이 fallback보다 항상 우선합니다(누락된 필드만 fallback으로 보정).
 - `screen_inch`를 찾지 못하면 13인치 기본값을 사용하고 `screen_inch_defaulted=true`로 반환합니다.
 - `confidence_score`는 product/chip/ram/ssd/screen 추출 확실도를 0~100 점수로 반환합니다.
 - `parse_success=false`이면 공정가 조회를 중단하고 `missing_fields`, `unit_validation_reason`를 응답에 포함합니다.
