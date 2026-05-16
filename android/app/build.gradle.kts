@@ -1,7 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.google.services)
+//    alias(libs.plugins.google.services)
 }
 
 val configuredBaseUrl = (project.findProperty("UMTP_BASE_URL") as String?)
