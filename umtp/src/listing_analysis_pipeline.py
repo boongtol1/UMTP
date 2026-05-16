@@ -41,6 +41,7 @@ except ModuleNotFoundError:
     from spec_parser import parse_listing_title
     from user_fair_price import is_user_fair_price_target_enabled, resolve_fair_price_for_user
 DUPLICATE_ENTRY_ERROR_CODE = 1062
+ALERT_BODY_EXCERPT_MAX_LEN = 500
 
 
 def _normalize_optional_text(value):
@@ -161,6 +162,15 @@ def _build_alert_message(title, listing_price_krw, fair_price_krw, drop_rate_per
     )
 
 
+def _build_body_excerpt(description, max_len=ALERT_BODY_EXCERPT_MAX_LEN):
+    normalized = _normalize_optional_text(description)
+    if normalized is None:
+        return None
+    if len(normalized) <= max_len:
+        return normalized
+    return f"{normalized[:max_len].rstrip()}..."
+
+
 def _find_alert_event_by_identity(
     cursor,
     *,
@@ -205,7 +215,16 @@ def maybe_create_alert_event(
     drop_rate_percent,
     trigger_reason,
     message,
+    source=None,
+    parsed_spec=None,
+    alert_drop_rate_percent=None,
+    alert_price_direction=None,
+    risk_result=None,
+    body_excerpt=None,
 ):
+    parsed_spec = parsed_spec or {}
+    risk_result = risk_result or {}
+
     normalized_user_id = _normalize_optional_text(user_id)
     normalized_product_id = _normalize_optional_text(product_id)
 
@@ -228,34 +247,107 @@ def maybe_create_alert_event(
                 user_id,
                 analysis_job_id,
                 product_id,
+                source,
                 url,
                 title,
+                product_type,
+                chip,
+                screen_inch,
+                ram_gb,
+                ssd_gb,
                 price_krw,
                 fair_price_krw,
                 target_price_krw,
                 drop_rate_percent,
+                alert_drop_rate_percent,
+                alert_price_direction,
+                risk_level,
+                risk_score,
+                risk_keywords,
+                is_exchange_post,
+                trade_type,
+                body_excerpt,
+                analyzed_at,
                 trigger_reason,
                 message,
                 status,
                 send_attempts
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 0)
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, 'pending', 0
+            )
             """,
             (
                 normalized_user_id,
                 _normalize_optional_int(analysis_job_id),
                 normalized_product_id,
+                _normalize_optional_text(source),
                 _normalize_optional_text(url),
                 _normalize_optional_text(title),
+                _normalize_optional_text(parsed_spec.get("product_type")),
+                _normalize_optional_text(parsed_spec.get("chip")),
+                _normalize_optional_int(parsed_spec.get("screen_inch")),
+                _normalize_optional_int(parsed_spec.get("ram_gb")),
+                _normalize_optional_int(parsed_spec.get("ssd_gb")),
                 _normalize_optional_int(price_krw),
                 _normalize_optional_int(fair_price_krw),
                 _normalize_optional_int(target_price_krw),
                 _normalize_optional_float(drop_rate_percent),
+                _normalize_optional_float(alert_drop_rate_percent),
+                _normalize_optional_text(alert_price_direction),
+                _normalize_optional_text(risk_result.get("risk_level")),
+                _normalize_optional_int(risk_result.get("risk_score")),
+                _normalize_optional_text(risk_result.get("risk_keywords_json")),
+                bool(risk_result.get("is_exchange_post")) if risk_result.get("is_exchange_post") is not None else None,
+                _normalize_optional_text(risk_result.get("trade_type")),
+                _normalize_optional_text(body_excerpt),
                 _normalize_optional_text(trigger_reason),
                 _normalize_optional_text(message),
             ),
         )
     except Exception as exc:
+        lowered_exc = str(exc).lower()
+        if "unknown column" in lowered_exc:
+            cursor.execute(
+                """
+                INSERT INTO alert_events (
+                    user_id,
+                    analysis_job_id,
+                    product_id,
+                    url,
+                    title,
+                    price_krw,
+                    fair_price_krw,
+                    target_price_krw,
+                    drop_rate_percent,
+                    trigger_reason,
+                    message,
+                    status,
+                    send_attempts
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 0)
+                """,
+                (
+                    normalized_user_id,
+                    _normalize_optional_int(analysis_job_id),
+                    normalized_product_id,
+                    _normalize_optional_text(url),
+                    _normalize_optional_text(title),
+                    _normalize_optional_int(price_krw),
+                    _normalize_optional_int(fair_price_krw),
+                    _normalize_optional_int(target_price_krw),
+                    _normalize_optional_float(drop_rate_percent),
+                    _normalize_optional_text(trigger_reason),
+                    _normalize_optional_text(message),
+                ),
+            )
+            return {
+                "created": True,
+                "alert_id": int(cursor.lastrowid),
+            }
+
         if _is_duplicate_entry_error(exc):
             duplicate = _find_alert_event_by_identity(
                 cursor,
@@ -493,6 +585,16 @@ def analyze_product_for_watch_rule(job):
             "alert_id": None,
         }
         if is_alert_target:
+            risk_keywords = risk_result.get("risk_keywords")
+            risk_keywords_json = None
+            if isinstance(risk_keywords, list):
+                try:
+                    import json
+
+                    risk_keywords_json = json.dumps(risk_keywords, ensure_ascii=False)
+                except Exception:
+                    risk_keywords_json = None
+
             alert_create_result = maybe_create_alert_event(
                 cursor,
                 analysis_job_id=job_id,
@@ -512,6 +614,18 @@ def analyze_product_for_watch_rule(job):
                     drop_rate_percent=drop_rate_percent,
                     url=url,
                 ),
+                source="joongna",
+                parsed_spec=parsed_spec,
+                alert_drop_rate_percent=alert_drop_rate_percent,
+                alert_price_direction=alert_price_direction,
+                risk_result={
+                    "risk_level": risk_result.get("risk_level"),
+                    "risk_score": risk_result.get("risk_score"),
+                    "risk_keywords_json": risk_keywords_json,
+                    "is_exchange_post": risk_result.get("is_exchange_post"),
+                    "trade_type": risk_result.get("trade_type"),
+                },
+                body_excerpt=_build_body_excerpt(description),
             )
 
         result_save = save_listing_analysis_result(
