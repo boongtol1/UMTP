@@ -1,4 +1,11 @@
 from src.analysis_log import save_failed_log, save_success_log
+from src.alert_price_direction import (
+    DEFAULT_ALERT_PRICE_DIRECTION,
+    compute_target_buy_price_krw,
+    is_listing_alert_match,
+    is_valid_alert_drop_rate_percent,
+    normalize_alert_price_direction,
+)
 from src.db import get_connection
 from src.listing_page_parser import fetch_html, parse_joongna_listing_page
 from src.risk_analyzer import analyze_risk
@@ -223,7 +230,7 @@ def analyze_url_for_user(
                 "invalid_alert_drop_rate_percent_override",
                 risk_result=_default_risk_result(),
             )
-        if normalized_alert_drop_rate_percent_override < 0 or normalized_alert_drop_rate_percent_override > 100:
+        if not is_valid_alert_drop_rate_percent(normalized_alert_drop_rate_percent_override):
             return _build_failed_response(
                 url,
                 "invalid_alert_drop_rate_percent_override",
@@ -336,6 +343,11 @@ def analyze_url_for_user(
         if use_price_override:
             fair_price_krw = normalized_fair_price_override_krw
             alert_drop_rate_percent = normalized_alert_drop_rate_percent_override
+            target_buy_price_krw = compute_target_buy_price_krw(
+                fair_price_krw,
+                alert_drop_rate_percent,
+            )
+            alert_price_direction = DEFAULT_ALERT_PRICE_DIRECTION
         else:
             user_fair_price = fetch_user_fair_price(cursor, user_id, parsed_spec)
             if user_fair_price is None:
@@ -345,10 +357,26 @@ def analyze_url_for_user(
             if fair_price_krw <= 0:
                 return fail("사용자 공정가 조회 실패: 공정가가 0보다 커야 합니다.", source=SOURCE_NAME)
             alert_drop_rate_percent = user_fair_price["alert_drop_rate_percent"]
+            target_buy_price_krw = user_fair_price.get("target_buy_price_krw")
+            alert_price_direction = normalize_alert_price_direction(
+                user_fair_price.get("alert_price_direction")
+            )
+            if target_buy_price_krw is None:
+                target_buy_price_krw = compute_target_buy_price_krw(
+                    fair_price_krw,
+                    alert_drop_rate_percent,
+                )
+
+        if alert_drop_rate_percent is None or target_buy_price_krw is None:
+            return fail("사용자 공정가 조회 실패: 알림 기준 계산에 실패했습니다.", source=SOURCE_NAME)
 
         diff_amount_krw = fair_price_krw - listing_price_krw
         diff_ratio = (diff_amount_krw / fair_price_krw) * 100
-        is_alert_target = diff_ratio >= alert_drop_rate_percent
+        is_alert_target = is_listing_alert_match(
+            listing_price_krw,
+            target_buy_price_krw,
+            alert_price_direction,
+        )
 
         listing = {
             "title": title,
@@ -448,8 +476,11 @@ def analyze_url_for_user(
             "trade_type": risk_result.get("trade_type", "sale"),
             "listing_price_krw": listing_price_krw,
             "fair_price_krw": fair_price_krw,
+            "target_buy_price_krw": target_buy_price_krw,
             "diff_amount_krw": diff_amount_krw,
             "diff_ratio": round(diff_ratio, 1),
+            "alert_drop_rate_percent": alert_drop_rate_percent,
+            "alert_price_direction": alert_price_direction,
             "is_alert_target": is_alert_target,
             "telegram_sent": telegram_sent,
             "message": message,

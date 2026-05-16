@@ -1,4 +1,10 @@
 try:
+    from src.alert_price_direction import (
+        BELOW_OR_EQUAL,
+        compute_target_buy_price_krw,
+        is_listing_alert_match,
+        normalize_alert_price_direction,
+    )
     from src.analysis_log import save_success_log
     from src.analysis_jobs import (
         create_analysis_jobs_for_rules,
@@ -14,6 +20,12 @@ try:
     from src.spec_parser import parse_listing_title
     from src.user_fair_price import is_user_fair_price_target_enabled, resolve_fair_price_for_user
 except ModuleNotFoundError:
+    from alert_price_direction import (
+        BELOW_OR_EQUAL,
+        compute_target_buy_price_krw,
+        is_listing_alert_match,
+        normalize_alert_price_direction,
+    )
     from analysis_log import save_success_log
     from analysis_jobs import (
         create_analysis_jobs_for_rules,
@@ -86,33 +98,51 @@ def enqueue_analysis_for_product(product, watch_rules, trigger_reason):
 def _resolve_price_rules(cursor, user_id, parsed_spec):
     parse_success = bool(parsed_spec.get("parse_success")) if isinstance(parsed_spec, dict) else False
     if not parse_success:
-        return None, None, None, "parse_failed", None
+        return None, None, None, None, "parse_failed", None
 
     normalized_user_id = _normalize_optional_text(user_id)
     if normalized_user_id is None:
-        return None, None, None, "user_id_missing", None
+        return None, None, None, None, "user_id_missing", None
 
     try:
         if not is_user_fair_price_target_enabled(cursor, normalized_user_id, parsed_spec):
-            return None, None, None, "user_target_disabled", None
+            return None, None, None, None, "user_target_disabled", None
 
         resolved_fair_price = resolve_fair_price_for_user(cursor, normalized_user_id, parsed_spec)
     except ValueError:
-        return None, None, None, "fair_price_spec_invalid", None
+        return None, None, None, None, "fair_price_spec_invalid", None
 
     if resolved_fair_price is None:
-        return None, None, None, "fair_price_missing", None
+        return None, None, None, None, "fair_price_missing", None
 
     fair_price_krw = _normalize_optional_int(resolved_fair_price.get("fair_price_krw"))
     alert_drop_rate_percent = _normalize_optional_float(
         resolved_fair_price.get("alert_drop_rate_percent")
     )
+    target_buy_price_krw = _normalize_optional_int(resolved_fair_price.get("target_buy_price_krw"))
+    alert_price_direction = normalize_alert_price_direction(resolved_fair_price.get("alert_price_direction"))
     price_source = _normalize_optional_text(resolved_fair_price.get("source"))
 
     if fair_price_krw is None or fair_price_krw <= 0 or alert_drop_rate_percent is None:
-        return None, None, None, "fair_price_missing", price_source
+        return None, None, None, None, "fair_price_missing", price_source
 
-    return fair_price_krw, None, alert_drop_rate_percent, None, price_source
+    if target_buy_price_krw is None:
+        target_buy_price_krw = compute_target_buy_price_krw(
+            fair_price_krw,
+            alert_drop_rate_percent,
+        )
+
+    if target_buy_price_krw is None:
+        return None, None, None, None, "fair_price_missing", price_source
+
+    return (
+        fair_price_krw,
+        target_buy_price_krw,
+        alert_drop_rate_percent,
+        alert_price_direction,
+        None,
+        price_source,
+    )
 
 
 def _build_alert_message(title, listing_price_krw, fair_price_krw, drop_rate_percent, url):
@@ -426,7 +456,7 @@ def analyze_product_for_watch_rule(job):
         connection = get_connection()
         cursor = connection.cursor()
 
-        fair_price_krw, target_price_krw, alert_drop_rate_percent, price_error_reason, fair_price_source = _resolve_price_rules(
+        fair_price_krw, target_price_krw, alert_drop_rate_percent, alert_price_direction, price_error_reason, fair_price_source = _resolve_price_rules(
             cursor,
             user_id,
             parsed_spec,
@@ -442,13 +472,19 @@ def analyze_product_for_watch_rule(job):
             matched_watch_rule
             and fair_price_krw is not None
             and fair_price_krw > 0
-            and alert_drop_rate_percent is not None
             and listing_price_krw is not None
-            and drop_rate_percent is not None
+            and target_price_krw is not None
         ):
-            is_alert_target = drop_rate_percent >= alert_drop_rate_percent
+            is_alert_target = is_listing_alert_match(
+                listing_price_krw,
+                target_price_krw,
+                alert_price_direction,
+            )
             if not is_alert_target:
-                alert_skip_reason = "drop_rate_below_threshold"
+                if normalize_alert_price_direction(alert_price_direction) == BELOW_OR_EQUAL:
+                    alert_skip_reason = "drop_rate_below_threshold"
+                else:
+                    alert_skip_reason = "price_below_threshold"
         elif alert_skip_reason is None:
             alert_skip_reason = "price_condition_missing"
 
@@ -520,6 +556,7 @@ def analyze_product_for_watch_rule(job):
             "target_price_krw": target_price_krw,
             "drop_rate_percent": drop_rate_percent,
             "alert_drop_rate_percent": alert_drop_rate_percent,
+            "alert_price_direction": alert_price_direction,
             "matched_watch_rule": matched_watch_rule,
             "is_alert_target": is_alert_target,
             "alert_created": bool(alert_create_result.get("created")),
