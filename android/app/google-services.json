@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "874897093818",
+    "project_id": "umtp-c5df3",
+    "storage_bucket": "umtp-c5df3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:874897093818:android:2fbc38d08faf40fc803e83",
+        "android_client_info": {
+          "package_name": "com.boongtol.umtp_android"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCWXY17203X0AwaorcWxBBhLR-UeqUU1SE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
