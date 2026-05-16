@@ -1,10 +1,10 @@
 import re
 
 try:
-    from src.macbook_air_units import is_valid_macbook_air_unit
+    from src.macbook_air_units import get_macbook_air_base_spec, is_valid_macbook_air_unit
     from src.numeric_candidate_extractor import extract_numeric_candidates
 except ImportError:
-    from macbook_air_units import is_valid_macbook_air_unit
+    from macbook_air_units import get_macbook_air_base_spec, is_valid_macbook_air_unit
     from numeric_candidate_extractor import extract_numeric_candidates
 
 
@@ -313,6 +313,25 @@ def parse_listing_title(text, self_check_fields=None):
         screen_inch = DEFAULT_SCREEN_INCH
         screen_inch_defaulted = True
         _record_pattern(detected_patterns, "screen_inch", DEFAULT_SCREEN_INCH, "default", None)
+
+    has_base_model_keyword = contains_base_model_keyword(text) or contains_base_model_keyword(model_name_raw)
+    should_apply_base_fallback = (
+        product_type == PRODUCT_TYPE
+        and chip is not None
+        and has_base_model_keyword
+        and (ram_gb is None or ssd_gb is None)
+    )
+    if should_apply_base_fallback:
+        base_spec = get_macbook_air_base_spec(chip, screen_inch)
+        if isinstance(base_spec, dict):
+            if ram_gb is None:
+                ram_gb = base_spec.get("ram_gb")
+                if ram_gb is not None:
+                    _record_pattern(detected_patterns, "ram_gb", ram_gb, "fallback_base_model", "기본형/깡통")
+            if ssd_gb is None:
+                ssd_gb = base_spec.get("ssd_gb")
+                if ssd_gb is not None:
+                    _record_pattern(detected_patterns, "ssd_gb", ssd_gb, "fallback_base_model", "기본형/깡통")
 
     parsed_fields = {
         "product_type": product_type,
