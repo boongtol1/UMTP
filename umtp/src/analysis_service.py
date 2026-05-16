@@ -3,6 +3,7 @@ from src.alert_price_direction import (
     DEFAULT_ALERT_PRICE_DIRECTION,
     compute_target_buy_price_krw,
     is_listing_alert_match,
+    passes_price_bounds,
     is_valid_alert_drop_rate_percent,
     normalize_alert_price_direction,
 )
@@ -361,11 +362,16 @@ def analyze_url_for_user(
             alert_price_direction = normalize_alert_price_direction(
                 user_fair_price.get("alert_price_direction")
             )
+            min_price_krw = user_fair_price.get("min_price_krw")
+            max_price_krw = user_fair_price.get("max_price_krw")
             if target_buy_price_krw is None:
                 target_buy_price_krw = compute_target_buy_price_krw(
                     fair_price_krw,
                     alert_drop_rate_percent,
                 )
+        if use_price_override:
+            min_price_krw = None
+            max_price_krw = None
 
         if alert_drop_rate_percent is None or target_buy_price_krw is None:
             return fail("사용자 공정가 조회 실패: 알림 기준 계산에 실패했습니다.", source=SOURCE_NAME)
@@ -377,6 +383,13 @@ def analyze_url_for_user(
             target_buy_price_krw,
             alert_price_direction,
         )
+        if is_alert_target and not passes_price_bounds(
+            listing_price_krw,
+            alert_price_direction,
+            min_price_krw=min_price_krw,
+            max_price_krw=max_price_krw,
+        ):
+            is_alert_target = False
 
         listing = {
             "title": title,
@@ -481,6 +494,8 @@ def analyze_url_for_user(
             "diff_ratio": round(diff_ratio, 1),
             "alert_drop_rate_percent": alert_drop_rate_percent,
             "alert_price_direction": alert_price_direction,
+            "min_price_krw": min_price_krw,
+            "max_price_krw": max_price_krw,
             "is_alert_target": is_alert_target,
             "telegram_sent": telegram_sent,
             "message": message,
