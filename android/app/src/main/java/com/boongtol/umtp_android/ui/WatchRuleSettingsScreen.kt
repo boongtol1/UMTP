@@ -106,12 +106,7 @@ fun WatchRuleSettingsScreen(
 
     val fairPrice = fairPriceText.toIntOrNull()
     val targetPrice = targetPriceText.toIntOrNull()
-    val localDropRate =
-        if (fairPrice != null && fairPrice > 0 && targetPrice != null) {
-            ((fairPrice - targetPrice).toDouble() / fairPrice.toDouble()) * 100.0
-        } else {
-            null
-        }
+    val localDropRate = computeAlertDropRatePercent(fairPrice, targetPrice)
 
     val friendlyTargetPriceText = targetPrice?.let {
         "${formatKrwAsManwonOrKrw(it)} 이하로 뜨면 알림"
@@ -189,7 +184,11 @@ fun WatchRuleSettingsScreen(
 
         OutlinedTextField(
             value = fairPriceText,
-            onValueChange = { if (it.all(Char::isDigit)) fairPriceText = it },
+            onValueChange = {
+                if (it.all(Char::isDigit)) {
+                    fairPriceText = normalizePriceTextInput(it)
+                }
+            },
             label = { Text("내 기준 적정 가격") },
             placeholder = { Text("예: 800000") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -203,7 +202,11 @@ fun WatchRuleSettingsScreen(
 
         OutlinedTextField(
             value = targetPriceText,
-            onValueChange = { if (it.all(Char::isDigit)) targetPriceText = it },
+            onValueChange = {
+                if (it.all(Char::isDigit)) {
+                    targetPriceText = normalizePriceTextInput(it)
+                }
+            },
             label = { Text("알림 받을 가격") },
             placeholder = { Text("예: 650000") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),

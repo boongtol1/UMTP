@@ -1,6 +1,8 @@
 package com.boongtol.umtp_android.ui
 
 import java.text.NumberFormat
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.util.Locale
 
 private const val DEFAULT_MARKET_PRICE_LABEL = "내가 생각한 시장가"
@@ -39,4 +41,27 @@ fun formatPercentDisplay(value: Double?): String {
         return "정보 없음"
     }
     return "${"%.2f".format(value)}%"
+}
+
+fun normalizePriceTextInput(input: String): String {
+    if (input.isEmpty()) {
+        return ""
+    }
+    if (!input.all { it.isDigit() }) {
+        return ""
+    }
+    val trimmed = input.trimStart('0')
+    return if (trimmed.isEmpty()) "0" else trimmed
+}
+
+fun computeAlertDropRatePercent(fairPrice: Int?, desiredPrice: Int?): Double? {
+    if (fairPrice == null || desiredPrice == null || fairPrice <= 0) {
+        return null
+    }
+    val fair = BigDecimal(fairPrice)
+    val desired = BigDecimal(desiredPrice)
+    val ratio = fair.subtract(desired)
+        .divide(fair, 8, RoundingMode.HALF_UP)
+        .multiply(BigDecimal("100"))
+    return ratio.setScale(2, RoundingMode.HALF_UP).toDouble()
 }

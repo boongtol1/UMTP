@@ -225,8 +225,8 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             return
         }
 
-        val dropRatePercent = ((fairPrice - desiredPrice).toDouble() / fairPrice.toDouble()) * 100.0
-        if (dropRatePercent < -100.0 || dropRatePercent > 100.0) {
+        val dropRatePercent = computeAlertDropRatePercent(fairPrice, desiredPrice)
+        if (dropRatePercent == null || dropRatePercent < -100.0 || dropRatePercent > 100.0) {
             _toastMessage.value = "시장가와의 차이(%)는 -100.00% ~ 100.00% 범위여야 합니다."
             return
         }

@@ -60,7 +60,7 @@ fun MacBookAirSettingCard(
     val marketPriceLabel = buildMarketPriceLabel(userId)
     val fairPriceInput = fairPriceText.toIntOrNull()
     val desiredPriceInput = desiredPriceText.toIntOrNull()
-    val computedDropRate = calculateDropRatePercent(fairPriceInput, desiredPriceInput)
+    val computedDropRate = computeAlertDropRatePercent(fairPriceInput, desiredPriceInput)
     val isAboveDirection = alertPriceDirection == ABOVE_OR_EQUAL_DIRECTION
     val boundPriceText = if (isAboveDirection) maxPriceText else minPriceText
     val boundPriceInput = boundPriceText.toIntOrNull()
@@ -136,7 +136,11 @@ fun MacBookAirSettingCard(
             ) {
                 OutlinedTextField(
                     value = fairPriceText,
-                    onValueChange = { if (it.all { char -> char.isDigit() }) fairPriceText = it },
+                    onValueChange = {
+                        if (it.all { char -> char.isDigit() }) {
+                            fairPriceText = normalizePriceTextInput(it)
+                        }
+                    },
                     label = { Text("$marketPriceLabel (원)", fontSize = 12.sp) },
                     modifier = Modifier.weight(1f),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -144,7 +148,11 @@ fun MacBookAirSettingCard(
                 )
                 OutlinedTextField(
                     value = desiredPriceText,
-                    onValueChange = { if (it.all { char -> char.isDigit() }) desiredPriceText = it },
+                    onValueChange = {
+                        if (it.all { char -> char.isDigit() }) {
+                            desiredPriceText = normalizePriceTextInput(it)
+                        }
+                    },
                     label = { Text("알림 기준 가격 (원)", fontSize = 12.sp) },
                     modifier = Modifier.weight(1f),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -218,9 +226,9 @@ fun MacBookAirSettingCard(
                 onValueChange = {
                     if (it.all { char -> char.isDigit() }) {
                         if (isAboveDirection) {
-                            maxPriceText = it
+                            maxPriceText = normalizePriceTextInput(it)
                         } else {
-                            minPriceText = it
+                            minPriceText = normalizePriceTextInput(it)
                         }
                     }
                 },
@@ -285,13 +293,6 @@ fun MacBookAirSettingCard(
             }
         }
     }
-}
-
-private fun calculateDropRatePercent(fairPrice: Int?, desiredPrice: Int?): Double? {
-    if (fairPrice == null || desiredPrice == null || fairPrice <= 0) {
-        return null
-    }
-    return ((fairPrice - desiredPrice).toDouble() / fairPrice.toDouble()) * 100.0
 }
 
 private fun calculateDesiredPrice(fairPrice: Int?, dropRate: Double?): Int? {
