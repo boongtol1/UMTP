@@ -91,6 +91,31 @@ def is_valid_macbook_air_unit(chip, screen_inch, ram_gb, ssd_gb):
     return ram_gb in screen_units["ram_gb"] and ssd_gb in screen_units["ssd_gb"]
 
 
+def get_macbook_air_base_spec(chip, screen_inch):
+    chip_units = VALID_MACBOOK_AIR_UNITS.get(chip)
+    if not isinstance(chip_units, dict):
+        return None
+
+    screen_units = chip_units.get(screen_inch)
+    if not isinstance(screen_units, dict):
+        return None
+
+    ram_options = screen_units.get("ram_gb")
+    ssd_options = screen_units.get("ssd_gb")
+    if not isinstance(ram_options, list) or not isinstance(ssd_options, list):
+        return None
+    if not ram_options or not ssd_options:
+        return None
+
+    min_ram_gb = min(ram_options)
+    min_ssd_gb = min(ssd_options)
+
+    return {
+        "ram_gb": min_ram_gb,
+        "ssd_gb": min_ssd_gb,
+    }
+
+
 def generate_macbook_air_units():
     units = []
     for chip, screen_map in VALID_MACBOOK_AIR_UNITS.items():
