@@ -46,6 +46,8 @@ def _normalize_alert_price_row(row):
         alert_drop_rate_percent = _safe_float(row.get("alert_drop_rate_percent"))
         target_buy_price_krw = _safe_int(row.get("target_buy_price_krw"))
         alert_price_direction = normalize_alert_price_direction(row.get("alert_price_direction"))
+        min_price_krw = _safe_int(row.get("min_price_krw"))
+        max_price_krw = _safe_int(row.get("max_price_krw"))
     else:
         row_values = tuple(row)
         fair_price_krw = _safe_int(row_values[0]) if len(row_values) > 0 else None
@@ -53,6 +55,8 @@ def _normalize_alert_price_row(row):
         target_buy_price_krw = _safe_int(row_values[2]) if len(row_values) > 2 else None
         raw_direction = row_values[3] if len(row_values) > 3 else DEFAULT_ALERT_PRICE_DIRECTION
         alert_price_direction = normalize_alert_price_direction(raw_direction)
+        min_price_krw = _safe_int(row_values[4]) if len(row_values) > 4 else None
+        max_price_krw = _safe_int(row_values[5]) if len(row_values) > 5 else None
 
     if target_buy_price_krw is None:
         target_buy_price_krw = compute_target_buy_price_krw(fair_price_krw, alert_drop_rate_percent)
@@ -62,6 +66,8 @@ def _normalize_alert_price_row(row):
         "alert_drop_rate_percent": alert_drop_rate_percent,
         "target_buy_price_krw": target_buy_price_krw,
         "alert_price_direction": alert_price_direction,
+        "min_price_krw": min_price_krw,
+        "max_price_krw": max_price_krw,
     }
 
 
@@ -76,6 +82,41 @@ def _fetch_user_fair_price_row(cursor, user_id, parsed_spec):
     )
 
     queries = (
+        """
+        SELECT
+            fair_price_krw,
+            alert_drop_rate_percent,
+            target_buy_price_krw,
+            alert_price_direction,
+            min_price_krw,
+            max_price_krw
+        FROM user_fair_prices
+        WHERE user_id = %s
+          AND product_type = %s
+          AND chip = %s
+          AND screen_inch = %s
+          AND ram_gb = %s
+          AND ssd_gb = %s
+          AND enabled = TRUE
+        LIMIT 1
+        """,
+        """
+        SELECT
+            fair_price_krw,
+            alert_drop_rate_percent,
+            target_buy_price_krw,
+            alert_price_direction,
+            min_price_krw,
+            max_price_krw
+        FROM user_fair_prices
+        WHERE user_id = %s
+          AND product_type = %s
+          AND chip = %s
+          AND screen_inch = %s
+          AND ram_gb = %s
+          AND ssd_gb = %s
+        LIMIT 1
+        """,
         """
         SELECT fair_price_krw, alert_drop_rate_percent, target_buy_price_krw, alert_price_direction
         FROM user_fair_prices
@@ -234,6 +275,8 @@ def fetch_user_fair_price(cursor, user_id, parsed_spec):
         "alert_drop_rate_percent": alert_drop_rate_percent,
         "target_buy_price_krw": target_buy_price_krw,
         "alert_price_direction": alert_price_direction,
+        "min_price_krw": normalized_row.get("min_price_krw"),
+        "max_price_krw": normalized_row.get("max_price_krw"),
         "source": "user_fair_prices",
     }
 
@@ -259,6 +302,8 @@ def resolve_fair_price_for_user(cursor, user_id, parsed_spec):
             "alert_drop_rate_percent": normalized_row.get("alert_drop_rate_percent"),
             "target_buy_price_krw": normalized_row.get("target_buy_price_krw"),
             "alert_price_direction": normalized_row.get("alert_price_direction"),
+            "min_price_krw": normalized_row.get("min_price_krw"),
+            "max_price_krw": normalized_row.get("max_price_krw"),
             "source": "user_fair_prices",
         }
 
@@ -274,6 +319,8 @@ def resolve_fair_price_for_user(cursor, user_id, parsed_spec):
                 alert_drop_rate_percent,
             ),
             "alert_price_direction": DEFAULT_ALERT_PRICE_DIRECTION,
+            "min_price_krw": None,
+            "max_price_krw": None,
             "source": "mac_fair_prices",
         }
 

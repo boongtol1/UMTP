@@ -79,6 +79,8 @@ class UserFairPriceUpsertRequest(BaseModel):
     alert_price_direction: Literal["BELOW_OR_EQUAL", "ABOVE_OR_EQUAL"] = Field(
         default=DEFAULT_ALERT_PRICE_DIRECTION
     )
+    min_price_krw: Optional[int] = Field(default=None, ge=0)
+    max_price_krw: Optional[int] = Field(default=None, ge=0)
     enabled: bool
     search_keyword: Optional[str] = Field(default=None, max_length=255)
     poll_interval_seconds: int = Field(default=60, ge=1)
@@ -195,6 +197,8 @@ def user_fair_prices_upsert(request: UserFairPriceUpsertRequest):
             alert_drop_rate_percent=request.alert_drop_rate_percent,
             enabled=request.enabled,
             alert_price_direction=request.alert_price_direction,
+            min_price_krw=request.min_price_krw,
+            max_price_krw=request.max_price_krw,
             search_keyword=request.search_keyword,
             poll_interval_seconds=request.poll_interval_seconds,
         )

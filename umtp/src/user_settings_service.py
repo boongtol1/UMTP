@@ -90,6 +90,39 @@ def _normalize_poll_interval_seconds(value):
     return normalized
 
 
+def _normalize_optional_price_bound(value, *, field_name):
+    if value is None:
+        return None
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(field_name) from exc
+    if normalized < 0:
+        raise ValueError(field_name)
+    return normalized
+
+
+def _normalize_alert_bounds(
+    *,
+    alert_price_direction,
+    min_price_krw=None,
+    max_price_krw=None,
+):
+    normalized_min = _normalize_optional_price_bound(
+        min_price_krw,
+        field_name="invalid_min_price_krw",
+    )
+    normalized_max = _normalize_optional_price_bound(
+        max_price_krw,
+        field_name="invalid_max_price_krw",
+    )
+
+    if alert_price_direction == DEFAULT_ALERT_PRICE_DIRECTION:
+        return normalized_min, None
+
+    return None, normalized_max
+
+
 def _build_recommended_search_keyword(product_type, chip, screen_inch=None, ram_gb=None, ssd_gb=None):
     keywords = build_recommended_keywords_for_spec(
         product_type,
@@ -245,7 +278,9 @@ def _fetch_user_overrides_map(cursor, user_id):
         cursor.execute(
                 """
                 SELECT product_type, chip, screen_inch, ram_gb, ssd_gb,
-                   fair_price_krw, alert_drop_rate_percent, target_buy_price_krw, alert_price_direction, enabled,
+                   fair_price_krw, alert_drop_rate_percent, target_buy_price_krw, alert_price_direction,
+                   min_price_krw, max_price_krw,
+                   enabled,
                    search_keyword, force_poll, poll_interval_seconds,
                    last_polled_at, last_poll_requested_at
                 FROM user_fair_prices
@@ -262,6 +297,26 @@ def _fetch_user_overrides_map(cursor, user_id):
             cursor.execute(
                 """
                 SELECT product_type, chip, screen_inch, ram_gb, ssd_gb,
+                   fair_price_krw, alert_drop_rate_percent, target_buy_price_krw, alert_price_direction, enabled,
+                   search_keyword, force_poll, poll_interval_seconds,
+                   last_polled_at, last_poll_requested_at
+                FROM user_fair_prices
+                WHERE user_id = %s
+              AND product_type = %s
+            """,
+                (user_id, PRODUCT_TYPE),
+            )
+            rows = cursor.fetchall() or []
+            for row in rows:
+                row["min_price_krw"] = None
+                row["max_price_krw"] = None
+        except Exception as first_fallback_exc:
+            if "unknown column" not in str(first_fallback_exc).lower():
+                raise
+            try:
+                cursor.execute(
+                """
+                SELECT product_type, chip, screen_inch, ram_gb, ssd_gb,
                        fair_price_krw, alert_drop_rate_percent, enabled
                 FROM user_fair_prices
                 WHERE user_id = %s
@@ -269,29 +324,32 @@ def _fetch_user_overrides_map(cursor, user_id):
                 """,
                 (user_id, PRODUCT_TYPE),
             )
-            rows = cursor.fetchall() or []
-        except Exception as second_exc:
-            if "unknown column" not in str(second_exc).lower() or "enabled" not in str(second_exc).lower():
-                raise
-            cursor.execute(
-                """
-                SELECT product_type, chip, screen_inch, ram_gb, ssd_gb,
-                       fair_price_krw, alert_drop_rate_percent
-                FROM user_fair_prices
-                WHERE user_id = %s
-                  AND product_type = %s
-                """,
-                (user_id, PRODUCT_TYPE),
-            )
-            rows = cursor.fetchall() or []
-        for row in rows:
-            row.setdefault("enabled", True)
-            row["alert_price_direction"] = DEFAULT_ALERT_PRICE_DIRECTION
-            row["search_keyword"] = None
-            row["force_poll"] = False
-            row["poll_interval_seconds"] = DEFAULT_POLL_INTERVAL_SECONDS
-            row["last_polled_at"] = None
-            row["last_poll_requested_at"] = None
+                rows = cursor.fetchall() or []
+            except Exception as second_exc:
+                if "unknown column" not in str(second_exc).lower() or "enabled" not in str(second_exc).lower():
+                    raise
+                cursor.execute(
+                    """
+                    SELECT product_type, chip, screen_inch, ram_gb, ssd_gb,
+                           fair_price_krw, alert_drop_rate_percent
+                    FROM user_fair_prices
+                    WHERE user_id = %s
+                      AND product_type = %s
+                    """,
+                    (user_id, PRODUCT_TYPE),
+                )
+                rows = cursor.fetchall() or []
+            for row in rows:
+                row.setdefault("enabled", True)
+                row["alert_price_direction"] = DEFAULT_ALERT_PRICE_DIRECTION
+                row["search_keyword"] = None
+                row["force_poll"] = False
+                row["poll_interval_seconds"] = DEFAULT_POLL_INTERVAL_SECONDS
+                row["last_polled_at"] = None
+                row["last_poll_requested_at"] = None
+                row["min_price_krw"] = None
+                row["max_price_krw"] = None
+                row["target_buy_price_krw"] = None
 
     user_map = {}
     for row in rows:
@@ -307,6 +365,8 @@ def _fetch_user_overrides_map(cursor, user_id):
             "alert_drop_rate_percent": _safe_float(row.get("alert_drop_rate_percent")),
             "target_buy_price_krw": _safe_int(row.get("target_buy_price_krw")),
             "alert_price_direction": normalize_alert_price_direction(row.get("alert_price_direction")),
+            "min_price_krw": _safe_int(row.get("min_price_krw")),
+            "max_price_krw": _safe_int(row.get("max_price_krw")),
             "enabled": _safe_bool(row.get("enabled"), default=True),
             "search_keyword": _normalize_optional_search_keyword(row.get("search_keyword")),
             "force_poll": _safe_bool(row.get("force_poll"), default=False),
@@ -359,6 +419,8 @@ def get_user_fair_price_settings(user_id):
         system_alert_price_direction = (
             DEFAULT_ALERT_PRICE_DIRECTION if system_fair_price_krw is not None else None
         )
+        system_min_price_krw = None
+        system_max_price_krw = None
 
         has_user_override = user_item is not None
         user_fair_price_krw = user_item.get("fair_price_krw") if has_user_override else None
@@ -369,6 +431,8 @@ def get_user_fair_price_settings(user_id):
             user_item.get("alert_price_direction") if has_user_override else None
         )
         user_target_buy_price_krw = user_item.get("target_buy_price_krw") if has_user_override else None
+        user_min_price_krw = user_item.get("min_price_krw") if has_user_override else None
+        user_max_price_krw = user_item.get("max_price_krw") if has_user_override else None
         enabled = user_item.get("enabled", True) if has_user_override else False
         custom_search_keyword = user_item.get("search_keyword") if has_user_override else None
         recommended_search_keyword = _build_recommended_search_keyword(
@@ -393,11 +457,15 @@ def get_user_fair_price_settings(user_id):
             effective_alert_drop_rate_percent = user_alert_drop_rate_percent
             effective_alert_price_direction = user_alert_price_direction
             effective_target_buy_price_krw = user_target_buy_price_krw
+            effective_min_price_krw = user_min_price_krw
+            effective_max_price_krw = user_max_price_krw
         else:
             effective_fair_price_krw = system_fair_price_krw
             effective_alert_drop_rate_percent = system_alert_drop_rate_percent
             effective_alert_price_direction = system_alert_price_direction
             effective_target_buy_price_krw = None
+            effective_min_price_krw = system_min_price_krw
+            effective_max_price_krw = system_max_price_krw
         if effective_target_buy_price_krw is None:
             effective_target_buy_price_krw = compute_target_buy_price_krw(
                 effective_fair_price_krw,
@@ -414,15 +482,21 @@ def get_user_fair_price_settings(user_id):
                 "system_fair_price_krw": system_fair_price_krw,
                 "system_alert_drop_rate_percent": system_alert_drop_rate_percent,
                 "system_alert_price_direction": system_alert_price_direction,
+                "system_min_price_krw": system_min_price_krw,
+                "system_max_price_krw": system_max_price_krw,
                 "user_fair_price_krw": user_fair_price_krw,
                 "user_alert_drop_rate_percent": user_alert_drop_rate_percent,
                 "user_alert_price_direction": user_alert_price_direction,
                 "user_target_buy_price_krw": user_target_buy_price_krw,
+                "user_min_price_krw": user_min_price_krw,
+                "user_max_price_krw": user_max_price_krw,
                 "enabled": bool(enabled),
                 "effective_fair_price_krw": effective_fair_price_krw,
                 "effective_alert_drop_rate_percent": effective_alert_drop_rate_percent,
                 "effective_alert_price_direction": effective_alert_price_direction,
                 "effective_target_buy_price_krw": effective_target_buy_price_krw,
+                "effective_min_price_krw": effective_min_price_krw,
+                "effective_max_price_krw": effective_max_price_krw,
                 "custom_search_keyword": custom_search_keyword,
                 "recommended_search_keyword": recommended_search_keyword,
                 "effective_search_keyword": effective_search_keyword,
@@ -627,6 +701,8 @@ def upsert_user_fair_price_setting(
     alert_drop_rate_percent,
     enabled,
     alert_price_direction=DEFAULT_ALERT_PRICE_DIRECTION,
+    min_price_krw=None,
+    max_price_krw=None,
     search_keyword=None,
     poll_interval_seconds=DEFAULT_POLL_INTERVAL_SECONDS,
 ):
@@ -661,6 +737,15 @@ def upsert_user_fair_price_setting(
         return {"ok": False, "reason": "invalid_alert_price_direction"}
     else:
         normalized_alert_price_direction = normalize_alert_price_direction(alert_price_direction)
+
+    try:
+        normalized_min_price_krw, normalized_max_price_krw = _normalize_alert_bounds(
+            alert_price_direction=normalized_alert_price_direction,
+            min_price_krw=min_price_krw,
+            max_price_krw=max_price_krw,
+        )
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc)}
 
     if not isinstance(enabled, bool):
         return {"ok": False, "reason": "invalid_enabled"}
@@ -706,6 +791,8 @@ def upsert_user_fair_price_setting(
                     fair_price_krw,
                     alert_drop_rate_percent,
                     alert_price_direction,
+                    min_price_krw,
+                    max_price_krw,
                     enabled,
                     search_keyword,
                     poll_interval_seconds,
@@ -714,7 +801,7 @@ def upsert_user_fair_price_setting(
                     last_polled_at
                 )
                 VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s,
                     %s,
                     %s,
@@ -726,6 +813,8 @@ def upsert_user_fair_price_setting(
                     fair_price_krw = VALUES(fair_price_krw),
                     alert_drop_rate_percent = VALUES(alert_drop_rate_percent),
                     alert_price_direction = VALUES(alert_price_direction),
+                    min_price_krw = VALUES(min_price_krw),
+                    max_price_krw = VALUES(max_price_krw),
                     enabled = VALUES(enabled),
                     search_keyword = VALUES(search_keyword),
                     poll_interval_seconds = VALUES(poll_interval_seconds),
@@ -753,6 +842,8 @@ def upsert_user_fair_price_setting(
                     normalized_fair_price_krw,
                     normalized_alert_drop_rate_percent,
                     normalized_alert_price_direction,
+                    normalized_min_price_krw,
+                    normalized_max_price_krw,
                     enabled,
                     resolved_search_keyword,
                     normalized_poll_interval_seconds,
@@ -764,7 +855,144 @@ def upsert_user_fair_price_setting(
             lowered_exc = str(exc).lower()
             if "unknown column" not in lowered_exc:
                 raise
-            if "alert_price_direction" in lowered_exc:
+            handled_unknown_column = False
+            if "min_price_krw" in lowered_exc or "max_price_krw" in lowered_exc:
+                try:
+                    cursor.execute(
+                        """
+                        INSERT INTO user_fair_prices (
+                            user_id,
+                            product_type,
+                            chip,
+                            screen_inch,
+                            ram_gb,
+                            ssd_gb,
+                            fair_price_krw,
+                            alert_drop_rate_percent,
+                            alert_price_direction,
+                            enabled,
+                            search_keyword,
+                            poll_interval_seconds,
+                            force_poll,
+                            last_poll_requested_at,
+                            last_polled_at
+                        )
+                        VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            %s,
+                            %s,
+                            %s,
+                            IF(%s = TRUE, TRUE, FALSE),
+                            IF(%s = TRUE, CURRENT_TIMESTAMP, NULL),
+                            NULL
+                        )
+                        ON DUPLICATE KEY UPDATE
+                            fair_price_krw = VALUES(fair_price_krw),
+                            alert_drop_rate_percent = VALUES(alert_drop_rate_percent),
+                            alert_price_direction = VALUES(alert_price_direction),
+                            enabled = VALUES(enabled),
+                            search_keyword = VALUES(search_keyword),
+                            poll_interval_seconds = VALUES(poll_interval_seconds),
+                            force_poll = CASE
+                                WHEN VALUES(enabled) = TRUE THEN TRUE
+                                ELSE FALSE
+                            END,
+                            last_poll_requested_at = CASE
+                                WHEN VALUES(enabled) = TRUE THEN CURRENT_TIMESTAMP
+                                ELSE last_poll_requested_at
+                            END,
+                            last_polled_at = CASE
+                                WHEN VALUES(enabled) = TRUE THEN NULL
+                                ELSE last_polled_at
+                            END,
+                            updated_at = CURRENT_TIMESTAMP
+                        """,
+                        (
+                            normalized_user_id,
+                            normalized_product_type,
+                            normalized_chip,
+                            normalized_screen_inch,
+                            normalized_ram_gb,
+                            normalized_ssd_gb,
+                            normalized_fair_price_krw,
+                            normalized_alert_drop_rate_percent,
+                            normalized_alert_price_direction,
+                            enabled,
+                            resolved_search_keyword,
+                            normalized_poll_interval_seconds,
+                            enabled,
+                            enabled,
+                        ),
+                    )
+                    handled_unknown_column = True
+                except Exception as second_exc:
+                    lowered_second_exc = str(second_exc).lower()
+                    if "unknown column" not in lowered_second_exc or "alert_price_direction" not in lowered_second_exc:
+                        raise
+                    cursor.execute(
+                        """
+                        INSERT INTO user_fair_prices (
+                            user_id,
+                            product_type,
+                            chip,
+                            screen_inch,
+                            ram_gb,
+                            ssd_gb,
+                            fair_price_krw,
+                            alert_drop_rate_percent,
+                            enabled,
+                            search_keyword,
+                            poll_interval_seconds,
+                            force_poll,
+                            last_poll_requested_at,
+                            last_polled_at
+                        )
+                        VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            %s,
+                            %s,
+                            IF(%s = TRUE, TRUE, FALSE),
+                            IF(%s = TRUE, CURRENT_TIMESTAMP, NULL),
+                            NULL
+                        )
+                        ON DUPLICATE KEY UPDATE
+                            fair_price_krw = VALUES(fair_price_krw),
+                            alert_drop_rate_percent = VALUES(alert_drop_rate_percent),
+                            enabled = VALUES(enabled),
+                            search_keyword = VALUES(search_keyword),
+                            poll_interval_seconds = VALUES(poll_interval_seconds),
+                            force_poll = CASE
+                                WHEN VALUES(enabled) = TRUE THEN TRUE
+                                ELSE FALSE
+                            END,
+                            last_poll_requested_at = CASE
+                                WHEN VALUES(enabled) = TRUE THEN CURRENT_TIMESTAMP
+                                ELSE last_poll_requested_at
+                            END,
+                            last_polled_at = CASE
+                                WHEN VALUES(enabled) = TRUE THEN NULL
+                                ELSE last_polled_at
+                            END,
+                            updated_at = CURRENT_TIMESTAMP
+                        """,
+                        (
+                            normalized_user_id,
+                            normalized_product_type,
+                            normalized_chip,
+                            normalized_screen_inch,
+                            normalized_ram_gb,
+                            normalized_ssd_gb,
+                            normalized_fair_price_krw,
+                            normalized_alert_drop_rate_percent,
+                            enabled,
+                            resolved_search_keyword,
+                            normalized_poll_interval_seconds,
+                            enabled,
+                            enabled,
+                        ),
+                    )
+                    handled_unknown_column = True
+            elif "alert_price_direction" in lowered_exc:
                 cursor.execute(
                     """
                     INSERT INTO user_fair_prices (
@@ -827,6 +1055,7 @@ def upsert_user_fair_price_setting(
                         enabled,
                     ),
                 )
+                handled_unknown_column = True
             elif "enabled" in lowered_exc:
                 return {"ok": False, "reason": "missing_enabled_column"}
             if (
@@ -835,7 +1064,7 @@ def upsert_user_fair_price_setting(
                 or "force_poll" in lowered_exc
             ):
                 return {"ok": False, "reason": "missing_polling_columns"}
-            if "alert_price_direction" not in lowered_exc:
+            if not handled_unknown_column and "alert_price_direction" not in lowered_exc:
                 raise
 
         connection.commit()
@@ -857,6 +1086,8 @@ def upsert_user_fair_price_setting(
                     normalized_alert_drop_rate_percent,
                 ),
                 "alert_price_direction": normalized_alert_price_direction,
+                "min_price_krw": normalized_min_price_krw,
+                "max_price_krw": normalized_max_price_krw,
                 "enabled": enabled,
                 "custom_search_keyword": resolved_search_keyword,
                 "recommended_search_keyword": _build_recommended_search_keyword(
@@ -912,6 +1143,8 @@ def _poll_target_row_to_dict(row):
         "alert_drop_rate_percent": alert_drop_rate_percent,
         "target_buy_price_krw": target_buy_price_krw,
         "alert_price_direction": normalize_alert_price_direction(row.get("alert_price_direction")),
+        "min_price_krw": _safe_int(row.get("min_price_krw")),
+        "max_price_krw": _safe_int(row.get("max_price_krw")),
         "last_polled_at": row.get("last_polled_at"),
         "last_poll_requested_at": row.get("last_poll_requested_at"),
         "created_at": row.get("created_at"),
@@ -997,6 +1230,8 @@ def get_due_user_fair_price_polling_targets(user_id=None):
                     alert_drop_rate_percent,
                     target_buy_price_krw,
                     alert_price_direction,
+                    min_price_krw,
+                    max_price_krw,
                     last_polled_at,
                     last_poll_requested_at,
                     created_at,
@@ -1012,7 +1247,40 @@ def get_due_user_fair_price_polling_targets(user_id=None):
             lowered_exc = str(exc).lower()
             if "unknown column" not in lowered_exc:
                 raise
-            if "alert_price_direction" in lowered_exc:
+            if "min_price_krw" in lowered_exc or "max_price_krw" in lowered_exc:
+                cursor.execute(
+                    f"""
+                    SELECT
+                        id,
+                        user_id,
+                        product_type,
+                        chip,
+                        screen_inch,
+                        ram_gb,
+                        ssd_gb,
+                        search_keyword,
+                        enabled,
+                        force_poll,
+                        poll_interval_seconds,
+                        fair_price_krw,
+                        alert_drop_rate_percent,
+                        target_buy_price_krw,
+                        alert_price_direction,
+                        last_polled_at,
+                        last_poll_requested_at,
+                        created_at,
+                        updated_at
+                    FROM user_fair_prices
+                    WHERE {where_clause}
+                    ORDER BY id ASC
+                    """,
+                    tuple(params),
+                )
+                rows = cursor.fetchall() or []
+                for row in rows:
+                    row["min_price_krw"] = None
+                    row["max_price_krw"] = None
+            elif "alert_price_direction" in lowered_exc:
                 cursor.execute(
                     f"""
                     SELECT
@@ -1043,6 +1311,8 @@ def get_due_user_fair_price_polling_targets(user_id=None):
                 rows = cursor.fetchall() or []
                 for row in rows:
                     row["alert_price_direction"] = DEFAULT_ALERT_PRICE_DIRECTION
+                    row["min_price_krw"] = None
+                    row["max_price_krw"] = None
                 return [_poll_target_row_to_dict(row) for row in rows]
             logger.warning(
                 "[polling_targets] required polling columns missing (%s); skip polling targets",
