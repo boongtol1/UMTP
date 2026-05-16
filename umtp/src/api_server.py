@@ -5,6 +5,11 @@ from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
+from src.alert_price_direction import (
+    DEFAULT_ALERT_PRICE_DIRECTION,
+    MAX_ALERT_DROP_RATE_PERCENT,
+    MIN_ALERT_DROP_RATE_PERCENT,
+)
 from src.analysis_service import analyze_url_for_user
 from src.notification_worker import list_alert_events_for_user
 from src.user_settings_service import (
@@ -66,7 +71,14 @@ class UserFairPriceUpsertRequest(BaseModel):
     ram_gb: int
     ssd_gb: int
     fair_price_krw: int = Field(..., gt=0)
-    alert_drop_rate_percent: float = Field(..., ge=0, le=100)
+    alert_drop_rate_percent: float = Field(
+        ...,
+        ge=MIN_ALERT_DROP_RATE_PERCENT,
+        le=MAX_ALERT_DROP_RATE_PERCENT,
+    )
+    alert_price_direction: Literal["BELOW_OR_EQUAL", "ABOVE_OR_EQUAL"] = Field(
+        default=DEFAULT_ALERT_PRICE_DIRECTION
+    )
     enabled: bool
     search_keyword: Optional[str] = Field(default=None, max_length=255)
     poll_interval_seconds: int = Field(default=60, ge=1)
@@ -182,6 +194,7 @@ def user_fair_prices_upsert(request: UserFairPriceUpsertRequest):
             fair_price_krw=request.fair_price_krw,
             alert_drop_rate_percent=request.alert_drop_rate_percent,
             enabled=request.enabled,
+            alert_price_direction=request.alert_price_direction,
             search_keyword=request.search_keyword,
             poll_interval_seconds=request.poll_interval_seconds,
         )
