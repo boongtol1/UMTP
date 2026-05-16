@@ -18,6 +18,7 @@ import com.boongtol.umtp_android.network.UserFairPriceItem
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RamSsdSettingsScreen(
+    userId: String?,
     chip: String,
     screenSize: Int,
     units: List<MacBookAirUnit>,
@@ -59,6 +60,7 @@ fun RamSsdSettingsScreen(
                     val itemKey = "${unit.chip}-${unit.screen_inch}-${unit.ram_gb}-${unit.ssd_gb}"
                     
                     MacBookAirSettingCard(
+                        userId = userId,
                         unit = unit,
                         userSetting = setting,
                         isSaving = savingItemKey == itemKey,

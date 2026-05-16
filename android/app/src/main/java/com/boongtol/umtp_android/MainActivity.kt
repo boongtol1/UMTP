@@ -153,6 +153,7 @@ fun SettingsNavigator(
                 it.chip == screen.chip && it.screen_inch == screen.screenSize 
             }
             RamSsdSettingsScreen(
+                userId = userId,
                 chip = screen.chip,
                 screenSize = screen.screenSize,
                 units = filteredUnits,

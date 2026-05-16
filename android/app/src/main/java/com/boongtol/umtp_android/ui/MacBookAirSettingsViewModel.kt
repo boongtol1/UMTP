@@ -181,13 +181,13 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         val itemKey = "${unit.chip}-${unit.screen_inch}-${unit.ram_gb}-${unit.ssd_gb}"
 
         if (fairPrice <= 0 || desiredPrice <= 0) {
-            _toastMessage.value = "공정가와 희망 구매가는 1원 이상이어야 합니다."
+            _toastMessage.value = "시장가와 알림 기준 가격은 1원 이상이어야 합니다."
             return
         }
 
         val dropRatePercent = ((fairPrice - desiredPrice).toDouble() / fairPrice.toDouble()) * 100.0
         if (dropRatePercent < -100.0 || dropRatePercent > 100.0) {
-            _toastMessage.value = "차이비율은 -100.00% ~ 100.00% 범위여야 합니다."
+            _toastMessage.value = "시장가와의 차이(%)는 -100.00% ~ 100.00% 범위여야 합니다."
             return
         }
 

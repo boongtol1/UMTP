@@ -13,12 +13,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.boongtol.umtp_android.network.MacBookAirUnit
 import com.boongtol.umtp_android.network.UserFairPriceItem
-import java.text.NumberFormat
-import java.util.*
 import kotlin.math.roundToInt
 
 @Composable
 fun MacBookAirSettingCard(
+    userId: String?,
     unit: MacBookAirUnit,
     userSetting: UserFairPriceItem?,
     isSaving: Boolean,
@@ -51,7 +50,7 @@ fun MacBookAirSettingCard(
         )
     }
 
-    val numberFormat = NumberFormat.getNumberInstance(Locale.KOREA)
+    val marketPriceLabel = buildMarketPriceLabel(userId)
     val fairPriceInput = fairPriceText.toIntOrNull()
     val desiredPriceInput = desiredPriceText.toIntOrNull()
     val computedDropRate = calculateDropRatePercent(fairPriceInput, desiredPriceInput)
@@ -87,13 +86,25 @@ fun MacBookAirSettingCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            InfoRow(label = "시스템 공정가", value = "${numberFormat.format(userSetting?.system_fair_price_krw ?: 0)}원")
+            InfoRow(label = "시스템 기준 시장가", value = formatKrwDisplay(userSetting?.system_fair_price_krw))
             InfoRow(
-                label = "적용 공정가", 
-                value = "${numberFormat.format(userSetting?.effective_fair_price_krw ?: 0)}원", 
+                label = marketPriceLabel,
+                value = formatKrwDisplay(userSetting?.effective_fair_price_krw),
                 valueColor = if (userSetting?.has_user_override == true) Color(0xFF388E3C) else Color.Unspecified
             )
-            InfoRow(label = "알림 기준", value = formatDropRateForDisplay(userSetting?.effective_alert_drop_rate_percent))
+            InfoRow(
+                label = "알림 기준 가격",
+                value = formatKrwDisplay(
+                    userSetting?.effective_target_buy_price_krw ?: calculateDesiredPrice(
+                        userSetting?.effective_fair_price_krw,
+                        userSetting?.effective_alert_drop_rate_percent,
+                    )
+                ),
+            )
+            InfoRow(
+                label = "시장가와의 차이(%)",
+                value = formatPercentDisplay(userSetting?.effective_alert_drop_rate_percent),
+            )
             InfoRow(label = "추천 검색어", value = userSetting?.recommended_search_keyword ?: "-")
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -116,7 +127,7 @@ fun MacBookAirSettingCard(
                 OutlinedTextField(
                     value = fairPriceText,
                     onValueChange = { if (it.all { char -> char.isDigit() }) fairPriceText = it },
-                    label = { Text("공정가 (원)", fontSize = 12.sp) },
+                    label = { Text("$marketPriceLabel (원)", fontSize = 12.sp) },
                     modifier = Modifier.weight(1f),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true
@@ -124,7 +135,7 @@ fun MacBookAirSettingCard(
                 OutlinedTextField(
                     value = desiredPriceText,
                     onValueChange = { if (it.all { char -> char.isDigit() }) desiredPriceText = it },
-                    label = { Text("내가 사고 싶은 가격 (원)", fontSize = 12.sp) },
+                    label = { Text("알림 기준 가격 (원)", fontSize = 12.sp) },
                     modifier = Modifier.weight(1f),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true
@@ -134,11 +145,26 @@ fun MacBookAirSettingCard(
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = if (computedDropRate != null) {
-                    "차이비율(자동 계산): ${formatDropRateForDisplay(computedDropRate)}"
+                    "시장가와의 차이(%): ${formatPercentDisplay(computedDropRate)}"
                 } else {
-                    "차이비율(자동 계산): -"
+                    "시장가와의 차이(%): 정보 없음"
                 },
                 style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                text = "시장가보다 몇 % 낮거나 높은 가격에서 알림을 받을지 자동 계산합니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray,
+            )
+            Text(
+                text = "20% → 시장가보다 20% 낮을 때, -10% → 시장가보다 10% 높을 때",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray,
+            )
+            Text(
+                text = "알림 기준 가격은 시장가와 차이를 바탕으로 자동 계산됩니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray,
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -176,6 +202,13 @@ fun MacBookAirSettingCard(
                 style = MaterialTheme.typography.bodySmall
             )
 
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "시장가 설정 안내: 이 제품이 보통 이 정도 가격이라고 생각하는 금액을 입력하세요.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray,
+            )
+
             Spacer(modifier = Modifier.height(16.dp))
 
             Button(
@@ -203,13 +236,6 @@ fun MacBookAirSettingCard(
             }
         }
     }
-}
-
-private fun formatDropRateForDisplay(value: Double?): String {
-    if (value == null) {
-        return "-"
-    }
-    return "${"%.2f".format(value)}%"
 }
 
 private fun calculateDropRatePercent(fairPrice: Int?, desiredPrice: Int?): Double? {
