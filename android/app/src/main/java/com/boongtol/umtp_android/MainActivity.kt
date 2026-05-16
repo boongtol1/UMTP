@@ -139,9 +139,9 @@ fun MainTabScreen(
     val units by viewModel.units.collectAsState()
     val userSettings by viewModel.userSettings.collectAsState()
     val savingItemKey by viewModel.savingItemKey.collectAsState()
-    val isRefreshingSettings by viewModel.isRefreshingSettings.collectAsState()
-    val settingsRefreshStatusMessage by viewModel.settingsRefreshStatusMessage.collectAsState()
-    val lastSettingsRefreshLabel by viewModel.lastSettingsRefreshLabel.collectAsState()
+    val isRefreshingAlerts by viewModel.isRefreshingAlerts.collectAsState()
+    val alertsRefreshStatusMessage by viewModel.alertsRefreshStatusMessage.collectAsState()
+    val lastAlertsRefreshLabel by viewModel.lastAlertsRefreshLabel.collectAsState()
 
     var targetAlertId by remember { mutableStateOf<String?>(null) }
 
@@ -175,7 +175,10 @@ fun MainTabScreen(
             when (selectedTab) {
                 0 -> AlertFeedScreen(
                     alerts = alerts,
-                    onRefresh = { viewModel.fetchAlerts(userId) },
+                    isRefreshing = isRefreshingAlerts,
+                    refreshStatusMessage = alertsRefreshStatusMessage,
+                    lastRefreshAtText = lastAlertsRefreshLabel,
+                    onRefresh = { viewModel.fetchAlerts(userId, showFeedback = true) },
                     initialTargetAlertId = targetAlertId,
                     onTargetAlertFound = { targetAlertId = null }
                 )
@@ -184,9 +187,6 @@ fun MainTabScreen(
                     units = units,
                     userSettings = userSettings,
                     savingItemKey = savingItemKey,
-                    isRefreshingSettings = isRefreshingSettings,
-                    settingsRefreshStatusMessage = settingsRefreshStatusMessage,
-                    lastSettingsRefreshLabel = lastSettingsRefreshLabel,
                     onUpsert = { unit, fairPrice, desiredPrice, alertPriceDirection, enabled, searchKeyword, boundPrice ->
                         viewModel.upsertItem(
                             unit,
@@ -197,8 +197,7 @@ fun MainTabScreen(
                             searchKeyword,
                             boundPrice,
                         )
-                    },
-                    onRefreshSettings = { viewModel.refreshUserSettings(showFeedback = true) }
+                    }
                 )
             }
         }
@@ -211,11 +210,7 @@ fun SettingsNavigator(
     units: List<com.boongtol.umtp_android.network.MacBookAirUnit>,
     userSettings: List<com.boongtol.umtp_android.network.UserFairPriceItem>,
     savingItemKey: String?,
-    isRefreshingSettings: Boolean,
-    settingsRefreshStatusMessage: String?,
-    lastSettingsRefreshLabel: String?,
     onUpsert: (com.boongtol.umtp_android.network.MacBookAirUnit, Int, Int, String, Boolean, String?, Int?) -> Unit,
-    onRefreshSettings: () -> Unit,
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.ChipList) }
 
@@ -250,11 +245,7 @@ fun SettingsNavigator(
                 units = filteredUnits,
                 userSettings = userSettings,
                 savingItemKey = savingItemKey,
-                isRefreshing = isRefreshingSettings,
-                refreshStatusMessage = settingsRefreshStatusMessage,
-                lastRefreshAtText = lastSettingsRefreshLabel,
                 onSave = onUpsert,
-                onRefresh = onRefreshSettings,
                 onBack = { currentScreen = Screen.ScreenSizeList(screen.chip) }
             )
         }

@@ -51,14 +51,16 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _savingItemKey = MutableStateFlow<String?>(null)
     val savingItemKey: StateFlow<String?> = _savingItemKey.asStateFlow()
 
-    private val _isRefreshingSettings = MutableStateFlow(false)
-    val isRefreshingSettings: StateFlow<Boolean> = _isRefreshingSettings.asStateFlow()
+    private val _isRefreshingAlerts = MutableStateFlow(false)
+    val isRefreshingAlerts: StateFlow<Boolean> = _isRefreshingAlerts.asStateFlow()
 
-    private val _settingsRefreshStatusMessage = MutableStateFlow<String?>(null)
-    val settingsRefreshStatusMessage: StateFlow<String?> = _settingsRefreshStatusMessage.asStateFlow()
+    private val _alertsRefreshStatusMessage = MutableStateFlow<String?>(null)
+    val alertsRefreshStatusMessage: StateFlow<String?> = _alertsRefreshStatusMessage.asStateFlow()
 
-    private val _lastSettingsRefreshLabel = MutableStateFlow<String?>(null)
-    val lastSettingsRefreshLabel: StateFlow<String?> = _lastSettingsRefreshLabel.asStateFlow()
+    private val _lastAlertsRefreshLabel = MutableStateFlow<String?>(null)
+    val lastAlertsRefreshLabel: StateFlow<String?> = _lastAlertsRefreshLabel.asStateFlow()
+
+    private var isAlertRefreshInFlight: Boolean = false
 
     init {
         _userId.value?.let {
@@ -76,8 +78,8 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     _units.value = unitsResponse.units
                 }
                 
-                refreshUserSettings(showFeedback = false, explicitUserId = uid)
-                fetchAlerts(uid)
+                loadUserSettings(uid)
+                fetchAlerts(uid, showFeedback = false)
             } catch (e: Exception) {
                 _errorMessage.value = "데이터 로딩 에러: ${e.localizedMessage}"
             } finally {
@@ -87,47 +89,40 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     }
 
     fun loadUserSettings(uid: String) {
-        refreshUserSettings(showFeedback = false, explicitUserId = uid)
-    }
-
-    fun refreshUserSettings(showFeedback: Boolean = true, explicitUserId: String? = null) {
-        val uid = explicitUserId ?: _userId.value ?: return
-        if (_isRefreshingSettings.value) {
-            return
-        }
         viewModelScope.launch {
-            _isRefreshingSettings.value = true
-            if (showFeedback) {
-                _settingsRefreshStatusMessage.value = "새로고침 중..."
-            }
             try {
                 val response = UmtpApiClient.apiService.getUserFairPrices(uid)
                 if (response.ok) {
                     _userSettings.value = response.items
-                    _lastSettingsRefreshLabel.value = "마지막 새로고침: ${formatRefreshTimeLabel(System.currentTimeMillis())}"
-                    if (showFeedback) {
-                        _settingsRefreshStatusMessage.value = "방금 새로고침됨"
-                    }
-                } else if (showFeedback) {
-                    _settingsRefreshStatusMessage.value =
-                        "새로고침 실패: ${response.message ?: response.reason ?: "서버 응답 오류"}"
                 }
             } catch (e: Exception) {
-                if (showFeedback) {
-                    _settingsRefreshStatusMessage.value = buildNetworkErrorMessage("새로고침 실패", e)
-                }
-            } finally {
-                _isRefreshingSettings.value = false
+                // Ignore background settings refresh errors
             }
         }
     }
 
-    fun fetchAlerts(uid: String) {
+    fun fetchAlerts(uid: String, showFeedback: Boolean = false) {
+        if (isAlertRefreshInFlight) {
+            return
+        }
         viewModelScope.launch {
+            isAlertRefreshInFlight = true
+            if (showFeedback) {
+                _isRefreshingAlerts.value = true
+                _alertsRefreshStatusMessage.value = "새로고침 중..."
+            }
             try {
                 val response = UmtpApiClient.apiService.getAlerts(uid)
                 if (response.ok) {
                     _alerts.value = response.items.sortedByDescending { it.created_at }
+                    if (showFeedback) {
+                        _alertsRefreshStatusMessage.value = "방금 새로고침됨"
+                        _lastAlertsRefreshLabel.value =
+                            "마지막 새로고침: ${formatRefreshTimeLabel(System.currentTimeMillis())}"
+                    }
+                } else if (showFeedback) {
+                    _alertsRefreshStatusMessage.value = "새로고침 실패"
+                    _toastMessage.value = "새로고침 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
                 }
             } catch (e: Exception) {
                 // Mock fallback if API fails
@@ -146,6 +141,15 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                         )
                     )
                 }
+                if (showFeedback) {
+                    _alertsRefreshStatusMessage.value = "새로고침 실패"
+                    _toastMessage.value = buildNetworkErrorMessage("새로고침 실패", e)
+                }
+            } finally {
+                if (showFeedback) {
+                    _isRefreshingAlerts.value = false
+                }
+                isAlertRefreshInFlight = false
             }
         }
     }
@@ -154,7 +158,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         viewModelScope.launch {
             while (true) {
                 delay(30000) // 30 seconds
-                fetchAlerts(uid)
+                fetchAlerts(uid, showFeedback = false)
             }
         }
     }
@@ -262,7 +266,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     } else {
                         "저장 완료"
                     }
-                    refreshUserSettings(showFeedback = false, explicitUserId = uid)
+                    loadUserSettings(uid)
                 } else {
                     _toastMessage.value = "저장 실패: ${response.message ?: response.reason}"
                 }
