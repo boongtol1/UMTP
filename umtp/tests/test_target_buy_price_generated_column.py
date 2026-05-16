@@ -13,6 +13,11 @@ from src.db import get_connection  # noqa: E402
 
 
 MIGRATION_SQL_PATH = os.path.join(PROJECT_ROOT, "sql", "migrate_target_buy_price_generated_column.sql")
+MIGRATION_ALERT_DIRECTION_SQL_PATH = os.path.join(
+    PROJECT_ROOT,
+    "sql",
+    "migrate_alert_price_direction.sql",
+)
 TEST_USER_ID = "generated_target_buy_price_it"
 TEST_PRODUCT_TYPE = "MacBook Air"
 TEST_CHIP = "M2"
@@ -53,6 +58,8 @@ class TargetBuyPriceGeneratedColumnTest(unittest.TestCase):
         try:
             _execute_sql_script(connection, MIGRATION_SQL_PATH)
             _execute_sql_script(connection, MIGRATION_SQL_PATH)
+            _execute_sql_script(connection, MIGRATION_ALERT_DIRECTION_SQL_PATH)
+            _execute_sql_script(connection, MIGRATION_ALERT_DIRECTION_SQL_PATH)
 
             cursor.execute(
                 """
@@ -74,6 +81,8 @@ class TargetBuyPriceGeneratedColumnTest(unittest.TestCase):
             self.assertIn("target_buy_price_krw", create_sql)
             self.assertIn("GENERATED ALWAYS AS", create_sql)
             self.assertIn("round((`fair_price_krw` * (1 - (`alert_drop_rate_percent` / 100)))", lowered_create_sql)
+            self.assertIn("alert_price_direction", create_sql)
+            self.assertIn("below_or_equal", lowered_create_sql)
         finally:
             cursor.close()
             connection.close()
@@ -160,6 +169,25 @@ class TargetBuyPriceGeneratedColumnTest(unittest.TestCase):
             )
             updated_drop = cursor.fetchone()
             self.assertEqual(updated_drop.get("target_buy_price_krw"), 810000)
+
+            cursor.execute(
+                """
+                UPDATE tmp_target_buy_price_generated
+                SET alert_drop_rate_percent = %s
+                WHERE id = %s
+                """,
+                (-10.00, row_id),
+            )
+            cursor.execute(
+                """
+                SELECT target_buy_price_krw
+                FROM tmp_target_buy_price_generated
+                WHERE id = %s
+                """,
+                (row_id,),
+            )
+            updated_drop_negative = cursor.fetchone()
+            self.assertEqual(updated_drop_negative.get("target_buy_price_krw"), 990000)
 
             with self.assertRaises(mysql.connector.Error):
                 cursor.execute(
@@ -304,6 +332,52 @@ class TargetBuyPriceGeneratedColumnTest(unittest.TestCase):
             )
             updated = cursor.fetchone()
             self.assertEqual(updated.get("target_buy_price_krw"), 810000)
+
+            cursor.execute(
+                """
+                UPDATE user_fair_prices
+                SET alert_drop_rate_percent = %s
+                WHERE user_id = %s
+                  AND product_type = %s
+                  AND chip = %s
+                  AND screen_inch = %s
+                  AND ram_gb = %s
+                  AND ssd_gb = %s
+                """,
+                (
+                    -10.00,
+                    TEST_USER_ID,
+                    TEST_PRODUCT_TYPE,
+                    TEST_CHIP,
+                    TEST_SCREEN_INCH,
+                    TEST_RAM_GB,
+                    TEST_SSD_GB,
+                ),
+            )
+            connection.commit()
+
+            cursor.execute(
+                """
+                SELECT target_buy_price_krw
+                FROM user_fair_prices
+                WHERE user_id = %s
+                  AND product_type = %s
+                  AND chip = %s
+                  AND screen_inch = %s
+                  AND ram_gb = %s
+                  AND ssd_gb = %s
+                """,
+                (
+                    TEST_USER_ID,
+                    TEST_PRODUCT_TYPE,
+                    TEST_CHIP,
+                    TEST_SCREEN_INCH,
+                    TEST_RAM_GB,
+                    TEST_SSD_GB,
+                ),
+            )
+            updated_negative = cursor.fetchone()
+            self.assertEqual(updated_negative.get("target_buy_price_krw"), 990000)
         finally:
             cursor.execute(
                 """

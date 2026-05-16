@@ -46,6 +46,32 @@ class ApiServerUserRegistrationTest(unittest.TestCase):
         mock_upsert_setting.assert_called_once()
         self.assertEqual(mock_upsert_setting.call_args.kwargs.get("user_id"), "boongtol")
 
+    @patch("src.api_server.upsert_user_fair_price_setting", return_value={"ok": True})
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_user_fair_price_upsert_accepts_negative_drop_and_direction(self, mock_register_user, mock_upsert_setting):
+        request = api_server.UserFairPriceUpsertRequest(
+            user_id="boongtol",
+            product_type="MacBook Air",
+            chip="M2",  # type: ignore[arg-type]
+            screen_inch=13,
+            ram_gb=8,
+            ssd_gb=256,
+            fair_price_krw=1000000,
+            alert_drop_rate_percent=-10.0,
+            alert_price_direction="ABOVE_OR_EQUAL",
+            enabled=True,
+            search_keyword="m2맥북에어",
+            poll_interval_seconds=60,
+        )
+
+        response = api_server.user_fair_prices_upsert(request)
+
+        self.assertTrue(response.get("ok"))
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_upsert_setting.assert_called_once()
+        self.assertEqual(mock_upsert_setting.call_args.kwargs.get("alert_drop_rate_percent"), -10.0)
+        self.assertEqual(mock_upsert_setting.call_args.kwargs.get("alert_price_direction"), "ABOVE_OR_EQUAL")
+
     @patch("src.api_server.register_user", return_value={"ok": False, "reason": "duplicate_device_conflict"})
     def test_user_fair_prices_returns_registration_failure(self, mock_register_user):
         response = api_server.user_fair_prices("boongtol")

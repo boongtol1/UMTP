@@ -78,6 +78,42 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
             },
         )
 
+    def _run_pipeline_for_price_rule(self, *, listing_price_krw, resolved_fair_price):
+        fake_cursor = _FakeCursor()
+        fake_connection = _FakeConnection(fake_cursor)
+
+        with patch("src.listing_analysis_pipeline.fetch_html", return_value="<html></html>"):
+            with patch(
+                "src.listing_analysis_pipeline.parse_joongna_listing_page",
+                return_value={
+                    "title": "맥북에어 M2 8GB 256GB",
+                    "description": "테스트",
+                    "listing_price_krw": listing_price_krw,
+                    "self_check_fields": {},
+                },
+            ):
+                with self._mock_parsing():
+                    with patch(
+                        "src.listing_analysis_pipeline.is_user_fair_price_target_enabled",
+                        return_value=True,
+                    ):
+                        with patch(
+                            "src.listing_analysis_pipeline.resolve_fair_price_for_user",
+                            return_value=resolved_fair_price,
+                        ):
+                            with patch("src.listing_analysis_pipeline.get_connection", return_value=fake_connection):
+                                with patch(
+                                    "src.listing_analysis_pipeline.save_listing_analysis_result",
+                                    return_value={"analysis_result_id": 5, "diff_ratio": 0.0},
+                                ):
+                                    with patch("src.listing_analysis_pipeline.save_success_log"):
+                                        with patch(
+                                            "src.listing_analysis_pipeline.maybe_create_alert_event",
+                                            return_value={"created": True, "alert_id": 71},
+                                        ) as mock_create_alert:
+                                            result = analyze_product_for_watch_rule(self._build_job())
+        return result, mock_create_alert.call_count
+
     def test_fair_price_missing_does_not_create_alert(self):
         fake_cursor = _FakeCursor()
         fake_connection = _FakeConnection(fake_cursor)
@@ -294,6 +330,76 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
         self.assertEqual(parsed_spec.get("chip"), "M2")
         self.assertEqual(parsed_spec.get("ram_gb"), 8)
         self.assertEqual(parsed_spec.get("ssd_gb"), 256)
+
+    def test_below_or_equal_alert_when_listing_is_lower_than_target(self):
+        result, create_alert_call_count = self._run_pipeline_for_price_rule(
+            listing_price_krw=790000,
+            resolved_fair_price={
+                "fair_price_krw": 1000000,
+                "alert_drop_rate_percent": 20.50,
+                "target_buy_price_krw": 795000,
+                "alert_price_direction": "BELOW_OR_EQUAL",
+                "source": "user_fair_prices",
+            },
+        )
+
+        self.assertTrue(result.get("ok"))
+        self.assertTrue(result.get("is_alert_target"))
+        self.assertEqual(result.get("alert_price_direction"), "BELOW_OR_EQUAL")
+        self.assertEqual(result.get("target_price_krw"), 795000)
+        self.assertEqual(create_alert_call_count, 1)
+
+    def test_above_or_equal_alert_with_negative_drop_rate_when_listing_is_higher(self):
+        result, create_alert_call_count = self._run_pipeline_for_price_rule(
+            listing_price_krw=1150000,
+            resolved_fair_price={
+                "fair_price_krw": 1000000,
+                "alert_drop_rate_percent": -10.00,
+                "target_buy_price_krw": 1100000,
+                "alert_price_direction": "ABOVE_OR_EQUAL",
+                "source": "user_fair_prices",
+            },
+        )
+
+        self.assertTrue(result.get("ok"))
+        self.assertTrue(result.get("is_alert_target"))
+        self.assertEqual(result.get("alert_price_direction"), "ABOVE_OR_EQUAL")
+        self.assertEqual(result.get("target_price_krw"), 1100000)
+        self.assertEqual(create_alert_call_count, 1)
+
+    def test_above_or_equal_alert_skips_when_listing_is_below_target(self):
+        result, create_alert_call_count = self._run_pipeline_for_price_rule(
+            listing_price_krw=1050000,
+            resolved_fair_price={
+                "fair_price_krw": 1000000,
+                "alert_drop_rate_percent": -10.00,
+                "target_buy_price_krw": 1100000,
+                "alert_price_direction": "ABOVE_OR_EQUAL",
+                "source": "user_fair_prices",
+            },
+        )
+
+        self.assertTrue(result.get("ok"))
+        self.assertFalse(result.get("is_alert_target"))
+        self.assertEqual(result.get("alert_skip_reason"), "price_below_threshold")
+        self.assertEqual(create_alert_call_count, 0)
+
+    def test_below_or_equal_alert_with_negative_drop_rate_matches_lower_listing(self):
+        result, create_alert_call_count = self._run_pipeline_for_price_rule(
+            listing_price_krw=1050000,
+            resolved_fair_price={
+                "fair_price_krw": 1000000,
+                "alert_drop_rate_percent": -10.00,
+                "target_buy_price_krw": 1100000,
+                "alert_price_direction": "BELOW_OR_EQUAL",
+                "source": "user_fair_prices",
+            },
+        )
+
+        self.assertTrue(result.get("ok"))
+        self.assertTrue(result.get("is_alert_target"))
+        self.assertEqual(result.get("alert_price_direction"), "BELOW_OR_EQUAL")
+        self.assertEqual(create_alert_call_count, 1)
 
     def test_process_analysis_job_skips_when_not_pending(self):
         job = {"id": 10, "product_id": "1001"}
