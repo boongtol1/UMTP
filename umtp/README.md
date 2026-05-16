@@ -53,10 +53,14 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - `alert_drop_rate_percent`는 `-100.00% ~ 100.00%`를 허용합니다. 양수는 공정가보다 낮은 목표가, 음수는 공정가보다 높은 목표가를 의미합니다.
 - `user_fair_prices.alert_price_direction` 기본값은 `BELOW_OR_EQUAL`이며, `ABOVE_OR_EQUAL`도 지원합니다.
 - 알림 비교 규칙: `BELOW_OR_EQUAL`은 `listing_price_krw <= target_buy_price_krw`, `ABOVE_OR_EQUAL`은 `listing_price_krw >= target_buy_price_krw`입니다.
+- `user_fair_prices.min_price_krw`/`max_price_krw`는 방향별 추가 경계값입니다. `BELOW_OR_EQUAL`에서는 `min_price_krw`만 사용(해당 값 미만 매물 제외), `ABOVE_OR_EQUAL`에서는 `max_price_krw`만 사용(해당 값 초과 매물 제외)합니다.
+- 예: `BELOW_OR_EQUAL + min_price_krw=300000`이면 30만원 미만 매물은 제외됩니다.
+- 예: `ABOVE_OR_EQUAL + max_price_krw=900000`이면 90만원 초과 매물은 제외됩니다.
 - 예1: 공정가 `1,000,000원`, 차이비율 `20%` -> 목표가 `800,000원`, `BELOW_OR_EQUAL`이면 `800,000원 이하`만 알림입니다.
 - 예2: 공정가 `1,000,000원`, 차이비율 `-10%` -> 목표가 `1,100,000원`, `ABOVE_OR_EQUAL`이면 `1,100,000원 이상`만 알림입니다.
 - 알림 피드는 기존 필드를 유지하면서 상세 필드(제품 분류/시장가 기준/알림 조건/위험도/본문 요약/분석 시각/출처)를 추가 제공합니다.
 - Android 가격 설정 화면은 개발자 용어 대신 사용자 친화 문구(`내가 생각한 시장가`, `시장가와의 차이(%)`, `알림 기준 가격`)를 사용합니다.
+- Android 설정 화면은 새로고침 상태(`새로고침 중...`, `방금 새로고침됨`, 실패 메시지, 마지막 새로고침 시각)를 표시합니다.
 - 위험도 표시는 `낮음/주의/위험`으로 요약하며, 위험 키워드/교환 여부/본문 요약을 함께 제공합니다.
 - 0.8 서비스 계층: `analysis_service.py`에서 URL 분석과 `ok/ reason` 실패 응답을 처리합니다.
 - 0.8 알림은 `notifier.py`의 `print()` 기반 가짜 알림으로 처리합니다.
