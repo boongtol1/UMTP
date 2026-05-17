@@ -65,3 +65,16 @@ fun computeAlertDropRatePercent(fairPrice: Int?, desiredPrice: Int?): Double? {
         .multiply(BigDecimal("100"))
     return ratio.setScale(2, RoundingMode.HALF_UP).toDouble()
 }
+
+fun computeMarketPriceGapPercent(fairPrice: Int?, desiredPrice: Int?): Double? {
+    if (fairPrice == null || desiredPrice == null || fairPrice <= 0 || desiredPrice <= 0) {
+        return null
+    }
+    val fair = BigDecimal(fairPrice)
+    val desired = BigDecimal(desiredPrice)
+    val base = if (fair <= desired) fair else desired
+    val ratio = fair.subtract(desired)
+        .divide(base, 8, RoundingMode.HALF_UP)
+        .multiply(BigDecimal("100"))
+    return ratio.setScale(2, RoundingMode.HALF_UP).toDouble()
+}

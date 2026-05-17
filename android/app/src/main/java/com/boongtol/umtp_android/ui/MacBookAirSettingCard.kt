@@ -60,7 +60,13 @@ fun MacBookAirSettingCard(
     val marketPriceLabel = buildMarketPriceLabel(userId)
     val fairPriceInput = fairPriceText.toIntOrNull()
     val desiredPriceInput = desiredPriceText.toIntOrNull()
-    val computedDropRate = computeAlertDropRatePercent(fairPriceInput, desiredPriceInput)
+    val computedGapPercent = computeMarketPriceGapPercent(fairPriceInput, desiredPriceInput)
+    val effectiveFairPrice = userSetting?.effective_fair_price_krw
+    val effectiveTargetPrice = userSetting?.effective_target_buy_price_krw ?: calculateDesiredPrice(
+        effectiveFairPrice,
+        userSetting?.effective_alert_drop_rate_percent,
+    )
+    val effectiveGapPercent = computeMarketPriceGapPercent(effectiveFairPrice, effectiveTargetPrice)
     val isAboveDirection = alertPriceDirection == ABOVE_OR_EQUAL_DIRECTION
     val boundPriceText = if (isAboveDirection) maxPriceText else minPriceText
     val boundPriceInput = boundPriceText.toIntOrNull()
@@ -113,7 +119,7 @@ fun MacBookAirSettingCard(
             )
             InfoRow(
                 label = "시장가와의 차이(%)",
-                value = formatPercentDisplay(userSetting?.effective_alert_drop_rate_percent),
+                value = formatPercentDisplay(effectiveGapPercent),
             )
             InfoRow(label = "추천 검색어", value = userSetting?.recommended_search_keyword ?: "-")
 
@@ -162,8 +168,8 @@ fun MacBookAirSettingCard(
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = if (computedDropRate != null) {
-                    "시장가와의 차이(%): ${formatPercentDisplay(computedDropRate)}"
+                text = if (computedGapPercent != null) {
+                    "시장가와의 차이(%): ${formatPercentDisplay(computedGapPercent)}"
                 } else {
                     "시장가와의 차이(%): 정보 없음"
                 },
@@ -175,7 +181,7 @@ fun MacBookAirSettingCard(
                 color = Color.Gray,
             )
             Text(
-                text = "20% → 시장가보다 20% 낮을 때, -10% → 시장가보다 10% 높을 때",
+                text = "차이가 매우 크면 100%를 넘어갈 수 있어요.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.Gray,
             )
