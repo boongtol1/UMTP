@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS alert_events (
   is_exchange_post BOOLEAN NULL,
   trade_type VARCHAR(20) NULL,
   body_excerpt TEXT NULL,
+  body_text TEXT NULL,
   analyzed_at TIMESTAMP NULL,
   trigger_reason VARCHAR(100) NULL,
   message TEXT NULL,

@@ -227,6 +227,7 @@ def maybe_create_alert_event(
     alert_price_direction=None,
     risk_result=None,
     body_excerpt=None,
+    body_text=None,
 ):
     parsed_spec = parsed_spec or {}
     risk_result = risk_result or {}
@@ -273,6 +274,7 @@ def maybe_create_alert_event(
                 is_exchange_post,
                 trade_type,
                 body_excerpt,
+                body_text,
                 analyzed_at,
                 trigger_reason,
                 message,
@@ -309,6 +311,7 @@ def maybe_create_alert_event(
                 bool(risk_result.get("is_exchange_post")) if risk_result.get("is_exchange_post") is not None else None,
                 _normalize_optional_text(risk_result.get("trade_type")),
                 _normalize_optional_text(body_excerpt),
+                _normalize_optional_text(body_text),
                 _normalize_optional_text(trigger_reason),
                 _normalize_optional_text(message),
             ),
@@ -316,6 +319,83 @@ def maybe_create_alert_event(
     except Exception as exc:
         lowered_exc = str(exc).lower()
         if "unknown column" in lowered_exc:
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO alert_events (
+                        user_id,
+                        analysis_job_id,
+                        product_id,
+                        source,
+                        url,
+                        title,
+                        product_type,
+                        chip,
+                        screen_inch,
+                        ram_gb,
+                        ssd_gb,
+                        price_krw,
+                        fair_price_krw,
+                        target_price_krw,
+                        drop_rate_percent,
+                        alert_drop_rate_percent,
+                        alert_price_direction,
+                        risk_level,
+                        risk_score,
+                        risk_keywords,
+                        is_exchange_post,
+                        trade_type,
+                        body_excerpt,
+                        analyzed_at,
+                        trigger_reason,
+                        message,
+                        status,
+                        send_attempts
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, 'pending', 0
+                    )
+                    """,
+                    (
+                        normalized_user_id,
+                        _normalize_optional_int(analysis_job_id),
+                        normalized_product_id,
+                        _normalize_optional_text(source),
+                        _normalize_optional_text(url),
+                        _normalize_optional_text(title),
+                        _normalize_optional_text(parsed_spec.get("product_type")),
+                        _normalize_optional_text(parsed_spec.get("chip")),
+                        _normalize_optional_int(parsed_spec.get("screen_inch")),
+                        _normalize_optional_int(parsed_spec.get("ram_gb")),
+                        _normalize_optional_int(parsed_spec.get("ssd_gb")),
+                        _normalize_optional_int(price_krw),
+                        _normalize_optional_int(fair_price_krw),
+                        _normalize_optional_int(target_price_krw),
+                        _normalize_optional_float(drop_rate_percent),
+                        _normalize_optional_float(alert_drop_rate_percent),
+                        _normalize_optional_text(alert_price_direction),
+                        _normalize_optional_text(risk_result.get("risk_level")),
+                        _normalize_optional_int(risk_result.get("risk_score")),
+                        _normalize_optional_text(risk_result.get("risk_keywords_json")),
+                        bool(risk_result.get("is_exchange_post"))
+                        if risk_result.get("is_exchange_post") is not None
+                        else None,
+                        _normalize_optional_text(risk_result.get("trade_type")),
+                        _normalize_optional_text(body_excerpt),
+                        _normalize_optional_text(trigger_reason),
+                        _normalize_optional_text(message),
+                    ),
+                )
+                return {
+                    "created": True,
+                    "alert_id": int(cursor.lastrowid),
+                }
+            except Exception as detail_exc:
+                if "unknown column" not in str(detail_exc).lower():
+                    raise
+
             cursor.execute(
                 """
                 INSERT INTO alert_events (
@@ -383,6 +463,7 @@ def save_listing_analysis_result(
     search_keyword,
     title,
     parsed_spec,
+    body_text=None,
     listing_price_krw,
     fair_price_krw,
     is_alert_target,
@@ -404,6 +485,57 @@ def save_listing_analysis_result(
     diff_ratio = 0.0
     if normalized_fair_price_krw > 0:
         diff_ratio = (diff_amount_krw / normalized_fair_price_krw) * 100
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO listing_analysis_results (
+                analysis_job_id,
+                trigger_reason,
+                search_keyword,
+                title,
+                body_text,
+                product_type,
+                chip,
+                screen_inch,
+                ram_gb,
+                ssd_gb,
+                listing_price_krw,
+                fair_price_krw,
+                diff_amount_krw,
+                diff_ratio,
+                is_alert_target,
+                alert_created
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                _normalize_optional_int(analysis_job_id),
+                _normalize_optional_text(trigger_reason),
+                _normalize_optional_text(search_keyword),
+                normalized_title,
+                _normalize_optional_text(body_text),
+                normalized_product_type,
+                normalized_chip,
+                normalized_screen_inch,
+                normalized_ram_gb,
+                normalized_ssd_gb,
+                normalized_listing_price_krw,
+                normalized_fair_price_krw,
+                diff_amount_krw,
+                round(diff_ratio, 2),
+                bool(is_alert_target),
+                bool(alert_created),
+            ),
+        )
+        return {
+            "inserted": True,
+            "analysis_result_id": int(cursor.lastrowid),
+            "diff_ratio": round(diff_ratio, 2),
+        }
+    except Exception as exc:
+        if "Unknown column" not in str(exc):
+            raise
 
     try:
         cursor.execute(
@@ -662,6 +794,7 @@ def analyze_product_for_watch_rule(job):
                     "trade_type": risk_result.get("trade_type"),
                 },
                 body_excerpt=_build_body_excerpt(description),
+                body_text=_normalize_optional_text(description),
             )
 
         result_save = save_listing_analysis_result(
@@ -671,6 +804,7 @@ def analyze_product_for_watch_rule(job):
             search_keyword=search_keyword,
             title=title,
             parsed_spec=parsed_spec,
+            body_text=description,
             listing_price_krw=listing_price_krw,
             fair_price_krw=fair_price_krw,
             is_alert_target=is_alert_target,
@@ -690,6 +824,7 @@ def analyze_product_for_watch_rule(job):
             diff_ratio=_normalize_optional_float(result_save.get("diff_ratio")) or 0.0,
             is_alert_target=bool(is_alert_target),
             risk_result=risk_result,
+            body_text=description,
         )
 
         connection.commit()

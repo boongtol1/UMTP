@@ -154,6 +154,7 @@ def _fetch_latest_log_details(cursor, *, user_id, url):
                 risk_keywords,
                 is_exchange_post,
                 trade_type,
+                body_text,
                 created_at
             FROM url_analysis_logs
             WHERE user_id = %s
@@ -172,14 +173,15 @@ def _fetch_latest_log_details(cursor, *, user_id, url):
             cursor.execute(
                 """
                 SELECT
-                    source,
-                    product_type,
-                    chip,
-                    screen_inch,
-                    ram_gb,
-                    ssd_gb,
-                    created_at
-                FROM url_analysis_logs
+                source,
+                product_type,
+                chip,
+                screen_inch,
+                ram_gb,
+                ssd_gb,
+                NULL AS body_text,
+                created_at
+            FROM url_analysis_logs
                 WHERE user_id = %s
                   AND url = %s
                   AND status = 'success'
@@ -227,6 +229,7 @@ def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit):
                 is_exchange_post,
                 trade_type,
                 body_excerpt,
+                body_text,
                 analyzed_at,
                 trigger_reason,
                 message,
@@ -248,6 +251,57 @@ def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit):
         lowered_exc = str(exc).lower()
         if "unknown column" not in lowered_exc:
             raise
+        try:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    NULL AS watch_rule_id,
+                    analysis_job_id,
+                    product_id,
+                    source,
+                    url,
+                    title,
+                    product_type,
+                    chip,
+                    screen_inch,
+                    ram_gb,
+                    ssd_gb,
+                    price_krw,
+                    fair_price_krw,
+                    target_price_krw,
+                    drop_rate_percent,
+                    alert_drop_rate_percent,
+                    alert_price_direction,
+                    risk_level,
+                    risk_score,
+                    risk_keywords,
+                    is_exchange_post,
+                    trade_type,
+                    body_excerpt,
+                    NULL AS body_text,
+                    analyzed_at,
+                    trigger_reason,
+                    message,
+                    status,
+                    send_attempts,
+                    error_message,
+                    created_at,
+                    sent_at,
+                    updated_at
+                FROM alert_events
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (normalized_user_id, normalized_limit),
+            )
+            return cursor.fetchall() or [], True
+        except Exception as detail_exc:
+            if "unknown column" not in str(detail_exc).lower():
+                raise
+
         cursor.execute(
             """
             SELECT
@@ -623,7 +677,11 @@ def list_alert_events_for_user(user_id, limit=200):
             screen_inch = _safe_int(row.get("screen_inch"))
             ram_gb = _safe_int(row.get("ram_gb"))
             ssd_gb = _safe_int(row.get("ssd_gb"))
-            body_excerpt = _build_body_excerpt(row.get("body_excerpt"))
+            body_text = _normalize_optional_text(row.get("body_text"))
+            body_excerpt_source = row.get("body_excerpt")
+            if body_excerpt_source is None:
+                body_excerpt_source = body_text
+            body_excerpt = _build_body_excerpt(body_excerpt_source)
             analyzed_at = row.get("analyzed_at") or row.get("created_at")
             confidence_score = _safe_int(row.get("confidence_score"))
 
@@ -648,6 +706,10 @@ def list_alert_events_for_user(user_id, limit=200):
                     is_exchange_post = _normalize_optional_bool(log_detail.get("is_exchange_post"))
                 if trade_type is None:
                     trade_type = _normalize_optional_text(log_detail.get("trade_type"))
+                if body_text is None:
+                    body_text = _normalize_optional_text(log_detail.get("body_text"))
+                if body_excerpt is None:
+                    body_excerpt = _build_body_excerpt(body_text)
                 analyzed_at = analyzed_at or log_detail.get("created_at")
                 if confidence_score is None:
                     confidence_score = _safe_int(log_detail.get("confidence_score"))
@@ -697,6 +759,7 @@ def list_alert_events_for_user(user_id, limit=200):
                     "is_exchange_post": bool(is_exchange_post) if is_exchange_post is not None else False,
                     "trade_type": trade_type,
                     "body_excerpt": body_excerpt,
+                    "body_text": body_text,
                     "analyzed_at": analyzed_at,
                     "confidence_score": confidence_score,
                     "status": row.get("status"),

@@ -19,6 +19,7 @@ def _insert_url_analysis_log_v1(
     is_alert_target=None,
     status,
     reason=None,
+    body_text=None,
 ):
     cursor.execute(
         """
@@ -83,6 +84,7 @@ def _insert_url_analysis_log_with_parser_fields(
     screen_inch_defaulted=None,
     unit_valid=None,
     unit_validation_reason=None,
+    body_text=None,
 ):
     cursor.execute(
         """
@@ -157,6 +159,7 @@ def _insert_url_analysis_log(
     is_alert_target=None,
     status,
     reason=None,
+    body_text=None,
     confidence_score=None,
     screen_inch_defaulted=None,
     unit_valid=None,
@@ -179,6 +182,7 @@ def _insert_url_analysis_log(
                 url,
                 source,
                 title,
+                body_text,
                 listing_price_krw,
                 product_type,
                 chip,
@@ -204,13 +208,14 @@ def _insert_url_analysis_log(
                 exchange_keywords,
                 trade_type
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 user_id,
                 url,
                 source,
                 title,
+                body_text,
                 listing_price_krw,
                 product_type,
                 chip,
@@ -242,6 +247,77 @@ def _insert_url_analysis_log(
             raise
 
         try:
+            cursor.execute(
+                """
+                INSERT INTO url_analysis_logs (
+                    user_id,
+                    url,
+                    source,
+                    title,
+                    listing_price_krw,
+                    product_type,
+                    chip,
+                    screen_inch,
+                    ram_gb,
+                    ssd_gb,
+                    fair_price_krw,
+                    diff_ratio,
+                    is_alert_target,
+                    status,
+                    reason,
+                    confidence_score,
+                    screen_inch_defaulted,
+                    unit_valid,
+                    unit_validation_reason,
+                    risk_detected,
+                    risk_level,
+                    risk_score,
+                    risk_keywords,
+                    risk_categories,
+                    is_exchange_post,
+                    exchange_strength,
+                    exchange_keywords,
+                    trade_type
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    user_id,
+                    url,
+                    source,
+                    title,
+                    listing_price_krw,
+                    product_type,
+                    chip,
+                    screen_inch,
+                    ram_gb,
+                    ssd_gb,
+                    fair_price_krw,
+                    diff_ratio,
+                    is_alert_target,
+                    status,
+                    reason,
+                    confidence_score,
+                    screen_inch_defaulted,
+                    unit_valid,
+                    unit_validation_reason,
+                    risk_detected,
+                    risk_level,
+                    risk_score,
+                    _safe_json_text(risk_keywords),
+                    _safe_json_text(risk_categories),
+                    is_exchange_post,
+                    exchange_strength,
+                    _safe_json_text(exchange_keywords),
+                    trade_type,
+                ),
+            )
+            return
+        except Exception as body_text_exc:
+            if "Unknown column" not in str(body_text_exc):
+                raise
+
+        try:
             _insert_url_analysis_log_with_parser_fields(
                 cursor,
                 user_id=user_id,
@@ -259,6 +335,7 @@ def _insert_url_analysis_log(
                 is_alert_target=is_alert_target,
                 status=status,
                 reason=reason,
+                body_text=body_text,
                 confidence_score=confidence_score,
                 screen_inch_defaulted=screen_inch_defaulted,
                 unit_valid=unit_valid,
@@ -275,6 +352,7 @@ def _insert_url_analysis_log(
             url=url,
             source=source,
             title=title,
+            body_text=body_text,
             listing_price_krw=listing_price_krw,
             product_type=product_type,
             chip=chip,
@@ -302,6 +380,7 @@ def save_success_log(
     diff_ratio,
     is_alert_target,
     risk_result=None,
+    body_text=None,
 ):
     risk_result = risk_result or {}
     _insert_url_analysis_log(
@@ -310,6 +389,7 @@ def save_success_log(
         url=url,
         source=source,
         title=title,
+        body_text=body_text,
         listing_price_krw=listing_price_krw,
         product_type=parsed_spec.get("product_type"),
         chip=parsed_spec.get("chip"),
@@ -345,6 +425,7 @@ def save_failed_log(
     reason,
     source=None,
     title=None,
+    body_text=None,
     listing_price_krw=None,
     parsed_spec=None,
     risk_result=None,
@@ -357,6 +438,7 @@ def save_failed_log(
         url=url,
         source=source,
         title=title,
+        body_text=body_text,
         listing_price_krw=listing_price_krw,
         product_type=parsed_spec.get("product_type"),
         chip=parsed_spec.get("chip"),

@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS mac_fair_prices (
 CREATE TABLE IF NOT EXISTS listing_analysis_results (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   title VARCHAR(255) NOT NULL,
+  body_text TEXT NULL,
   product_type VARCHAR(100) NOT NULL,
   chip VARCHAR(50) NOT NULL,
   screen_inch INT NOT NULL,

@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS url_analysis_logs (
   url VARCHAR(1000) NOT NULL,
   source VARCHAR(50) NULL,
   title VARCHAR(255) NULL,
+  body_text TEXT NULL,
   listing_price_krw INT NULL,
   product_type VARCHAR(100) NULL,
   chip VARCHAR(50) NULL,

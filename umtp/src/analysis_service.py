@@ -57,6 +57,45 @@ def _save_listing_analysis_result(
     diff_ratio,
     is_alert_target,
 ):
+    try:
+        cursor.execute(
+            """
+            INSERT INTO listing_analysis_results (
+                title,
+                body_text,
+                product_type,
+                chip,
+                screen_inch,
+                ram_gb,
+                ssd_gb,
+                listing_price_krw,
+                fair_price_krw,
+                diff_amount_krw,
+                diff_ratio,
+                is_alert_target
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                listing["title"],
+                listing.get("body_text"),
+                listing["product_type"],
+                listing["chip"],
+                listing["screen_inch"],
+                listing["ram_gb"],
+                listing["ssd_gb"],
+                listing["listing_price_krw"],
+                fair_price_krw,
+                diff_amount_krw,
+                round(diff_ratio, 2),
+                is_alert_target,
+            ),
+        )
+        return
+    except Exception as exc:
+        if "Unknown column" not in str(exc):
+            raise
+
     cursor.execute(
         """
         INSERT INTO listing_analysis_results (
@@ -158,7 +197,7 @@ def _build_parse_failure_reason(parsed_spec):
     return "스펙 추출 실패"
 
 
-def _build_failed_response(url, reason, *, parsed_spec=None, self_check_fields=None, risk_result=None):
+def _build_failed_response(url, reason, *, parsed_spec=None, self_check_fields=None, risk_result=None, body_text=None):
     parsed_spec = parsed_spec or {}
     risk_result = risk_result or _default_risk_result()
     return {
@@ -189,6 +228,7 @@ def _build_failed_response(url, reason, *, parsed_spec=None, self_check_fields=N
         "exchange_strength": risk_result.get("exchange_strength", "none"),
         "exchange_keywords": risk_result.get("exchange_keywords", []),
         "trade_type": risk_result.get("trade_type", "sale"),
+        "body_text": body_text,
         "telegram_sent": False,
     }
 
@@ -241,6 +281,7 @@ def analyze_url_for_user(
     connection = None
     cursor = None
     title = None
+    description = None
     listing_price_krw = None
     parsed_spec = {}
     self_check_fields = {}
@@ -256,6 +297,7 @@ def analyze_url_for_user(
                     reason=reason,
                     source=source,
                     title=title,
+                    body_text=description,
                     listing_price_krw=listing_price_krw,
                     parsed_spec=parsed_spec,
                     risk_result=risk_result,
@@ -270,6 +312,7 @@ def analyze_url_for_user(
             parsed_spec=parsed_spec,
             self_check_fields=self_check_fields,
             risk_result=risk_result,
+            body_text=description,
         )
 
     try:
@@ -311,6 +354,7 @@ def analyze_url_for_user(
                     "exchange_strength": "none",
                     "exchange_keywords": [],
                     "trade_type": "sale",
+                    "body_text": None,
                     "telegram_sent": False,
                     "message": "이미 분석된 URL",
                 }
@@ -393,6 +437,7 @@ def analyze_url_for_user(
 
         listing = {
             "title": title,
+            "body_text": description,
             "listing_price_krw": listing_price_krw,
             **parsed_spec,
         }
@@ -416,6 +461,7 @@ def analyze_url_for_user(
             diff_ratio=diff_ratio,
             is_alert_target=is_alert_target,
             risk_result=risk_result,
+            body_text=description,
         )
         connection.commit()
 
@@ -487,6 +533,7 @@ def analyze_url_for_user(
             "exchange_strength": risk_result.get("exchange_strength", "none"),
             "exchange_keywords": risk_result.get("exchange_keywords", []),
             "trade_type": risk_result.get("trade_type", "sale"),
+            "body_text": description,
             "listing_price_krw": listing_price_krw,
             "fair_price_krw": fair_price_krw,
             "target_buy_price_krw": target_buy_price_krw,

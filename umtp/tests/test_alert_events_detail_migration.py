@@ -11,6 +11,7 @@ from src.db import get_connection  # noqa: E402
 
 
 MIGRATION_SQL_PATH = os.path.join(PROJECT_ROOT, "sql", "migrate_alert_events_detail_fields.sql")
+BODY_TEXT_MIGRATION_SQL_PATH = os.path.join(PROJECT_ROOT, "sql", "migrate_body_text_fields.sql")
 CREATE_ALERT_EVENTS_SQL_PATH = os.path.join(PROJECT_ROOT, "sql", "create_or_alter_alert_events.sql")
 
 
@@ -47,6 +48,8 @@ class AlertEventsDetailMigrationTest(unittest.TestCase):
             _execute_sql_script(connection, CREATE_ALERT_EVENTS_SQL_PATH)
             _execute_sql_script(connection, MIGRATION_SQL_PATH)
             _execute_sql_script(connection, MIGRATION_SQL_PATH)
+            _execute_sql_script(connection, BODY_TEXT_MIGRATION_SQL_PATH)
+            _execute_sql_script(connection, BODY_TEXT_MIGRATION_SQL_PATH)
 
             expected_columns = {
                 "source",
@@ -63,6 +66,7 @@ class AlertEventsDetailMigrationTest(unittest.TestCase):
                 "is_exchange_post",
                 "trade_type",
                 "body_excerpt",
+                "body_text",
                 "analyzed_at",
             }
 

@@ -65,6 +65,7 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
                     "is_exchange_post": False,
                     "trade_type": "sale",
                     "body_excerpt": "상태 좋고 배터리 정상",
+                    "body_text": "상태 좋고 배터리 정상. 사용감 적음.",
                     "analyzed_at": "2026-05-16T12:00:00",
                     "trigger_reason": "new_product",
                     "message": "msg",
@@ -93,6 +94,7 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
         self.assertEqual(item.get("formatted_risk_label"), "낮음")
         self.assertEqual(item.get("risk_keywords"), [])
         self.assertEqual(item.get("body_excerpt"), "상태 좋고 배터리 정상")
+        self.assertEqual(item.get("body_text"), "상태 좋고 배터리 정상. 사용감 적음.")
 
     @patch("src.notification_worker.get_connection", return_value=_FakeConnection())
     @patch(
@@ -138,6 +140,7 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
             "risk_keywords": '["교환"]',
             "is_exchange_post": True,
             "trade_type": "exchange",
+            "body_text": "교환 원합니다. 본문 테스트",
             "created_at": "2026-05-16T12:10:00",
         },
     )
@@ -158,7 +161,8 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
         self.assertEqual(item.get("risk_keywords"), ["교환"])
         self.assertTrue(item.get("trade_type_flags", {}).get("is_exchange"))
         self.assertTrue(item.get("trade_type_flags", {}).get("is_suspicious"))
-        self.assertEqual(item.get("body_excerpt"), None)
+        self.assertEqual(item.get("body_text"), "교환 원합니다. 본문 테스트")
+        self.assertEqual(item.get("body_excerpt"), "교환 원합니다. 본문 테스트")
 
 
 if __name__ == "__main__":
