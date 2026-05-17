@@ -65,7 +65,6 @@ def _contains_product_type(text):
         "macbook air" in lowered
         or "macbookair" in normalized
         or "맥북에어" in normalized
-        or re.search(r"\bair\b", lowered) is not None
     )
 
 
@@ -197,9 +196,33 @@ def parse_listing_title(text, self_check_fields=None):
     screen_inch_defaulted = False
 
     model_name_raw = normalized_self_check.get("모델명")
-    if model_name_raw and _contains_product_type(model_name_raw):
+    has_product_type_in_model = bool(model_name_raw and _contains_product_type(model_name_raw))
+    has_product_type_in_text = _contains_product_type(text)
+
+    # Gate spec parsing with product type detection first.
+    if not has_product_type_in_model and not has_product_type_in_text:
+        return {
+            "parse_success": False,
+            "product_type": None,
+            "chip": None,
+            "screen_inch": None,
+            "screen_inch_defaulted": False,
+            "ram_gb": None,
+            "ssd_gb": None,
+            "confidence_score": 0,
+            "unit_valid": False,
+            "unit_validation_reason": MISSING_REQUIRED_REASON,
+            "missing_fields": list(REQUIRED_FIELDS),
+            "detected_patterns": detected_patterns,
+            "detected_conflicts": detected_conflicts,
+        }
+
+    if has_product_type_in_model:
         product_type = PRODUCT_TYPE
         _record_pattern(detected_patterns, "product_type", PRODUCT_TYPE, "self_check", model_name_raw)
+    elif has_product_type_in_text:
+        product_type = PRODUCT_TYPE
+        _record_pattern(detected_patterns, "product_type", PRODUCT_TYPE, "text", text)
 
     model_chip_candidates = _extract_unique_chip_candidates(model_name_raw)
     if len(model_chip_candidates) == 1:
@@ -253,10 +276,6 @@ def parse_listing_title(text, self_check_fields=None):
     if screen_from_model is not None:
         screen_inch = screen_from_model
         _record_pattern(detected_patterns, "screen_inch", screen_from_model, "self_check", model_name_raw)
-
-    if product_type is None and _contains_product_type(text):
-        product_type = PRODUCT_TYPE
-        _record_pattern(detected_patterns, "product_type", PRODUCT_TYPE, "text", text)
 
     text_chip_candidates = _extract_unique_chip_candidates(text)
     if len(text_chip_candidates) == 1:

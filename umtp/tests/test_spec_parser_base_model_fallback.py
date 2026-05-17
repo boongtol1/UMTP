@@ -76,7 +76,15 @@ class SpecParserBaseModelFallbackTest(unittest.TestCase):
         parsed = parse_listing_title("맥북프로 m1 기본형")
         self.assertFalse(parsed["parse_success"])
         self.assertIsNone(parsed["product_type"])
-        self.assertEqual(parsed["chip"], "M1")
+        self.assertIsNone(parsed["chip"])
+        self.assertIsNone(parsed["ram_gb"])
+        self.assertIsNone(parsed["ssd_gb"])
+
+    def test_air_word_only_does_not_pass_product_type_gate(self):
+        parsed = parse_listing_title("air m1 8gb 256gb")
+        self.assertFalse(parsed["parse_success"])
+        self.assertIsNone(parsed["product_type"])
+        self.assertIsNone(parsed["chip"])
         self.assertIsNone(parsed["ram_gb"])
         self.assertIsNone(parsed["ssd_gb"])
 
