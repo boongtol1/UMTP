@@ -278,7 +278,7 @@ fun AlertCard(
                 DetailRow(label = "위험도", value = resolveRiskLabel(alert))
                 DetailRow(label = "위험 점수", value = alert.risk_score?.toString() ?: "정보 없음")
                 DetailRow(label = "위험 키워드", value = resolveRiskKeywordsText(alert))
-                DetailRow(label = "본문 요약", value = alert.body_excerpt ?: "본문 정보 없음")
+                DetailRow(label = "본문 내용", value = resolveBodyText(alert))
                 DetailRow(label = "분석 시각", value = alert.analyzed_at ?: alert.created_at ?: "분석 시각 정보 없음")
                 DetailRow(label = "교환/나눔/의심", value = resolveTradeFlagsText(alert.trade_type_flags))
 
@@ -374,6 +374,18 @@ private fun resolveRiskKeywordsText(alert: AlertItem): String {
         return "특이사항 없음"
     }
     return keywords.joinToString(", ")
+}
+
+private fun resolveBodyText(alert: AlertItem): String {
+    val fullText = alert.body_text?.trim()
+    if (!fullText.isNullOrEmpty()) {
+        return fullText
+    }
+    val excerpt = alert.body_excerpt?.trim()
+    if (!excerpt.isNullOrEmpty()) {
+        return excerpt
+    }
+    return "본문 내용 없음"
 }
 
 private fun resolveTradeFlagsText(flags: TradeTypeFlags?): String {

@@ -26,6 +26,7 @@ data class AlertItem(
     val risk_keywords: List<String>? = null,
     val trade_type_flags: TradeTypeFlags? = null,
     val body_excerpt: String? = null,
+    val body_text: String? = null,
     val analyzed_at: String? = null,
     val created_at: String? = null,
     val is_alert_target: Boolean = true,

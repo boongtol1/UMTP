@@ -60,7 +60,17 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _lastAlertsRefreshLabel = MutableStateFlow<String?>(null)
     val lastAlertsRefreshLabel: StateFlow<String?> = _lastAlertsRefreshLabel.asStateFlow()
 
+    private val _isRefreshingSettings = MutableStateFlow(false)
+    val isRefreshingSettings: StateFlow<Boolean> = _isRefreshingSettings.asStateFlow()
+
+    private val _settingsRefreshStatusMessage = MutableStateFlow<String?>(null)
+    val settingsRefreshStatusMessage: StateFlow<String?> = _settingsRefreshStatusMessage.asStateFlow()
+
+    private val _lastSettingsRefreshLabel = MutableStateFlow<String?>(null)
+    val lastSettingsRefreshLabel: StateFlow<String?> = _lastSettingsRefreshLabel.asStateFlow()
+
     private var isAlertRefreshInFlight: Boolean = false
+    private var isSettingsRefreshInFlight: Boolean = false
 
     init {
         _userId.value?.let {
@@ -73,12 +83,13 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val unitsResponse = UmtpApiClient.apiService.getMacBookAirUnits()
-                if (unitsResponse.ok) {
-                    _units.value = unitsResponse.units
+                val unitsRefreshError = refreshUnitsInternal()
+                val settingsRefreshError = refreshUserSettingsInternal(uid)
+
+                if (unitsRefreshError != null || settingsRefreshError != null) {
+                    val reasons = listOfNotNull(unitsRefreshError, settingsRefreshError)
+                    _errorMessage.value = "데이터 로딩 에러: ${reasons.joinToString(" / ")}"
                 }
-                
-                loadUserSettings(uid)
                 fetchAlerts(uid, showFeedback = false)
             } catch (e: Exception) {
                 _errorMessage.value = "데이터 로딩 에러: ${e.localizedMessage}"
@@ -90,13 +101,46 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
 
     fun loadUserSettings(uid: String) {
         viewModelScope.launch {
+            refreshUserSettingsInternal(uid)
+        }
+    }
+
+    fun refreshSettings(uid: String, showFeedback: Boolean = true) {
+        if (isSettingsRefreshInFlight) {
+            return
+        }
+        viewModelScope.launch {
+            isSettingsRefreshInFlight = true
+            if (showFeedback) {
+                _isRefreshingSettings.value = true
+                _settingsRefreshStatusMessage.value = "새로고침 중..."
+            }
             try {
-                val response = UmtpApiClient.apiService.getUserFairPrices(uid)
-                if (response.ok) {
-                    _userSettings.value = response.items
+                val unitsRefreshError = refreshUnitsInternal()
+                val settingsRefreshError = refreshUserSettingsInternal(uid)
+                fetchAlerts(uid, showFeedback = false)
+
+                if (showFeedback) {
+                    if (unitsRefreshError == null && settingsRefreshError == null) {
+                        _settingsRefreshStatusMessage.value = "방금 새로고침됨"
+                        _lastSettingsRefreshLabel.value =
+                            "마지막 새로고침: ${formatRefreshTimeLabel(System.currentTimeMillis())}"
+                    } else {
+                        val reasons = listOfNotNull(unitsRefreshError, settingsRefreshError)
+                        _settingsRefreshStatusMessage.value = "새로고침 실패"
+                        _toastMessage.value = "새로고침 실패: ${reasons.joinToString(" / ")}"
+                    }
                 }
             } catch (e: Exception) {
-                // Ignore background settings refresh errors
+                if (showFeedback) {
+                    _settingsRefreshStatusMessage.value = "새로고침 실패"
+                    _toastMessage.value = buildNetworkErrorMessage("새로고침 실패", e)
+                }
+            } finally {
+                if (showFeedback) {
+                    _isRefreshingSettings.value = false
+                }
+                isSettingsRefreshInFlight = false
             }
         }
     }
@@ -274,6 +318,34 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             else -> error.localizedMessage ?: "알 수 없는 네트워크 오류"
         }
         return "$prefix: $reason 서버 주소(${UmtpApiClient.baseUrl})를 확인해주세요."
+    }
+
+    private suspend fun refreshUnitsInternal(): String? {
+        return try {
+            val unitsResponse = UmtpApiClient.apiService.getMacBookAirUnits()
+            if (!unitsResponse.ok) {
+                unitsResponse.reason ?: unitsResponse.message ?: "MacBook Air 단위 목록 응답 오류"
+            } else {
+                _units.value = unitsResponse.units
+                null
+            }
+        } catch (e: Exception) {
+            buildNetworkErrorMessage("MacBook Air 단위 목록 로딩 실패", e)
+        }
+    }
+
+    private suspend fun refreshUserSettingsInternal(uid: String): String? {
+        return try {
+            val response = UmtpApiClient.apiService.getUserFairPrices(uid)
+            if (!response.ok) {
+                response.reason ?: response.message ?: "사용자 설정 응답 오류"
+            } else {
+                _userSettings.value = response.items
+                null
+            }
+        } catch (e: Exception) {
+            buildNetworkErrorMessage("사용자 설정 로딩 실패", e)
+        }
     }
 
     private fun formatRefreshTimeLabel(epochMillis: Long): String {

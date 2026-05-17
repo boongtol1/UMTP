@@ -142,6 +142,9 @@ fun MainTabScreen(
     val isRefreshingAlerts by viewModel.isRefreshingAlerts.collectAsState()
     val alertsRefreshStatusMessage by viewModel.alertsRefreshStatusMessage.collectAsState()
     val lastAlertsRefreshLabel by viewModel.lastAlertsRefreshLabel.collectAsState()
+    val isRefreshingSettings by viewModel.isRefreshingSettings.collectAsState()
+    val settingsRefreshStatusMessage by viewModel.settingsRefreshStatusMessage.collectAsState()
+    val lastSettingsRefreshLabel by viewModel.lastSettingsRefreshLabel.collectAsState()
 
     var targetAlertId by remember { mutableStateOf<String?>(null) }
 
@@ -187,6 +190,10 @@ fun MainTabScreen(
                     units = units,
                     userSettings = userSettings,
                     savingItemKey = savingItemKey,
+                    isRefreshing = isRefreshingSettings,
+                    refreshStatusMessage = settingsRefreshStatusMessage,
+                    lastRefreshAtText = lastSettingsRefreshLabel,
+                    onRefresh = { viewModel.refreshSettings(userId, showFeedback = true) },
                     onUpsert = { unit, fairPrice, desiredPrice, alertPriceDirection, enabled, searchKeyword, boundPrice ->
                         viewModel.upsertItem(
                             unit,
@@ -210,6 +217,10 @@ fun SettingsNavigator(
     units: List<com.boongtol.umtp_android.network.MacBookAirUnit>,
     userSettings: List<com.boongtol.umtp_android.network.UserFairPriceItem>,
     savingItemKey: String?,
+    isRefreshing: Boolean,
+    refreshStatusMessage: String?,
+    lastRefreshAtText: String?,
+    onRefresh: () -> Unit,
     onUpsert: (com.boongtol.umtp_android.network.MacBookAirUnit, Int, Int, String, Boolean, String?, Int?) -> Unit,
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.ChipList) }
@@ -220,6 +231,10 @@ fun SettingsNavigator(
             ChipListScreen(
                 userId = userId,
                 chips = chips,
+                isRefreshing = isRefreshing,
+                refreshStatusMessage = refreshStatusMessage,
+                lastRefreshAtText = lastRefreshAtText,
+                onRefresh = onRefresh,
                 onChipClick = { currentScreen = Screen.ScreenSizeList(it) },
                 onLogout = { /* Registration is locked, logout removed */ }
             )
@@ -230,6 +245,10 @@ fun SettingsNavigator(
             ScreenSizeListScreen(
                 chip = screen.chip,
                 screenSizes = sizes,
+                isRefreshing = isRefreshing,
+                refreshStatusMessage = refreshStatusMessage,
+                lastRefreshAtText = lastRefreshAtText,
+                onRefresh = onRefresh,
                 onScreenSizeClick = { currentScreen = Screen.RamSsdSettings(screen.chip, it) },
                 onBack = { currentScreen = Screen.ChipList }
             )
@@ -245,6 +264,10 @@ fun SettingsNavigator(
                 units = filteredUnits,
                 userSettings = userSettings,
                 savingItemKey = savingItemKey,
+                isRefreshing = isRefreshing,
+                refreshStatusMessage = refreshStatusMessage,
+                lastRefreshAtText = lastRefreshAtText,
+                onRefresh = onRefresh,
                 onSave = onUpsert,
                 onBack = { currentScreen = Screen.ScreenSizeList(screen.chip) }
             )

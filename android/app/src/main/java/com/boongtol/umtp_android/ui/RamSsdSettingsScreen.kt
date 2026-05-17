@@ -5,10 +5,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.boongtol.umtp_android.network.MacBookAirUnit
@@ -23,6 +25,10 @@ fun RamSsdSettingsScreen(
     units: List<MacBookAirUnit>,
     userSettings: List<UserFairPriceItem>,
     savingItemKey: String?,
+    isRefreshing: Boolean,
+    refreshStatusMessage: String?,
+    lastRefreshAtText: String?,
+    onRefresh: () -> Unit,
     onSave: (MacBookAirUnit, Int, Int, String, Boolean, String?, Int?) -> Unit,
     onBack: () -> Unit
 ) {
@@ -34,13 +40,34 @@ fun RamSsdSettingsScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                actions = {
+                    IconButton(onClick = onRefresh, enabled = !isRefreshing) {
+                        if (isRefreshing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(Icons.Default.Refresh, contentDescription = "새로고침")
+                        }
+                    }
+                },
             )
         }
     ) { innerPadding ->
         if (units.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "설정 데이터를 불러오지 못했습니다.\n상단 새로고침을 눌러 다시 시도해주세요.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.Gray,
+                )
             }
         } else {
             LazyColumn(
@@ -49,6 +76,31 @@ fun RamSsdSettingsScreen(
                     .padding(innerPadding),
                 contentPadding = PaddingValues(16.dp)
             ) {
+                item {
+                    if (isRefreshing) {
+                        Text(
+                            text = "새로고침 중...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                    } else if (!refreshStatusMessage.isNullOrBlank()) {
+                        Text(
+                            text = refreshStatusMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 4.dp),
+                        )
+                        if (!lastRefreshAtText.isNullOrBlank()) {
+                            Text(
+                                text = lastRefreshAtText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray,
+                                modifier = Modifier.padding(bottom = 8.dp),
+                            )
+                        }
+                    }
+                }
                 items(units) { unit ->
                     val setting = userSettings.find { 
                         it.chip == unit.chip && 
