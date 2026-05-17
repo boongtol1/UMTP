@@ -125,22 +125,6 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     _toastMessage.value = "새로고침 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
                 }
             } catch (e: Exception) {
-                // Mock fallback if API fails
-                if (_alerts.value.isEmpty()) {
-                    _alerts.value = listOf(
-                        AlertItem(
-                            id = 1,
-                            title = "Mock: 맥북 에어 M1 8GB 256GB 실버",
-                            listing_price_krw = 430000,
-                            fair_price_krw = 550000,
-                            diff_ratio = -21.8,
-                            is_alert_target = true,
-                            risk_score = 15,
-                            product_url = "https://web.joongna.com/product/228559836",
-                            created_at = "2026-05-14T03:22:11"
-                        )
-                    )
-                }
                 if (showFeedback) {
                     _alertsRefreshStatusMessage.value = "새로고침 실패"
                     _toastMessage.value = buildNetworkErrorMessage("새로고침 실패", e)
