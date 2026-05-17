@@ -16,6 +16,7 @@ SUPPORTED_SSD_GB = (256, 512, 1024, 2048, 4096)
 REQUIRED_FIELDS = ("product_type", "chip", "ram_gb", "ssd_gb")
 MISSING_REQUIRED_REASON = "missing_required_fields"
 INVALID_UNIT_REASON = "invalid_macbook_air_unit"
+MULTIPLE_CHIPS_REASON = "multiple_chips_found"
 
 TB_TO_GB_MAP = {
     "1tb": 1024,
@@ -69,17 +70,19 @@ def _contains_product_type(text):
 
 
 def _extract_chip(text):
+    unique_chips = _extract_unique_chip_candidates(text)
+    if len(unique_chips) != 1:
+        return None
+    return unique_chips[0]
+
+
+def _extract_unique_chip_candidates(text):
     if not isinstance(text, str):
-        return None
+        return []
 
-    match = re.search(r"\b(m[1-5])\b", text, flags=re.IGNORECASE)
-    if not match:
-        return None
-
-    chip = match.group(1).upper()
-    if chip in SUPPORTED_CHIPS:
-        return chip
-    return None
+    chip_candidates = re.findall(r"m[1-5]", text.lower())
+    unique_chips = sorted(set(chip_candidates))
+    return [chip.upper() for chip in unique_chips]
 
 
 def _extract_screen_inch_from_text(text):
@@ -187,6 +190,7 @@ def parse_listing_title(text, self_check_fields=None):
 
     product_type = None
     chip = None
+    chip_ambiguous = False
     screen_inch = None
     ram_gb = None
     ssd_gb = None
@@ -197,18 +201,41 @@ def parse_listing_title(text, self_check_fields=None):
         product_type = PRODUCT_TYPE
         _record_pattern(detected_patterns, "product_type", PRODUCT_TYPE, "self_check", model_name_raw)
 
-    chip_model = _extract_chip(model_name_raw)
-    if chip_model:
+    model_chip_candidates = _extract_unique_chip_candidates(model_name_raw)
+    if len(model_chip_candidates) == 1:
+        chip_model = model_chip_candidates[0]
         chip = chip_model
         _record_pattern(detected_patterns, "chip", chip_model, "self_check", model_name_raw)
+    elif len(model_chip_candidates) >= 2:
+        chip_ambiguous = True
+        _record_conflict(
+            detected_conflicts,
+            "chip",
+            "unresolved",
+            None,
+            "self_check",
+            model_chip_candidates,
+        )
 
     cpu_raw = normalized_self_check.get("CPU종류")
-    chip_cpu = _extract_chip(cpu_raw)
-    if chip_cpu:
+    cpu_chip_candidates = _extract_unique_chip_candidates(cpu_raw)
+    if len(cpu_chip_candidates) == 1:
+        chip_cpu = cpu_chip_candidates[0]
         if chip is not None and chip != chip_cpu:
+            chip_ambiguous = True
             _record_conflict(detected_conflicts, "chip", "self_check", chip_cpu, "self_check", chip)
         chip = chip_cpu
         _record_pattern(detected_patterns, "chip", chip_cpu, "self_check", cpu_raw)
+    elif len(cpu_chip_candidates) >= 2:
+        chip_ambiguous = True
+        _record_conflict(
+            detected_conflicts,
+            "chip",
+            "unresolved",
+            None,
+            "self_check",
+            cpu_chip_candidates,
+        )
 
     ram_raw = normalized_self_check.get("램 용량")
     ram_from_self_check = _extract_ram_gb_from_text(ram_raw)
@@ -231,12 +258,25 @@ def parse_listing_title(text, self_check_fields=None):
         product_type = PRODUCT_TYPE
         _record_pattern(detected_patterns, "product_type", PRODUCT_TYPE, "text", text)
 
-    chip_from_text = _extract_chip(text)
-    if chip is None and chip_from_text is not None:
-        chip = chip_from_text
-        _record_pattern(detected_patterns, "chip", chip_from_text, "text", chip_from_text)
-    elif chip is not None and chip_from_text is not None and chip != chip_from_text:
-        _record_conflict(detected_conflicts, "chip", "self_check", chip, "text", chip_from_text)
+    text_chip_candidates = _extract_unique_chip_candidates(text)
+    if len(text_chip_candidates) == 1:
+        chip_from_text = text_chip_candidates[0]
+        if chip is None:
+            chip = chip_from_text
+            _record_pattern(detected_patterns, "chip", chip_from_text, "text", chip_from_text)
+        elif chip != chip_from_text:
+            chip_ambiguous = True
+            _record_conflict(detected_conflicts, "chip", "self_check", chip, "text", chip_from_text)
+    elif len(text_chip_candidates) >= 2:
+        chip_ambiguous = True
+        _record_conflict(
+            detected_conflicts,
+            "chip",
+            "unresolved",
+            None,
+            "text",
+            text_chip_candidates,
+        )
 
     numeric_candidates = extract_numeric_candidates(text)
 
@@ -358,7 +398,10 @@ def parse_listing_title(text, self_check_fields=None):
     unit_validation_reason = None
     parse_success = len(missing_fields) == 0
 
-    if not parse_success:
+    if chip_ambiguous:
+        parse_success = False
+        unit_validation_reason = MULTIPLE_CHIPS_REASON
+    elif not parse_success:
         unit_validation_reason = MISSING_REQUIRED_REASON
     elif product_type == PRODUCT_TYPE:
         unit_valid = is_valid_macbook_air_unit(chip, screen_inch, ram_gb, ssd_gb)

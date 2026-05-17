@@ -88,6 +88,28 @@ class SpecParserBaseModelFallbackTest(unittest.TestCase):
         self.assertIsNone(get_macbook_air_base_spec("M1", 15))
         self.assertIsNone(get_macbook_air_base_spec("M9", 13))
 
+    def test_chip_parsing_accepts_embedded_chip_token(self):
+        parsed = parse_listing_title("맥북에어 m1pro 8gb 256gb")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["chip"], "M1")
+
+    def test_chip_parsing_fails_when_multiple_unique_chips_found(self):
+        parsed = parse_listing_title("맥북에어 m1 m2 8gb 256gb")
+        self.assertFalse(parsed["parse_success"])
+        self.assertIsNone(parsed["chip"])
+        self.assertEqual(parsed["unit_validation_reason"], "multiple_chips_found")
+
+    def test_chip_parsing_fails_for_slash_separated_multiple_chips(self):
+        parsed = parse_listing_title("맥북에어 m1/m2 8gb 256gb")
+        self.assertFalse(parsed["parse_success"])
+        self.assertIsNone(parsed["chip"])
+        self.assertEqual(parsed["unit_validation_reason"], "multiple_chips_found")
+
+    def test_chip_parsing_allows_duplicate_same_chip_tokens(self):
+        parsed = parse_listing_title("맥북에어 m1 m1 8gb 256gb")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["chip"], "M1")
+
 
 if __name__ == "__main__":
     unittest.main()
