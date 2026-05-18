@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS user_fair_prices (
   force_poll BOOLEAN NOT NULL DEFAULT FALSE,
   last_poll_requested_at TIMESTAMP NULL,
   last_polled_at TIMESTAMP NULL,
+  saved_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_user_fair_price_spec (
@@ -40,6 +41,22 @@ CREATE TABLE IF NOT EXISTS user_fair_prices (
   KEY idx_user_fair_prices_due (enabled, last_polled_at),
   KEY idx_user_fair_prices_force_poll (force_poll)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET @target_db = DATABASE();
+
+SELECT COUNT(*) INTO @has_saved_at
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'user_fair_prices'
+  AND column_name = 'saved_at';
+SET @sql_saved_at = IF(
+  @has_saved_at = 0,
+  'ALTER TABLE user_fair_prices ADD COLUMN saved_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP AFTER last_polled_at',
+  'SELECT "saved_at exists"'
+);
+PREPARE stmt_saved_at FROM @sql_saved_at;
+EXECUTE stmt_saved_at;
+DEALLOCATE PREPARE stmt_saved_at;
 
 INSERT INTO user_fair_prices (
   user_id,
@@ -58,7 +75,8 @@ INSERT INTO user_fair_prices (
   poll_interval_seconds,
   force_poll,
   last_poll_requested_at,
-  last_polled_at
+  last_polled_at,
+  saved_at
 )
 VALUES (
   'test_user',
@@ -77,7 +95,8 @@ VALUES (
   60,
   TRUE,
   CURRENT_TIMESTAMP,
-  NULL
+  NULL,
+  CURRENT_TIMESTAMP
 )
 ON DUPLICATE KEY UPDATE
   fair_price_krw = VALUES(fair_price_krw),
@@ -90,4 +109,5 @@ ON DUPLICATE KEY UPDATE
   poll_interval_seconds = VALUES(poll_interval_seconds),
   force_poll = VALUES(force_poll),
   last_poll_requested_at = VALUES(last_poll_requested_at),
-  last_polled_at = VALUES(last_polled_at);
+  last_polled_at = VALUES(last_polled_at),
+  saved_at = CURRENT_TIMESTAMP;

@@ -117,9 +117,12 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.8 진행 현황: polling은 감지된 매물을 `analysis_jobs`에 enqueue하고, analysis worker가 pending job을 처리해 `listing_analysis_results` 및 `alert_events`를 생성합니다.
 - 1.8 알림 구조: notification worker가 `alert_events` pending을 읽어 Telegram 전송(`sent`) 또는 앱 피드 전용 상태(`app_only`)로 처리합니다.
 - 1.8 운영 구조: polling은 enqueue 전용이며, analysis는 `run_analysis_worker_umtp.py`, Telegram 전송은 `run_notification_worker_umtp.py` 전용 worker로 처리합니다.
-- identity 정책: `analysis_jobs`/`alert_events`의 중복 기준은 `(user_id, product_id)`입니다.
+- identity 정책: `analysis_jobs`/`alert_events`의 중복 기준은 `(user_id, watch_rule_id, product_id)`입니다.
+- saved_at 정책: UMTP는 사용자가 저장한 시각(`saved_at`) 이후에 등록된 매물(`sort_date >= saved_at`)만 알림 후보로 봅니다.
+- 재저장 정책: 같은 저장 조건에서 저장 버튼을 다시 누르면 `saved_at`이 현재 시각으로 갱신되고, 그 시점부터 새로 조회를 시작합니다.
+- 재알림 정책: 이미 분석한 `product_id`라도 사용자별 저장 규칙 기준으로는 다시 알림 가능하지만, 같은 사용자/같은 규칙/같은 `product_id` 알림은 한 번만 보냅니다.
+- 마이그레이션: 기존 운영 DB는 `sql/migrate_saved_at_alert_window.sql`을 실행해 `saved_at/sort_date` 컬럼과 rule 단위 unique key를 반영합니다.
 - Telegram 발송 기준: 새 `alert_events` insert 성공 시 1회만 발송됩니다.
-- deprecated: `watch_rule_id`는 보존되지만 더 이상 알림 identity 기준이 아니며, `user_watch_rules` fanout은 사용하지 않습니다.
 - 1.9 진행 현황: Android 설정 화면에서 사용자는 차이비율을 직접 입력하지 않고 `내 기준 적정 가격`과 `내가 사고 싶은 가격`만 입력합니다.
 - 1.9 자동 계산: 앱이 할인 정도를 읽기 전용 설명으로 표시하고, 최종 기준은 서버 응답 `alert_drop_rate_percent`를 사용합니다.
 - 1.9 검색어 UX: 검색어를 직접 입력하거나 추천 검색어를 불러와 선택할 수 있습니다.

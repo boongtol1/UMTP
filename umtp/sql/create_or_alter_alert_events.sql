@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS alert_events (
   trade_type VARCHAR(20) NULL,
   body_excerpt TEXT NULL,
   body_text TEXT NULL,
+  sort_date DATETIME NULL,
   analyzed_at TIMESTAMP NULL,
   trigger_reason VARCHAR(100) NULL,
   message TEXT NULL,
@@ -40,7 +41,8 @@ CREATE TABLE IF NOT EXISTS alert_events (
   KEY idx_alert_events_status (status),
   KEY idx_alert_events_created_at (created_at),
   KEY idx_alert_events_product (product_id),
-  UNIQUE KEY uq_alert_events_user_product (user_id, product_id)
+  KEY idx_alert_events_sort_date (sort_date),
+  UNIQUE KEY uq_alert_events_user_rule_product (user_id, watch_rule_id, product_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET @target_db = DATABASE();
@@ -86,6 +88,20 @@ SET @sql_product_id = IF(
 PREPARE stmt_product_id FROM @sql_product_id;
 EXECUTE stmt_product_id;
 DEALLOCATE PREPARE stmt_product_id;
+
+SELECT COUNT(*) INTO @has_sort_date
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND COLUMN_NAME = 'sort_date';
+SET @sql_sort_date = IF(
+  @has_sort_date = 0,
+  'ALTER TABLE alert_events ADD COLUMN sort_date DATETIME NULL AFTER product_id',
+  'SELECT "sort_date exists"'
+);
+PREPARE stmt_sort_date FROM @sql_sort_date;
+EXECUTE stmt_sort_date;
+DEALLOCATE PREPARE stmt_sort_date;
 
 SELECT COUNT(*) INTO @has_url
 FROM INFORMATION_SCHEMA.COLUMNS
@@ -325,16 +341,44 @@ PREPARE stmt_idx_product FROM @sql_idx_product;
 EXECUTE stmt_idx_product;
 DEALLOCATE PREPARE stmt_idx_product;
 
+SELECT COUNT(*) INTO @has_idx_sort_date
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND INDEX_NAME = 'idx_alert_events_sort_date';
+SET @sql_idx_sort_date = IF(
+  @has_idx_sort_date = 0,
+  'ALTER TABLE alert_events ADD INDEX idx_alert_events_sort_date (sort_date)',
+  'SELECT "idx_alert_events_sort_date exists"'
+);
+PREPARE stmt_idx_sort_date FROM @sql_idx_sort_date;
+EXECUTE stmt_idx_sort_date;
+DEALLOCATE PREPARE stmt_idx_sort_date;
+
 SELECT COUNT(*) INTO @has_uq_user_product
 FROM INFORMATION_SCHEMA.STATISTICS
 WHERE TABLE_SCHEMA = @target_db
   AND TABLE_NAME = 'alert_events'
   AND INDEX_NAME = 'uq_alert_events_user_product';
-SET @sql_uq_user_product = IF(
+SET @sql_drop_uq_user_product = IF(
   @has_uq_user_product = 0,
-  'ALTER TABLE alert_events ADD UNIQUE KEY uq_alert_events_user_product (user_id, product_id)',
-  'SELECT \"uq_alert_events_user_product exists\"'
+  'SELECT "uq_alert_events_user_product already absent"',
+  'ALTER TABLE alert_events DROP INDEX uq_alert_events_user_product'
 );
-PREPARE stmt_uq_user_product FROM @sql_uq_user_product;
-EXECUTE stmt_uq_user_product;
-DEALLOCATE PREPARE stmt_uq_user_product;
+PREPARE stmt_drop_uq_user_product FROM @sql_drop_uq_user_product;
+EXECUTE stmt_drop_uq_user_product;
+DEALLOCATE PREPARE stmt_drop_uq_user_product;
+
+SELECT COUNT(*) INTO @has_uq_user_rule_product
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND INDEX_NAME = 'uq_alert_events_user_rule_product';
+SET @sql_uq_user_rule_product = IF(
+  @has_uq_user_rule_product = 0,
+  'ALTER TABLE alert_events ADD UNIQUE KEY uq_alert_events_user_rule_product (user_id, watch_rule_id, product_id)',
+  'SELECT "uq_alert_events_user_rule_product exists"'
+);
+PREPARE stmt_uq_user_rule_product FROM @sql_uq_user_rule_product;
+EXECUTE stmt_uq_user_rule_product;
+DEALLOCATE PREPARE stmt_uq_user_rule_product;
