@@ -29,7 +29,11 @@ fun RamSsdSettingsScreen(
     refreshStatusMessage: String?,
     lastRefreshAtText: String?,
     onRefresh: () -> Unit,
+    refreshingRuleIds: Set<Long>,
+    ruleRefreshStatusMessages: Map<Long, String>,
+    ruleLastRefreshLabels: Map<Long, String>,
     onSave: (MacBookAirUnit, Int, Int, String, Boolean, String?, Int?) -> Unit,
+    onRefreshRule: (Long) -> Unit,
     onBack: () -> Unit
 ) {
     Scaffold(
@@ -100,6 +104,12 @@ fun RamSsdSettingsScreen(
                             )
                         }
                     }
+                    Text(
+                        text = "지금부터 새로 올라오는 매물만 다시 조회합니다.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
                 }
                 items(units) { unit ->
                     val setting = userSettings.find { 
@@ -108,6 +118,8 @@ fun RamSsdSettingsScreen(
                         it.ram_gb == unit.ram_gb && 
                         it.ssd_gb == unit.ssd_gb 
                     }
+                    val ruleId = setting?.id
+                    val canRefreshRule = setting?.let { it.id != null && it.enabled && it.has_user_override } == true
                     val itemKey = "${unit.chip}-${unit.screen_inch}-${unit.ram_gb}-${unit.ssd_gb}"
                     
                     MacBookAirSettingCard(
@@ -115,6 +127,15 @@ fun RamSsdSettingsScreen(
                         unit = unit,
                         userSetting = setting,
                         isSaving = savingItemKey == itemKey,
+                        canRefreshRuleSavedAt = canRefreshRule,
+                        isRefreshingRuleSavedAt = ruleId != null && refreshingRuleIds.contains(ruleId),
+                        ruleRefreshStatusMessage = ruleId?.let { ruleRefreshStatusMessages[it] },
+                        ruleLastRefreshAtText = ruleId?.let { ruleLastRefreshLabels[it] },
+                        onRefreshRuleSavedAt = if (ruleId != null) {
+                            { onRefreshRule(ruleId) }
+                        } else {
+                            null
+                        },
                         onSave = { fairPrice, desiredPrice, alertPriceDirection, enabled, searchKeyword, boundPrice ->
                             onSave(
                                 unit,

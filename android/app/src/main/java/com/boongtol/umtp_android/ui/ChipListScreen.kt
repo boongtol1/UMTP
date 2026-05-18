@@ -76,6 +76,12 @@ fun ChipListScreen(
                     )
                 }
             }
+            Text(
+                text = "지금부터 새로 올라오는 매물만 다시 조회합니다.",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.Gray,
+            )
 
             Text(
                 text = "칩 선택",

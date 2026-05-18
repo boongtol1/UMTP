@@ -30,6 +30,7 @@ data class MacBookAirUnitsResponse(
 )
 
 data class UserFairPriceItem(
+    val id: Long? = null,
     val product_type: String,
     val chip: String,
     val screen_inch: Int,
@@ -63,6 +64,7 @@ data class UserFairPriceItem(
     val force_poll: Boolean? = null,
     val last_polled_at: String? = null,
     val last_poll_requested_at: String? = null,
+    val saved_at: String? = null,
     val has_user_override: Boolean = false
 )
 
@@ -96,4 +98,20 @@ data class UserFairPriceUpsertResponse(
     val message: String? = null,
     val reason: String? = null,
     val immediate_poll_requested: Boolean? = null
+)
+
+data class UserRulesRefreshResponse(
+    val ok: Boolean,
+    val user_id: String? = null,
+    val refreshed_rule_count: Int? = null,
+    val message: String? = null,
+    val reason: String? = null
+)
+
+data class UserRuleRefreshResponse(
+    val ok: Boolean,
+    val user_id: String? = null,
+    val rule_id: Long? = null,
+    val message: String? = null,
+    val reason: String? = null
 )

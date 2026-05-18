@@ -69,6 +69,15 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _lastSettingsRefreshLabel = MutableStateFlow<String?>(null)
     val lastSettingsRefreshLabel: StateFlow<String?> = _lastSettingsRefreshLabel.asStateFlow()
 
+    private val _refreshingRuleIds = MutableStateFlow<Set<Long>>(emptySet())
+    val refreshingRuleIds: StateFlow<Set<Long>> = _refreshingRuleIds.asStateFlow()
+
+    private val _ruleRefreshStatusMessages = MutableStateFlow<Map<Long, String>>(emptyMap())
+    val ruleRefreshStatusMessages: StateFlow<Map<Long, String>> = _ruleRefreshStatusMessages.asStateFlow()
+
+    private val _ruleLastRefreshLabels = MutableStateFlow<Map<Long, String>>(emptyMap())
+    val ruleLastRefreshLabels: StateFlow<Map<Long, String>> = _ruleLastRefreshLabels.asStateFlow()
+
     private var isAlertRefreshInFlight: Boolean = false
     private var isSettingsRefreshInFlight: Boolean = false
 
@@ -116,17 +125,25 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 _settingsRefreshStatusMessage.value = "새로고침 중..."
             }
             try {
+                val refreshSavedAtError = refreshActiveRulesSavedAtInternal(uid)
                 val unitsRefreshError = refreshUnitsInternal()
                 val settingsRefreshError = refreshUserSettingsInternal(uid)
                 fetchAlerts(uid, showFeedback = false)
 
                 if (showFeedback) {
-                    if (unitsRefreshError == null && settingsRefreshError == null) {
-                        _settingsRefreshStatusMessage.value = "방금 새로고침됨"
+                    if (refreshSavedAtError == null && unitsRefreshError == null && settingsRefreshError == null) {
+                        val nowMillis = System.currentTimeMillis()
+                        _settingsRefreshStatusMessage.value = "새로고침됨"
                         _lastSettingsRefreshLabel.value =
-                            "마지막 새로고침: ${formatRefreshTimeLabel(System.currentTimeMillis())}"
+                            "마지막 새로고침: ${formatRefreshTimeLabel(nowMillis)}"
+                        val refreshedRuleIds = _userSettings.value
+                            .asSequence()
+                            .filter { it.has_user_override && it.enabled && it.id != null }
+                            .mapNotNull { it.id }
+                            .toSet()
+                        applyRuleRefreshSuccessMarkers(refreshedRuleIds, nowMillis)
                     } else {
-                        val reasons = listOfNotNull(unitsRefreshError, settingsRefreshError)
+                        val reasons = listOfNotNull(refreshSavedAtError, unitsRefreshError, settingsRefreshError)
                         _settingsRefreshStatusMessage.value = "새로고침 실패"
                         _toastMessage.value = "새로고침 실패: ${reasons.joinToString(" / ")}"
                     }
@@ -141,6 +158,39 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     _isRefreshingSettings.value = false
                 }
                 isSettingsRefreshInFlight = false
+            }
+        }
+    }
+
+    fun refreshSingleRuleSavedAt(uid: String, ruleId: Long) {
+        if (ruleId <= 0L) {
+            _toastMessage.value = "새로고침 실패: 유효하지 않은 조건입니다."
+            return
+        }
+
+        if (_refreshingRuleIds.value.contains(ruleId)) {
+            return
+        }
+
+        viewModelScope.launch {
+            _refreshingRuleIds.value = _refreshingRuleIds.value + ruleId
+            _ruleRefreshStatusMessages.value = _ruleRefreshStatusMessages.value + (ruleId to "새로고침 중...")
+            try {
+                val response = UmtpApiClient.apiService.refreshSingleUserRuleSavedAt(uid, ruleId)
+                if (response.ok) {
+                    val nowMillis = System.currentTimeMillis()
+                    applyRuleRefreshSuccessMarkers(setOf(ruleId), nowMillis)
+                    refreshUserSettingsInternal(uid)
+                } else {
+                    _ruleRefreshStatusMessages.value = _ruleRefreshStatusMessages.value + (ruleId to "새로고침 실패")
+                    _toastMessage.value =
+                        "새로고침 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                }
+            } catch (e: Exception) {
+                _ruleRefreshStatusMessages.value = _ruleRefreshStatusMessages.value + (ruleId to "새로고침 실패")
+                _toastMessage.value = buildNetworkErrorMessage("새로고침 실패", e)
+            } finally {
+                _refreshingRuleIds.value = _refreshingRuleIds.value - ruleId
             }
         }
     }
@@ -341,6 +391,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 response.reason ?: response.message ?: "사용자 설정 응답 오류"
             } else {
                 _userSettings.value = response.items
+                pruneRuleRefreshState(response.items.mapNotNull { it.id }.toSet())
                 null
             }
         } catch (e: Exception) {
@@ -348,8 +399,49 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
     }
 
+    private suspend fun refreshActiveRulesSavedAtInternal(uid: String): String? {
+        return try {
+            val response = UmtpApiClient.apiService.refreshUserRulesSavedAt(uid)
+            if (!response.ok) {
+                response.reason ?: response.message ?: "활성 조건 saved_at 새로고침 응답 오류"
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            buildNetworkErrorMessage("활성 조건 saved_at 새로고침 실패", e)
+        }
+    }
+
     private fun formatRefreshTimeLabel(epochMillis: Long): String {
         val formatter = SimpleDateFormat("HH:mm", Locale.KOREA)
         return formatter.format(Date(epochMillis))
+    }
+
+    private fun applyRuleRefreshSuccessMarkers(ruleIds: Set<Long>, epochMillis: Long) {
+        if (ruleIds.isEmpty()) {
+            return
+        }
+        val timeLabel = "마지막 새로고침: ${formatRefreshTimeLabel(epochMillis)}"
+        val nextStatus = _ruleRefreshStatusMessages.value.toMutableMap()
+        val nextLabels = _ruleLastRefreshLabels.value.toMutableMap()
+        ruleIds.forEach { ruleId ->
+            nextStatus[ruleId] = "새로고침됨"
+            nextLabels[ruleId] = timeLabel
+        }
+        _ruleRefreshStatusMessages.value = nextStatus
+        _ruleLastRefreshLabels.value = nextLabels
+    }
+
+    private fun pruneRuleRefreshState(validRuleIds: Set<Long>) {
+        if (validRuleIds.isEmpty()) {
+            _refreshingRuleIds.value = emptySet()
+            _ruleRefreshStatusMessages.value = emptyMap()
+            _ruleLastRefreshLabels.value = emptyMap()
+            return
+        }
+
+        _refreshingRuleIds.value = _refreshingRuleIds.value.filterTo(mutableSetOf()) { it in validRuleIds }
+        _ruleRefreshStatusMessages.value = _ruleRefreshStatusMessages.value.filterKeys { it in validRuleIds }
+        _ruleLastRefreshLabels.value = _ruleLastRefreshLabels.value.filterKeys { it in validRuleIds }
     }
 }

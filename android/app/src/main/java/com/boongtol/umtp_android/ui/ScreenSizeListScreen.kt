@@ -76,6 +76,12 @@ fun ScreenSizeListScreen(
                     )
                 }
             }
+            Text(
+                text = "지금부터 새로 올라오는 매물만 다시 조회합니다.",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.Gray,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
 
             Text(
                 text = "화면 크기 선택",

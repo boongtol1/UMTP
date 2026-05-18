@@ -2,6 +2,8 @@ package com.boongtol.umtp_android.ui
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,6 +23,11 @@ fun MacBookAirSettingCard(
     unit: MacBookAirUnit,
     userSetting: UserFairPriceItem?,
     isSaving: Boolean,
+    canRefreshRuleSavedAt: Boolean = false,
+    isRefreshingRuleSavedAt: Boolean = false,
+    ruleRefreshStatusMessage: String? = null,
+    ruleLastRefreshAtText: String? = null,
+    onRefreshRuleSavedAt: (() -> Unit)? = null,
     onSave: (
         fairPrice: Int,
         desiredPrice: Int,
@@ -90,10 +97,51 @@ fun MacBookAirSettingCard(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
-                Switch(
-                    checked = enabled,
-                    onCheckedChange = { enabled = it }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedButton(
+                        onClick = { onRefreshRuleSavedAt?.invoke() },
+                        enabled = canRefreshRuleSavedAt && !isRefreshingRuleSavedAt && onRefreshRuleSavedAt != null,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        if (isRefreshingRuleSavedAt) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "조건 새로고침",
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("새로고침", fontSize = 12.sp)
+                        }
+                    }
+                    Switch(
+                        checked = enabled,
+                        onCheckedChange = { enabled = it }
+                    )
+                }
+            }
+
+            if (!ruleRefreshStatusMessage.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = ruleRefreshStatusMessage,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
                 )
+                if (!ruleLastRefreshAtText.isNullOrBlank()) {
+                    Text(
+                        text = ruleLastRefreshAtText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))

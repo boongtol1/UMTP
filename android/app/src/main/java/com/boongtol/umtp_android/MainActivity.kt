@@ -145,6 +145,9 @@ fun MainTabScreen(
     val isRefreshingSettings by viewModel.isRefreshingSettings.collectAsState()
     val settingsRefreshStatusMessage by viewModel.settingsRefreshStatusMessage.collectAsState()
     val lastSettingsRefreshLabel by viewModel.lastSettingsRefreshLabel.collectAsState()
+    val refreshingRuleIds by viewModel.refreshingRuleIds.collectAsState()
+    val ruleRefreshStatusMessages by viewModel.ruleRefreshStatusMessages.collectAsState()
+    val ruleLastRefreshLabels by viewModel.ruleLastRefreshLabels.collectAsState()
 
     var targetAlertId by remember { mutableStateOf<String?>(null) }
 
@@ -194,6 +197,9 @@ fun MainTabScreen(
                     refreshStatusMessage = settingsRefreshStatusMessage,
                     lastRefreshAtText = lastSettingsRefreshLabel,
                     onRefresh = { viewModel.refreshSettings(userId, showFeedback = true) },
+                    refreshingRuleIds = refreshingRuleIds,
+                    ruleRefreshStatusMessages = ruleRefreshStatusMessages,
+                    ruleLastRefreshLabels = ruleLastRefreshLabels,
                     onUpsert = { unit, fairPrice, desiredPrice, alertPriceDirection, enabled, searchKeyword, boundPrice ->
                         viewModel.upsertItem(
                             unit,
@@ -204,7 +210,10 @@ fun MainTabScreen(
                             searchKeyword,
                             boundPrice,
                         )
-                    }
+                    },
+                    onRefreshRule = { ruleId ->
+                        viewModel.refreshSingleRuleSavedAt(userId, ruleId)
+                    },
                 )
             }
         }
@@ -221,7 +230,11 @@ fun SettingsNavigator(
     refreshStatusMessage: String?,
     lastRefreshAtText: String?,
     onRefresh: () -> Unit,
+    refreshingRuleIds: Set<Long>,
+    ruleRefreshStatusMessages: Map<Long, String>,
+    ruleLastRefreshLabels: Map<Long, String>,
     onUpsert: (com.boongtol.umtp_android.network.MacBookAirUnit, Int, Int, String, Boolean, String?, Int?) -> Unit,
+    onRefreshRule: (Long) -> Unit,
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.ChipList) }
 
@@ -268,7 +281,11 @@ fun SettingsNavigator(
                 refreshStatusMessage = refreshStatusMessage,
                 lastRefreshAtText = lastRefreshAtText,
                 onRefresh = onRefresh,
+                refreshingRuleIds = refreshingRuleIds,
+                ruleRefreshStatusMessages = ruleRefreshStatusMessages,
+                ruleLastRefreshLabels = ruleLastRefreshLabels,
                 onSave = onUpsert,
+                onRefreshRule = onRefreshRule,
                 onBack = { currentScreen = Screen.ScreenSizeList(screen.chip) }
             )
         }

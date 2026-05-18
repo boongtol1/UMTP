@@ -2,6 +2,7 @@ package com.boongtol.umtp_android.network
 
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Path
 import retrofit2.http.POST
 import retrofit2.http.Query
 
@@ -23,6 +24,17 @@ interface UmtpApiService {
     suspend fun upsertUserFairPrice(
         @Body request: UserFairPriceUpsertRequest
     ): UserFairPriceUpsertResponse
+
+    @POST("users/{user_id}/rules/refresh")
+    suspend fun refreshUserRulesSavedAt(
+        @Path("user_id") userId: String
+    ): UserRulesRefreshResponse
+
+    @POST("users/{user_id}/rules/{rule_id}/refresh")
+    suspend fun refreshSingleUserRuleSavedAt(
+        @Path("user_id") userId: String,
+        @Path("rule_id") ruleId: Long,
+    ): UserRuleRefreshResponse
 
     @POST("users/register")
     suspend fun registerUser(
