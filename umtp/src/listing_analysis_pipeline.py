@@ -22,7 +22,11 @@ try:
     from src.notification_worker import dispatch_alert_event_immediately
     from src.risk_analyzer import analyze_risk
     from src.spec_parser import parse_listing_title
-    from src.user_fair_price import is_user_fair_price_target_enabled, resolve_fair_price_for_user
+    from src.user_fair_price import (
+        is_user_fair_price_target_enabled,
+        resolve_fair_price_for_user,
+        resolve_fair_price_for_watch_rule,
+    )
 except ModuleNotFoundError:
     from alert_price_direction import (
         BELOW_OR_EQUAL,
@@ -45,7 +49,11 @@ except ModuleNotFoundError:
     from notification_worker import dispatch_alert_event_immediately
     from risk_analyzer import analyze_risk
     from spec_parser import parse_listing_title
-    from user_fair_price import is_user_fair_price_target_enabled, resolve_fair_price_for_user
+    from user_fair_price import (
+        is_user_fair_price_target_enabled,
+        resolve_fair_price_for_user,
+        resolve_fair_price_for_watch_rule,
+    )
 DUPLICATE_ENTRY_ERROR_CODE = 1062
 ALERT_BODY_EXCERPT_MAX_LEN = 500
 
@@ -153,7 +161,7 @@ def enqueue_analysis_for_product(product, watch_rules, trigger_reason):
     return create_analysis_jobs_for_rules(product, watch_rules, trigger_reason)
 
 
-def _resolve_price_rules(cursor, user_id, parsed_spec):
+def _resolve_price_rules(cursor, user_id, parsed_spec, watch_rule_id=None):
     parse_success = bool(parsed_spec.get("parse_success")) if isinstance(parsed_spec, dict) else False
     if not parse_success:
         return None, None, None, None, None, None, "parse_failed", None
@@ -162,12 +170,25 @@ def _resolve_price_rules(cursor, user_id, parsed_spec):
     if normalized_user_id is None:
         return None, None, None, None, None, None, "user_id_missing", None
 
-    try:
-        if not is_user_fair_price_target_enabled(cursor, normalized_user_id, parsed_spec):
-            return None, None, None, None, None, None, "user_target_disabled", None
+    normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
 
-        resolved_fair_price = resolve_fair_price_for_user(cursor, normalized_user_id, parsed_spec)
+    try:
+        if normalized_watch_rule_id is not None:
+            resolved_fair_price = resolve_fair_price_for_watch_rule(
+                cursor,
+                normalized_user_id,
+                normalized_watch_rule_id,
+                parsed_spec,
+            )
+            if resolved_fair_price is None:
+                return None, None, None, None, None, None, "watch_rule_spec_mismatch", "watch_rule"
+        else:
+            if not is_user_fair_price_target_enabled(cursor, normalized_user_id, parsed_spec):
+                return None, None, None, None, None, None, "user_target_disabled", None
+            resolved_fair_price = resolve_fair_price_for_user(cursor, normalized_user_id, parsed_spec)
     except ValueError:
+        if normalized_watch_rule_id is not None:
+            return None, None, None, None, None, None, "watch_rule_invalid", "watch_rule"
         return None, None, None, None, None, None, "fair_price_spec_invalid", None
 
     if resolved_fair_price is None:
@@ -869,6 +890,7 @@ def analyze_product_for_watch_rule(job):
             cursor,
             user_id,
             parsed_spec,
+            watch_rule_id=watch_rule_id,
         )
 
         drop_rate_percent = None

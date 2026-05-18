@@ -281,6 +281,67 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
         self.assertEqual(result.get("alert_skip_reason"), "user_target_disabled")
         self.assertEqual(mock_create_alert.call_count, 0)
 
+    def test_watch_rule_id_keeps_rule_scoped_price_resolution(self):
+        fake_cursor = _FakeCursor()
+        fake_connection = _FakeConnection(fake_cursor)
+        job = self._build_job()
+        job["watch_rule_id"] = 3
+
+        with patch("src.listing_analysis_pipeline.fetch_html", return_value="<html></html>"):
+            with patch(
+                "src.listing_analysis_pipeline.parse_joongna_listing_page",
+                return_value={
+                    "title": "맥북에어 m5",
+                    "description": "m5 맥북에어 15인치 기본형입니다",
+                    "listing_price_krw": 1700000,
+                    "self_check_fields": {},
+                },
+            ):
+                with patch(
+                    "src.listing_analysis_pipeline.parse_listing_title",
+                    return_value={
+                        "parse_success": True,
+                        "product_type": "MacBook Air",
+                        "chip": "M5",
+                        "screen_inch": 15,
+                        "ram_gb": 16,
+                        "ssd_gb": 512,
+                        "confidence_score": 100,
+                        "screen_inch_defaulted": False,
+                        "unit_valid": True,
+                        "unit_validation_reason": None,
+                    },
+                ):
+                    with patch(
+                        "src.listing_analysis_pipeline.resolve_fair_price_for_watch_rule",
+                        return_value=None,
+                    ) as mock_rule_resolve:
+                        with patch(
+                            "src.listing_analysis_pipeline.resolve_fair_price_for_user"
+                        ) as mock_user_resolve:
+                            with patch("src.listing_analysis_pipeline.get_connection", return_value=fake_connection):
+                                with patch(
+                                    "src.listing_analysis_pipeline.save_listing_analysis_result",
+                                    return_value={"analysis_result_id": 11, "diff_ratio": 0.0},
+                                ):
+                                    with patch("src.listing_analysis_pipeline.save_success_log"):
+                                        with patch(
+                                            "src.listing_analysis_pipeline._evaluate_watch_rule_saved_window",
+                                            return_value=(True, None),
+                                        ):
+                                            with patch(
+                                                "src.listing_analysis_pipeline.maybe_create_alert_event"
+                                            ) as mock_create_alert:
+                                                result = analyze_product_for_watch_rule(job)
+
+        self.assertTrue(result.get("ok"))
+        self.assertFalse(result.get("is_alert_target"))
+        self.assertFalse(result.get("alert_created"))
+        self.assertEqual(result.get("alert_skip_reason"), "watch_rule_spec_mismatch")
+        self.assertEqual(mock_create_alert.call_count, 0)
+        self.assertEqual(mock_rule_resolve.call_count, 1)
+        self.assertEqual(mock_user_resolve.call_count, 0)
+
     def test_base_model_keyword_parsed_listing_creates_alert(self):
         fake_cursor = _FakeCursor()
         fake_connection = _FakeConnection(fake_cursor)

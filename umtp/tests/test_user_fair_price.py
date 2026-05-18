@@ -12,6 +12,7 @@ from src.user_fair_price import (  # noqa: E402
     fetch_user_fair_price,
     is_user_fair_price_target_enabled,
     resolve_fair_price_for_user,
+    resolve_fair_price_for_watch_rule,
 )
 
 
@@ -80,6 +81,76 @@ class UserFairPriceTest(unittest.TestCase):
         self.assertEqual(result.get("alert_price_direction"), "BELOW_OR_EQUAL")
         self.assertIsNone(result.get("min_price_krw"))
         self.assertIsNone(result.get("max_price_krw"))
+
+    def test_resolve_watch_rule_uses_exact_rule_spec(self):
+        with patch(
+            "src.user_fair_price._fetch_user_fair_price_rule_row",
+            return_value={
+                "user_id": "boongtol",
+                "product_type": "MacBook Air",
+                "chip": "M5",
+                "screen_inch": 15,
+                "ram_gb": 16,
+                "ssd_gb": 512,
+                "fair_price_krw": 1620000,
+                "alert_drop_rate_percent": -23.46,
+                "target_buy_price_krw": 2000052,
+                "alert_price_direction": "BELOW_OR_EQUAL",
+                "min_price_krw": 300000,
+                "max_price_krw": None,
+                "enabled": 1,
+            },
+        ):
+            result = resolve_fair_price_for_watch_rule(
+                cursor=object(),
+                user_id="boongtol",
+                watch_rule_id=1,
+                parsed_spec={
+                    "product_type": "MacBook Air",
+                    "chip": "M5",
+                    "screen_inch": 15,
+                    "ram_gb": 16,
+                    "ssd_gb": 512,
+                },
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get("fair_price_krw"), 1620000)
+        self.assertEqual(result.get("source"), "watch_rule")
+
+    def test_resolve_watch_rule_returns_none_when_spec_mismatch(self):
+        with patch(
+            "src.user_fair_price._fetch_user_fair_price_rule_row",
+            return_value={
+                "user_id": "boongtol",
+                "product_type": "MacBook Air",
+                "chip": "M5",
+                "screen_inch": 13,
+                "ram_gb": 16,
+                "ssd_gb": 512,
+                "fair_price_krw": 1470000,
+                "alert_drop_rate_percent": -2.72,
+                "target_buy_price_krw": 1509984,
+                "alert_price_direction": "BELOW_OR_EQUAL",
+                "min_price_krw": 300000,
+                "max_price_krw": None,
+                "enabled": 1,
+            },
+        ):
+            result = resolve_fair_price_for_watch_rule(
+                cursor=object(),
+                user_id="boongtol",
+                watch_rule_id=3,
+                parsed_spec={
+                    "product_type": "MacBook Air",
+                    "chip": "M5",
+                    "screen_inch": 15,
+                    "ram_gb": 16,
+                    "ssd_gb": 512,
+                },
+            )
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":
