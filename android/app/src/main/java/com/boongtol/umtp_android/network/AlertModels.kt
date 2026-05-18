@@ -5,6 +5,7 @@ data class AlertItem(
     val user_id: String? = null,
     val title: String? = null,
     val source: String? = null,
+    val listing_image_url: String? = null,
     val product_url: String? = null,
     val url: String? = null,
     val listing_price_krw: Int? = null,

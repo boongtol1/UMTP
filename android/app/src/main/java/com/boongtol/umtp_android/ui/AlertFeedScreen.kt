@@ -36,11 +36,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.boongtol.umtp_android.network.AlertItem
 import com.boongtol.umtp_android.network.TradeTypeFlags
 
@@ -174,6 +177,7 @@ fun AlertCard(
     onOpenUrl: () -> Unit,
 ) {
     val resolvedUrl = resolveAlertUrl(alert)
+    val listingImageUrl = alert.listing_image_url?.takeIf { it.isNotBlank() }
 
     Card(
         modifier = Modifier
@@ -189,6 +193,19 @@ fun AlertCard(
         elevation = CardDefaults.cardElevation(defaultElevation = if (isRead) 0.dp else 2.dp),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
+            if (listingImageUrl != null) {
+                AsyncImage(
+                    model = listingImageUrl,
+                    contentDescription = "대표 이미지",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(172.dp)
+                        .clip(MaterialTheme.shapes.medium),
+                    contentScale = ContentScale.Crop,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -276,6 +293,7 @@ fun AlertCard(
 
                 DetailRow(label = "출처", value = alert.source ?: "정보 없음")
                 DetailRow(label = "URL", value = resolvedUrl ?: "URL 정보 없음")
+                DetailRow(label = "대표 이미지", value = listingImageUrl ?: "이미지 없음")
                 DetailRow(label = "내가 생각한 시장가", value = formatKrwDisplay(alert.user_market_price_krw ?: alert.fair_price_krw))
                 DetailRow(label = "알림 기준 가격", value = formatKrwDisplay(alert.alert_target_price_krw))
                 DetailRow(label = "시장가와의 차이", value = formatPercentDisplay(alert.price_gap_percent ?: alert.diff_ratio))

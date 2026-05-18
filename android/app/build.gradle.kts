@@ -68,6 +68,7 @@ dependencies {
     // Firebase
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+    implementation(libs.coil.compose)
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

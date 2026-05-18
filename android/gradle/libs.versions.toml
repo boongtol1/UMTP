@@ -13,6 +13,7 @@ okhttp = "4.12.0"
 kotlinxCoroutines = "1.8.1"
 firebaseBom = "34.13.0"
 googleServices = "4.4.4"
+coilCompose = "2.7.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -37,6 +38,7 @@ okhttp-logging-interceptor = { group = "com.squareup.okhttp3", name = "logging-i
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
+coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coilCompose" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

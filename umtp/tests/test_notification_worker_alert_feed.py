@@ -36,6 +36,10 @@ class _FakeConnection:
 class NotificationWorkerAlertFeedTest(unittest.TestCase):
     @patch("src.notification_worker.get_connection", return_value=_FakeConnection())
     @patch(
+        "src.notification_worker._fetch_listing_image_urls",
+        return_value={"1": "https://img.joongna.com/p/1.jpg"},
+    )
+    @patch(
         "src.notification_worker._fetch_alert_rows",
         return_value=(
             [
@@ -44,7 +48,7 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
                     "user_id": "boongtol",
                     "watch_rule_id": None,
                     "analysis_job_id": 100,
-                    "product_id": "p1",
+                    "product_id": "1",
                     "source": "joongna",
                     "url": "https://web.joongna.com/product/1",
                     "title": "맥북에어 m1 8 256",
@@ -80,7 +84,7 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
             True,
         ),
     )
-    def test_alert_feed_includes_detailed_fields(self, _mock_rows, _mock_conn):
+    def test_alert_feed_includes_detailed_fields(self, _mock_rows, _mock_images, _mock_conn):
         items = list_alert_events_for_user("boongtol", limit=20)
 
         self.assertEqual(len(items), 1)
@@ -95,6 +99,7 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
         self.assertEqual(item.get("risk_keywords"), [])
         self.assertEqual(item.get("body_excerpt"), "상태 좋고 배터리 정상")
         self.assertEqual(item.get("body_text"), "상태 좋고 배터리 정상. 사용감 적음.")
+        self.assertEqual(item.get("listing_image_url"), "https://img.joongna.com/p/1.jpg")
 
     @patch("src.notification_worker.get_connection", return_value=_FakeConnection())
     @patch(

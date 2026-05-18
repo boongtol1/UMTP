@@ -154,6 +154,189 @@ def _build_body_excerpt(value, *, max_len=500):
     return f"{normalized[:max_len].rstrip()}..."
 
 
+def _coerce_product_seq(value):
+    normalized = _normalize_optional_text(value)
+    if normalized is None:
+        return None
+
+    digits = "".join(ch for ch in normalized if ch.isdigit())
+    if not digits:
+        return None
+
+    try:
+        parsed = int(digits)
+    except (TypeError, ValueError):
+        return None
+
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def _fetch_listing_image_urls(cursor, product_ids):
+    if cursor is None or not hasattr(cursor, "execute") or not hasattr(cursor, "fetchall"):
+        return {}
+
+    sequence_ids = []
+    for product_id in product_ids or []:
+        seq = _coerce_product_seq(product_id)
+        if seq is None:
+            continue
+        if seq not in sequence_ids:
+            sequence_ids.append(seq)
+
+    if not sequence_ids:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(sequence_ids))
+    query = (
+        "SELECT seq, image_url "
+        "FROM joongna_seen_products "
+        f"WHERE seq IN ({placeholders})"
+    )
+
+    try:
+        cursor.execute(query, tuple(sequence_ids))
+    except Exception as exc:
+        lowered = str(exc).lower()
+        if "unknown column" in lowered or "doesn't exist" in lowered:
+            return {}
+        raise
+
+    rows = cursor.fetchall() or []
+    image_url_map = {}
+    for row in rows:
+        if isinstance(row, dict):
+            seq = _coerce_product_seq(row.get("seq"))
+            image_url = _normalize_optional_text(row.get("image_url"))
+        else:
+            seq = _coerce_product_seq(row[0]) if len(row) > 0 else None
+            image_url = _normalize_optional_text(row[1]) if len(row) > 1 else None
+
+        if seq is None or image_url is None:
+            continue
+        image_url_map[str(seq)] = image_url
+
+    return image_url_map
+
+
+def _resolve_listing_image_url(product_id, image_url_map):
+    seq = _coerce_product_seq(product_id)
+    if seq is None:
+        return None
+    return _normalize_optional_text((image_url_map or {}).get(str(seq)))
+
+
+def _fetch_listing_image_url_by_product_id(product_id):
+    normalized_seq = _coerce_product_seq(product_id)
+    if normalized_seq is None:
+        return None
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        try:
+            cursor.execute(
+                """
+                SELECT image_url
+                FROM joongna_seen_products
+                WHERE seq = %s
+                LIMIT 1
+                """,
+                (normalized_seq,),
+            )
+            row = cursor.fetchone()
+        except Exception as exc:
+            lowered = str(exc).lower()
+            if "unknown column" in lowered or "doesn't exist" in lowered:
+                return None
+            raise
+
+        if not row:
+            return None
+
+        if isinstance(row, dict):
+            return _normalize_optional_text(row.get("image_url"))
+        if isinstance(row, (tuple, list)) and row:
+            return _normalize_optional_text(row[0])
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def _format_krw_display(value):
+    normalized = _safe_int(value)
+    if normalized is None:
+        return "정보 없음"
+    return f"{normalized:,}원"
+
+
+def _format_percent_display(value):
+    normalized = _normalize_optional_float(value)
+    if normalized is None:
+        return "정보 없음"
+    return f"{normalized:.2f}%"
+
+
+def _build_spec_summary(alert):
+    tokens = []
+
+    product_type = _normalize_optional_text(alert.get("product_type"))
+    if product_type is not None:
+        tokens.append(product_type)
+
+    chip = _normalize_optional_text(alert.get("chip"))
+    if chip is not None:
+        tokens.append(chip)
+
+    screen_inch = _safe_int(alert.get("screen_inch"))
+    if screen_inch is not None:
+        tokens.append(f"{screen_inch}인치")
+
+    ram_gb = _safe_int(alert.get("ram_gb"))
+    if ram_gb is not None:
+        tokens.append(f"{ram_gb}GB")
+
+    ssd_gb = _safe_int(alert.get("ssd_gb"))
+    if ssd_gb is not None:
+        tokens.append(f"{ssd_gb}GB SSD")
+
+    if not tokens:
+        return "분류 정보 없음"
+    return " · ".join(tokens)
+
+
+def _resolve_alert_condition_label_for_display(alert):
+    explicit_label = _normalize_optional_text(alert.get("alert_condition_label"))
+    if explicit_label is not None:
+        return explicit_label
+    return _build_alert_condition_label(alert.get("alert_price_direction"))
+
+
+def _resolve_risk_label_for_display(alert):
+    explicit_label = _normalize_optional_text(alert.get("formatted_risk_label"))
+    if explicit_label is not None:
+        return explicit_label
+    return _build_formatted_risk_label(alert.get("risk_level"))
+
+
+def _resolve_body_text_for_display(alert):
+    body_text = _normalize_optional_text(alert.get("body_text"))
+    if body_text is not None:
+        return body_text
+
+    body_excerpt = _normalize_optional_text(alert.get("body_excerpt"))
+    if body_excerpt is not None:
+        return body_excerpt
+
+    return "본문 내용 없음"
+
+
 def _fetch_latest_log_details(cursor, *, user_id, url):
     normalized_user_id = _normalize_optional_text(user_id)
     normalized_url = _normalize_optional_text(url)
@@ -520,31 +703,38 @@ def _send_fcm_to_user(user_id, alert):
 
 
 def _build_telegram_message(alert):
-    message = _normalize_optional_text(alert.get("message"))
-    if message:
-        return message
-
-    title = _normalize_optional_text(alert.get("title")) or "-"
-    price_krw = _normalize_optional_int(alert.get("price_krw"), "price_krw") or 0
-    fair_price_krw = _normalize_optional_int(alert.get("fair_price_krw"), "fair_price_krw") or 0
-    drop_rate_percent = alert.get("drop_rate_percent")
-    trigger_reason = _normalize_optional_text(alert.get("trigger_reason")) or "-"
+    title = _normalize_optional_text(alert.get("title")) or "제목 없음"
     url = _normalize_optional_text(alert.get("url")) or "-"
+    listing_price_krw = _safe_int(alert.get("price_krw"))
+    user_market_price_krw = _safe_int(alert.get("user_market_price_krw"))
+    if user_market_price_krw is None:
+        user_market_price_krw = _safe_int(alert.get("fair_price_krw"))
+    alert_target_price_krw = _safe_int(alert.get("alert_target_price_krw"))
+    if alert_target_price_krw is None:
+        alert_target_price_krw = _safe_int(alert.get("target_price_krw"))
 
-    drop_text = "-"
-    if drop_rate_percent is not None:
-        try:
-            drop_text = f"{float(drop_rate_percent):.2f}%"
-        except (TypeError, ValueError):
-            drop_text = str(drop_rate_percent)
+    price_gap_percent = _normalize_optional_float(alert.get("price_gap_percent"))
+    if price_gap_percent is None:
+        price_gap_percent = _normalize_optional_float(alert.get("diff_ratio"))
+    if price_gap_percent is None:
+        price_gap_percent = _normalize_optional_float(alert.get("drop_rate_percent"))
+
+    spec_summary = _build_spec_summary(alert)
+    risk_label = _resolve_risk_label_for_display(alert)
+    alert_condition_label = _resolve_alert_condition_label_for_display(alert)
+    body_text = _resolve_body_text_for_display(alert)
 
     return (
         "[UMTP 알림]\n"
         f"{title}\n\n"
-        f"현재가: {price_krw:,}원\n"
-        f"공정가: {fair_price_krw:,}원\n"
-        f"저평가율: {drop_text}\n"
-        f"트리거: {trigger_reason}\n\n"
+        f"가격: {_format_krw_display(listing_price_krw)}\n"
+        f"제품 분류: {spec_summary}\n"
+        f"내가 생각한 시장가: {_format_krw_display(user_market_price_krw)}\n"
+        f"알림 기준 가격: {_format_krw_display(alert_target_price_krw)}\n"
+        f"시장가와의 차이: {_format_percent_display(price_gap_percent)}\n"
+        f"알림 조건: {alert_condition_label}\n"
+        f"위험도: {risk_label}\n"
+        f"본문 내용: {body_text}\n\n"
         "URL:\n"
         f"{url}"
     )
@@ -567,12 +757,23 @@ def get_pending_alert_events(limit=20):
                     watch_rule_id,
                     analysis_job_id,
                     product_id,
+                    source,
                     url,
                     title,
+                    product_type,
+                    chip,
+                    screen_inch,
+                    ram_gb,
+                    ssd_gb,
                     price_krw,
                     fair_price_krw,
                     target_price_krw,
                     drop_rate_percent,
+                    alert_drop_rate_percent,
+                    alert_price_direction,
+                    risk_level,
+                    body_excerpt,
+                    body_text,
                     trigger_reason,
                     message,
                     status,
@@ -591,35 +792,79 @@ def get_pending_alert_events(limit=20):
         except Exception as exc:
             if "unknown column" not in str(exc).lower():
                 raise
-            cursor.execute(
-                """
-                SELECT
-                    id,
-                    user_id,
-                    NULL AS watch_rule_id,
-                    analysis_job_id,
-                    product_id,
-                    url,
-                    title,
-                    price_krw,
-                    fair_price_krw,
-                    target_price_krw,
-                    drop_rate_percent,
-                    trigger_reason,
-                    message,
-                    status,
-                    send_attempts,
-                    error_message,
-                    created_at,
-                    sent_at,
-                    updated_at
-                FROM alert_events
-                WHERE status = 'pending'
-                ORDER BY created_at ASC
-                LIMIT %s
-                """,
-                (normalized_limit,),
-            )
+            try:
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        user_id,
+                        NULL AS watch_rule_id,
+                        analysis_job_id,
+                        product_id,
+                        source,
+                        url,
+                        title,
+                        product_type,
+                        chip,
+                        screen_inch,
+                        ram_gb,
+                        ssd_gb,
+                        price_krw,
+                        fair_price_krw,
+                        target_price_krw,
+                        drop_rate_percent,
+                        alert_drop_rate_percent,
+                        alert_price_direction,
+                        risk_level,
+                        body_excerpt,
+                        NULL AS body_text,
+                        trigger_reason,
+                        message,
+                        status,
+                        send_attempts,
+                        error_message,
+                        created_at,
+                        sent_at,
+                        updated_at
+                    FROM alert_events
+                    WHERE status = 'pending'
+                    ORDER BY created_at ASC
+                    LIMIT %s
+                    """,
+                    (normalized_limit,),
+                )
+            except Exception as detail_exc:
+                if "unknown column" not in str(detail_exc).lower():
+                    raise
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        user_id,
+                        NULL AS watch_rule_id,
+                        analysis_job_id,
+                        product_id,
+                        url,
+                        title,
+                        price_krw,
+                        fair_price_krw,
+                        target_price_krw,
+                        drop_rate_percent,
+                        trigger_reason,
+                        message,
+                        status,
+                        send_attempts,
+                        error_message,
+                        created_at,
+                        sent_at,
+                        updated_at
+                    FROM alert_events
+                    WHERE status = 'pending'
+                    ORDER BY created_at ASC
+                    LIMIT %s
+                    """,
+                    (normalized_limit,),
+                )
         return cursor.fetchall() or []
     finally:
         if cursor is not None:
@@ -758,10 +1003,14 @@ def send_alert_event(alert):
 
         telegram_attempted = True
         telegram_message = _build_telegram_message(alert)
+        listing_image_url = _normalize_optional_text(alert.get("listing_image_url"))
+        if listing_image_url is None:
+            listing_image_url = _fetch_listing_image_url_by_product_id(alert.get("product_id"))
         sent_ok = send_telegram_alert(
             telegram_message,
             chat_id=user_chat_id,
             allow_global_fallback=allow_global_fallback,
+            image_url=listing_image_url,
         )
         if sent_ok:
             telegram_status = "sent"
@@ -833,12 +1082,23 @@ def get_alert_event_by_id(alert_id):
                     watch_rule_id,
                     analysis_job_id,
                     product_id,
+                    source,
                     url,
                     title,
+                    product_type,
+                    chip,
+                    screen_inch,
+                    ram_gb,
+                    ssd_gb,
                     price_krw,
                     fair_price_krw,
                     target_price_krw,
                     drop_rate_percent,
+                    alert_drop_rate_percent,
+                    alert_price_direction,
+                    risk_level,
+                    body_excerpt,
+                    body_text,
                     trigger_reason,
                     message,
                     status,
@@ -856,34 +1116,77 @@ def get_alert_event_by_id(alert_id):
         except Exception as exc:
             if "unknown column" not in str(exc).lower():
                 raise
-            cursor.execute(
-                """
-                SELECT
-                    id,
-                    user_id,
-                    NULL AS watch_rule_id,
-                    analysis_job_id,
-                    product_id,
-                    url,
-                    title,
-                    price_krw,
-                    fair_price_krw,
-                    target_price_krw,
-                    drop_rate_percent,
-                    trigger_reason,
-                    message,
-                    status,
-                    send_attempts,
-                    error_message,
-                    created_at,
-                    sent_at,
-                    updated_at
-                FROM alert_events
-                WHERE id = %s
-                LIMIT 1
-                """,
-                (normalized_alert_id,),
-            )
+            try:
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        user_id,
+                        NULL AS watch_rule_id,
+                        analysis_job_id,
+                        product_id,
+                        source,
+                        url,
+                        title,
+                        product_type,
+                        chip,
+                        screen_inch,
+                        ram_gb,
+                        ssd_gb,
+                        price_krw,
+                        fair_price_krw,
+                        target_price_krw,
+                        drop_rate_percent,
+                        alert_drop_rate_percent,
+                        alert_price_direction,
+                        risk_level,
+                        body_excerpt,
+                        NULL AS body_text,
+                        trigger_reason,
+                        message,
+                        status,
+                        send_attempts,
+                        error_message,
+                        created_at,
+                        sent_at,
+                        updated_at
+                    FROM alert_events
+                    WHERE id = %s
+                    LIMIT 1
+                    """,
+                    (normalized_alert_id,),
+                )
+            except Exception as detail_exc:
+                if "unknown column" not in str(detail_exc).lower():
+                    raise
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        user_id,
+                        NULL AS watch_rule_id,
+                        analysis_job_id,
+                        product_id,
+                        url,
+                        title,
+                        price_krw,
+                        fair_price_krw,
+                        target_price_krw,
+                        drop_rate_percent,
+                        trigger_reason,
+                        message,
+                        status,
+                        send_attempts,
+                        error_message,
+                        created_at,
+                        sent_at,
+                        updated_at
+                    FROM alert_events
+                    WHERE id = %s
+                    LIMIT 1
+                    """,
+                    (normalized_alert_id,),
+                )
         return cursor.fetchone()
     finally:
         if cursor is not None:
@@ -1000,6 +1303,10 @@ def list_alert_events_for_user(user_id, limit=200):
             normalized_user_id=normalized_user_id,
             normalized_limit=normalized_limit,
         )
+        listing_image_url_map = _fetch_listing_image_urls(
+            cursor,
+            [row.get("product_id") for row in rows],
+        )
 
         items = []
         for row in rows:
@@ -1062,6 +1369,10 @@ def list_alert_events_for_user(user_id, limit=200):
                 risk_level=risk_level,
             )
             risk_keywords_display = risk_keywords if risk_keywords else []
+            listing_image_url = _resolve_listing_image_url(
+                row.get("product_id"),
+                listing_image_url_map,
+            )
 
             items.append(
                 {
@@ -1073,6 +1384,8 @@ def list_alert_events_for_user(user_id, limit=200):
                     "source": source or "joongna",
                     "url": row.get("url"),
                     "product_url": row.get("url"),
+                    "listing_image_url": listing_image_url,
+                    "image_url": listing_image_url,
                     "title": row.get("title"),
                     "product_type": product_type,
                     "chip": chip,

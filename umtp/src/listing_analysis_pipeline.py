@@ -229,16 +229,16 @@ def _resolve_price_rules(cursor, user_id, parsed_spec, watch_rule_id=None):
 
 
 def _build_alert_message(title, listing_price_krw, fair_price_krw, drop_rate_percent, url):
-    drop_text = "-"
+    drop_text = "정보 없음"
     if drop_rate_percent is not None:
         drop_text = f"{round(drop_rate_percent, 2)}%"
 
     return (
         "[UMTP 알림]\n"
         f"{title or '-'}\n\n"
-        f"현재가: {listing_price_krw:,}원\n"
-        f"내 공정가: {fair_price_krw:,}원\n"
-        f"저평가율: {drop_text}\n\n"
+        f"가격: {listing_price_krw:,}원\n"
+        f"내가 생각한 시장가: {fair_price_krw:,}원\n"
+        f"시장가와의 차이: {drop_text}\n\n"
         "URL:\n"
         f"{url}"
     )

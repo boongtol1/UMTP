@@ -17,24 +17,26 @@ from src.notification_worker import (  # noqa: E402
 
 
 class NotificationWorkerTest(unittest.TestCase):
-    def test_build_telegram_message_keeps_default_format(self):
+    def test_build_telegram_message_uses_alert_feed_wording(self):
         message = _build_telegram_message(
             {
                 "title": "맥북에어 m2 기본형",
                 "price_krw": 650000,
                 "fair_price_krw": 800000,
                 "drop_rate_percent": 18.75,
-                "trigger_reason": "new_product",
+                "alert_price_direction": "BELOW_OR_EQUAL",
+                "risk_level": "LOW",
                 "url": "https://web.joongna.com/product/1001",
             }
         )
 
         self.assertIn("[UMTP 알림]", message)
         self.assertIn("맥북에어 m2 기본형", message)
-        self.assertIn("현재가: 650,000원", message)
-        self.assertIn("공정가: 800,000원", message)
-        self.assertIn("저평가율: 18.75%", message)
-        self.assertIn("트리거: new_product", message)
+        self.assertIn("가격: 650,000원", message)
+        self.assertIn("내가 생각한 시장가: 800,000원", message)
+        self.assertIn("시장가와의 차이: 18.75%", message)
+        self.assertIn("알림 조건: 이 가격 이하이면 알림", message)
+        self.assertIn("위험도: 낮음", message)
         self.assertIn("https://web.joongna.com/product/1001", message)
 
     def test_send_alert_event_app_only_when_alerts_disabled(self):
@@ -118,6 +120,36 @@ class NotificationWorkerTest(unittest.TestCase):
         self.assertEqual(result.get("reason"), "telegram_sent")
         self.assertEqual(mock_mark_sent.call_count, 1)
         self.assertEqual(mock_send_telegram.call_args.kwargs.get("chat_id"), "123456")
+
+    def test_send_alert_event_passes_listing_image_url_to_telegram(self):
+        with patch(
+            "src.notification_worker.resolve_user_alert_delivery_policy",
+            return_value={
+                "enabled": True,
+                "telegram_chat_id": "123456",
+                "allow_global_fallback": False,
+            },
+        ):
+            with patch("src.notification_worker._send_fcm_to_user", return_value={"sent": 0, "failed": 0, "attempted": 0, "reason": "no_active_push_tokens"}):
+                with patch("src.notification_worker._telegram_configured", return_value=True):
+                    with patch("src.notification_worker._fetch_listing_image_url_by_product_id", return_value="https://img.joongna.com/p/1001.jpg"):
+                        with patch("src.notification_worker.send_telegram_alert", return_value=True) as mock_send_telegram:
+                            with patch("src.notification_worker.mark_alert_event_sent"):
+                                result = send_alert_event(
+                                    {
+                                        "id": 301,
+                                        "user_id": "boongtol",
+                                        "product_id": "1001",
+                                        "title": "이미지 테스트",
+                                    }
+                                )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("status"), "sent")
+        self.assertEqual(
+            mock_send_telegram.call_args.kwargs.get("image_url"),
+            "https://img.joongna.com/p/1001.jpg",
+        )
 
     def test_send_alert_event_sent_when_push_success_without_telegram(self):
         with patch(
