@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 try:
     from src.alert_price_direction import (
         BELOW_OR_EQUAL,
@@ -76,6 +78,55 @@ def _normalize_optional_float(value):
         return None
 
 
+def _normalize_optional_watch_rule_id(value):
+    normalized = _normalize_optional_int(value)
+    if normalized is None:
+        return None
+    if normalized <= 0:
+        return None
+    return normalized
+
+
+def _coerce_datetime(value):
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = _normalize_optional_text(value)
+        if text is None:
+            return None
+
+        parsed = None
+        candidate = text.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            pass
+
+        if parsed is None:
+            for date_format in (
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d %H:%M",
+                "%Y/%m/%d %H:%M:%S",
+                "%Y/%m/%d %H:%M",
+            ):
+                try:
+                    parsed = datetime.strptime(text, date_format)
+                    break
+                except ValueError:
+                    continue
+
+        if parsed is None:
+            return None
+
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return parsed.replace(microsecond=0)
+
+
 def _is_duplicate_entry_error(exc):
     error_code = getattr(exc, "errno", None)
     if error_code == DUPLICATE_ENTRY_ERROR_CODE:
@@ -93,6 +144,8 @@ def _build_listing_snapshot_from_job(job):
         "price": _normalize_optional_int(job.get("price_krw")),
         "search_keyword": _normalize_optional_text(job.get("search_keyword")),
         "user_id": _normalize_optional_text(job.get("user_id")),
+        "watch_rule_id": _normalize_optional_watch_rule_id(job.get("watch_rule_id")),
+        "sort_date": _coerce_datetime(job.get("sort_date")),
     }
 
 
@@ -179,32 +232,125 @@ def _build_body_excerpt(description, max_len=ALERT_BODY_EXCERPT_MAX_LEN):
     return f"{normalized[:max_len].rstrip()}..."
 
 
+def _evaluate_watch_rule_saved_window(cursor, *, user_id, watch_rule_id, sort_date):
+    normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
+    if normalized_watch_rule_id is None:
+        return True, None
+
+    try:
+        cursor.execute(
+            """
+            SELECT user_id, enabled, saved_at
+            FROM user_fair_prices
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (normalized_watch_rule_id,),
+        )
+        row = cursor.fetchone()
+    except Exception as exc:
+        lowered = str(exc).lower()
+        if "unknown column" not in lowered:
+            raise
+        cursor.execute(
+            """
+            SELECT user_id, enabled, last_poll_requested_at
+            FROM user_fair_prices
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (normalized_watch_rule_id,),
+        )
+        row = cursor.fetchone()
+
+    if not row:
+        return False, "watch_rule_missing"
+
+    if isinstance(row, dict):
+        rule_user_id = _normalize_optional_text(row.get("user_id"))
+        enabled = row.get("enabled")
+        saved_at = row.get("saved_at")
+        if saved_at is None:
+            saved_at = row.get("last_poll_requested_at")
+    else:
+        row_values = tuple(row)
+        rule_user_id = _normalize_optional_text(row_values[0]) if len(row_values) > 0 else None
+        enabled = row_values[1] if len(row_values) > 1 else True
+        saved_at = row_values[2] if len(row_values) > 2 else None
+
+    normalized_user_id = _normalize_optional_text(user_id)
+    if normalized_user_id is None or rule_user_id != normalized_user_id:
+        return False, "watch_rule_user_mismatch"
+
+    if enabled is not None and not bool(enabled):
+        return False, "watch_rule_disabled"
+
+    listing_sort_date = _coerce_datetime(sort_date)
+    if listing_sort_date is None:
+        return False, "sort_date_missing"
+
+    saved_at_dt = _coerce_datetime(saved_at)
+    if saved_at_dt is None:
+        return False, "saved_at_missing"
+
+    if listing_sort_date < saved_at_dt:
+        return False, "sort_date_before_saved_at"
+
+    return True, None
+
+
 def _find_alert_event_by_identity(
     cursor,
     *,
     user_id,
+    watch_rule_id,
     product_id,
 ):
     normalized_user_id = _normalize_optional_text(user_id)
+    normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
     normalized_product_id = _normalize_optional_text(product_id)
 
     if normalized_user_id is None or normalized_product_id is None:
         return None
 
-    cursor.execute(
-        """
-        SELECT id
-        FROM alert_events
-        WHERE user_id = %s
-          AND product_id = %s
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (
-            normalized_user_id,
-            normalized_product_id,
-        ),
-    )
+    try:
+        cursor.execute(
+            """
+            SELECT id
+            FROM alert_events
+            WHERE user_id = %s
+              AND (
+                    (watch_rule_id IS NULL AND %s IS NULL)
+                 OR watch_rule_id = %s
+              )
+              AND product_id = %s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                normalized_user_id,
+                normalized_watch_rule_id,
+                normalized_watch_rule_id,
+                normalized_product_id,
+            ),
+        )
+    except Exception as exc:
+        if "unknown column" not in str(exc).lower():
+            raise
+        cursor.execute(
+            """
+            SELECT id
+            FROM alert_events
+            WHERE user_id = %s
+              AND product_id = %s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                normalized_user_id,
+                normalized_product_id,
+            ),
+        )
     return cursor.fetchone()
 
 
@@ -230,16 +376,20 @@ def maybe_create_alert_event(
     risk_result=None,
     body_excerpt=None,
     body_text=None,
+    sort_date=None,
 ):
     parsed_spec = parsed_spec or {}
     risk_result = risk_result or {}
 
     normalized_user_id = _normalize_optional_text(user_id)
+    normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
     normalized_product_id = _normalize_optional_text(product_id)
+    normalized_sort_date = _coerce_datetime(sort_date)
 
     duplicate = _find_alert_event_by_identity(
         cursor,
         user_id=normalized_user_id,
+        watch_rule_id=normalized_watch_rule_id,
         product_id=normalized_product_id,
     )
     if duplicate is not None:
@@ -254,6 +404,7 @@ def maybe_create_alert_event(
             """
             INSERT INTO alert_events (
                 user_id,
+                watch_rule_id,
                 analysis_job_id,
                 product_id,
                 source,
@@ -277,6 +428,7 @@ def maybe_create_alert_event(
                 trade_type,
                 body_excerpt,
                 body_text,
+                sort_date,
                 analyzed_at,
                 trigger_reason,
                 message,
@@ -286,11 +438,12 @@ def maybe_create_alert_event(
             VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, 'pending', 0
+                %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, 'pending', 0
             )
             """,
             (
                 normalized_user_id,
+                normalized_watch_rule_id,
                 _normalize_optional_int(analysis_job_id),
                 normalized_product_id,
                 _normalize_optional_text(source),
@@ -314,6 +467,7 @@ def maybe_create_alert_event(
                 _normalize_optional_text(risk_result.get("trade_type")),
                 _normalize_optional_text(body_excerpt),
                 _normalize_optional_text(body_text),
+                normalized_sort_date,
                 _normalize_optional_text(trigger_reason),
                 _normalize_optional_text(message),
             ),
@@ -326,6 +480,7 @@ def maybe_create_alert_event(
                     """
                     INSERT INTO alert_events (
                         user_id,
+                        watch_rule_id,
                         analysis_job_id,
                         product_id,
                         source,
@@ -348,6 +503,7 @@ def maybe_create_alert_event(
                         is_exchange_post,
                         trade_type,
                         body_excerpt,
+                        sort_date,
                         analyzed_at,
                         trigger_reason,
                         message,
@@ -357,11 +513,12 @@ def maybe_create_alert_event(
                     VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, 'pending', 0
+                        %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, 'pending', 0
                     )
                     """,
                     (
                         normalized_user_id,
+                        normalized_watch_rule_id,
                         _normalize_optional_int(analysis_job_id),
                         normalized_product_id,
                         _normalize_optional_text(source),
@@ -386,6 +543,7 @@ def maybe_create_alert_event(
                         else None,
                         _normalize_optional_text(risk_result.get("trade_type")),
                         _normalize_optional_text(body_excerpt),
+                        normalized_sort_date,
                         _normalize_optional_text(trigger_reason),
                         _normalize_optional_text(message),
                     ),
@@ -440,6 +598,7 @@ def maybe_create_alert_event(
             duplicate = _find_alert_event_by_identity(
                 cursor,
                 user_id=normalized_user_id,
+                watch_rule_id=normalized_watch_rule_id,
                 product_id=normalized_product_id,
             )
             if duplicate is not None:
@@ -658,10 +817,12 @@ def analyze_product_for_watch_rule(job):
 
     job_id = _normalize_optional_int(job.get("id"))
     user_id = _normalize_optional_text(job.get("user_id"))
+    watch_rule_id = _normalize_optional_watch_rule_id(job.get("watch_rule_id"))
     trigger_reason = _normalize_optional_text(job.get("trigger_reason"))
     product_id = _normalize_optional_text(job.get("product_id"))
     url = _normalize_optional_text(job.get("url"))
     search_keyword = _normalize_optional_text(job.get("search_keyword"))
+    sort_date = _coerce_datetime(job.get("sort_date"))
 
     if not url:
         raise ValueError("analysis_job_url_missing")
@@ -688,6 +849,13 @@ def analyze_product_for_watch_rule(job):
         connection = get_connection()
         cursor = connection.cursor()
 
+        saved_window_allowed, saved_window_reason = _evaluate_watch_rule_saved_window(
+            cursor,
+            user_id=user_id,
+            watch_rule_id=watch_rule_id,
+            sort_date=sort_date,
+        )
+
         (
             fair_price_krw,
             target_price_krw,
@@ -709,7 +877,10 @@ def analyze_product_for_watch_rule(job):
 
         is_alert_target = False
         alert_skip_reason = price_error_reason
-        if (
+        if not saved_window_allowed:
+            is_alert_target = False
+            alert_skip_reason = saved_window_reason or "sort_date_before_saved_at"
+        elif (
             matched_watch_rule
             and fair_price_krw is not None
             and fair_price_krw > 0
@@ -777,6 +948,7 @@ def analyze_product_for_watch_rule(job):
                 cursor,
                 analysis_job_id=job_id,
                 user_id=user_id,
+                watch_rule_id=watch_rule_id,
                 product_id=product_id,
                 url=url,
                 title=title,
@@ -799,6 +971,7 @@ def analyze_product_for_watch_rule(job):
                 },
                 body_excerpt=_build_body_excerpt(description),
                 body_text=_normalize_optional_text(description),
+                sort_date=sort_date,
             )
 
         result_save = save_listing_analysis_result(
@@ -865,7 +1038,7 @@ def analyze_product_for_watch_rule(job):
         return {
             "ok": True,
             "analysis_job_id": job_id,
-            "watch_rule_id": None,
+            "watch_rule_id": watch_rule_id,
             "product_id": product_id,
             "url": url,
             "title": title,
@@ -893,6 +1066,8 @@ def analyze_product_for_watch_rule(job):
             ),
             "alert_skip_reason": alert_skip_reason,
             "fair_price_source": fair_price_source,
+            "sort_date": sort_date,
+            "saved_window_allowed": saved_window_allowed,
         }
     except Exception:
         if connection is not None:

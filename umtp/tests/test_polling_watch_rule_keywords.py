@@ -72,7 +72,7 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(list(targets.keys()), ["맥북 m1"])
         self.assertEqual(len(targets["맥북 m1"]), 2)
 
-    def test_build_keyword_targets_dedupes_same_user(self):
+    def test_build_keyword_targets_keeps_rules_per_setting(self):
         targets = _build_keyword_targets_from_watch_rules(
             [
                 {
@@ -89,8 +89,9 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         )
 
         self.assertEqual(list(targets.keys()), ["맥북 m1"])
-        self.assertEqual(len(targets["맥북 m1"]), 1)
-        self.assertEqual(targets["맥북 m1"][0].get("setting_ids"), [1, 2])
+        self.assertEqual(len(targets["맥북 m1"]), 2)
+        self.assertEqual(targets["맥북 m1"][0].get("setting_ids"), [1])
+        self.assertEqual(targets["맥북 m1"][1].get("setting_ids"), [2])
 
     def test_build_keyword_targets_skips_rows_without_toggle_activation_marker(self):
         targets = _build_keyword_targets_from_watch_rules(
@@ -129,6 +130,7 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
                 "target_price_krw": 900000,
                 "fair_price_krw": 1000000,
                 "alert_drop_rate_percent": 10.0,
+                "saved_at": "2026-05-15 10:00:00",
             },
             {
                 "id": 2,
@@ -142,6 +144,7 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
                 "target_price_krw": 1300000,
                 "fair_price_krw": 1500000,
                 "alert_drop_rate_percent": 13.33,
+                "saved_at": "2026-05-15 10:00:00",
             },
         ]
 
@@ -150,6 +153,7 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
             "product_id": 1001,
             "title": "맥북에어 M2 16GB 512GB",
             "price": 1200000,
+            "sort_date": "2026-05-15 12:28:52",
             "refresh_key": "rk-1",
             "product_url": "https://web.joongna.com/product/1001",
             "image_url": "",
@@ -208,6 +212,7 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
                 "id": 1,
                 "user_id": "boongtol",
                 "search_keyword": "m3맥북에어",
+                "saved_at": "2026-05-15 10:00:00",
             }
         ]
         mock_item = {
@@ -252,6 +257,7 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
                 "id": 1,
                 "user_id": "boongtol",
                 "search_keyword": "m3맥북에어",
+                "saved_at": "2026-05-15 10:00:00",
             }
         ]
         mock_item = {
@@ -280,8 +286,38 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
                             with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
                                 stats = poll_once()
 
-        self.assertEqual(mock_enqueue.call_count, 0)
+        self.assertEqual(mock_enqueue.call_count, 1)
+        self.assertEqual(mock_enqueue.call_args.args[2], "unchanged")
         self.assertEqual(stats.get("skipped_seen"), 1)
+
+    def test_poll_once_excludes_listings_before_saved_at(self):
+        due_rules = [
+            {
+                "id": 1,
+                "user_id": "boongtol",
+                "search_keyword": "m3맥북에어",
+                "saved_at": "2026-05-15 13:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 1001,
+            "product_id": 1001,
+            "title": "맥북에어 M3 8GB 256GB",
+            "price": 1200000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-1",
+            "product_url": "https://web.joongna.com/product/1001",
+            "image_url": "",
+        }
+
+        with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+            with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                with patch("src.joongna_polling_service.get_connection", side_effect=RuntimeError("db down")):
+                    with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                        stats = poll_once()
+
+        self.assertEqual(mock_enqueue.call_count, 0)
+        self.assertEqual(stats.get("skipped_before_saved_at"), 1)
 
 
 if __name__ == "__main__":

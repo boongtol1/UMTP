@@ -58,6 +58,7 @@ class UserSettingsPollTargetsTest(unittest.TestCase):
 
         executed_query = fake_cursor.executed[0][0]
         self.assertIn("last_poll_requested_at IS NOT NULL", executed_query)
+        self.assertIn("saved_at", executed_query)
         self.assertIn("EXISTS (SELECT 1 FROM users u", executed_query)
         self.assertIn("u.app_notification_enabled = TRUE", executed_query)
 

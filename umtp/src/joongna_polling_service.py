@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 try:
     from src.db import get_connection
     from src.joongna_search_client import search_joongna_products
@@ -63,6 +65,50 @@ def parse_sort_date(item):
     return cleaned or None
 
 
+def _coerce_datetime(value):
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        if isinstance(value, str):
+            text = value.strip()
+        else:
+            text = str(value).strip()
+
+        if not text:
+            return None
+
+        parsed = None
+        candidate = text.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            pass
+
+        if parsed is None:
+            for date_format in (
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d %H:%M",
+                "%Y/%m/%d %H:%M:%S",
+                "%Y/%m/%d %H:%M",
+            ):
+                try:
+                    parsed = datetime.strptime(text, date_format)
+                    break
+                except ValueError:
+                    continue
+
+        if parsed is None:
+            return None
+
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return parsed.replace(microsecond=0)
+
+
 def _build_poll_stats(search_words):
     return {
         "search_words": search_words,
@@ -79,6 +125,7 @@ def _build_poll_stats(search_words):
         "settings_marked": 0,
         "analysis_jobs_created": 0,
         "analysis_jobs_skipped_duplicate": 0,
+        "skipped_before_saved_at": 0,
         "analysis_jobs_processed": 0,
         "analysis_jobs_process_failed": 0,
     }
@@ -101,7 +148,7 @@ def _build_observed_product(search_word, item):
 
 def _build_keyword_targets_from_user_fair_prices(watch_rules):
     keyword_targets = {}
-    target_by_key = {}
+    target_keys = set()
 
     for rule in watch_rules:
         if rule.get("enabled") is not None and not bool(rule.get("enabled")):
@@ -115,20 +162,21 @@ def _build_keyword_targets_from_user_fair_prices(watch_rules):
             continue
 
         setting_id = rule.get("id")
-        target_key = (search_keyword.lower(), user_id)
-        existing_target = target_by_key.get(target_key)
-        if existing_target is None:
-            existing_target = {
-                "user_id": user_id,
-                "rule_id": None,
-                "setting_ids": [],
-                "watch_rule": None,
-            }
-            target_by_key[target_key] = existing_target
-            keyword_targets.setdefault(search_keyword, []).append(existing_target)
+        target_key = (search_keyword.lower(), user_id, setting_id)
+        if target_key in target_keys:
+            continue
+        target_keys.add(target_key)
 
-        if setting_id is not None and setting_id not in existing_target["setting_ids"]:
-            existing_target["setting_ids"].append(setting_id)
+        target = {
+            "user_id": user_id,
+            "rule_id": setting_id,
+            "setting_id": setting_id,
+            "setting_ids": [setting_id] if setting_id is not None else [],
+            "saved_at": rule.get("saved_at"),
+            "search_keyword": search_keyword,
+            "watch_rule": None,
+        }
+        keyword_targets.setdefault(search_keyword, []).append(target)
 
     return keyword_targets
 
@@ -226,6 +274,20 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                     stats["db_errors"] += 1
                     print(f"[polling] setting polled_at 갱신 실패 (setting_id={setting_id}): {exc}")
 
+    def filter_targets_by_saved_window(observed_product, targets):
+        listing_sort_date = _coerce_datetime(observed_product.get("sort_date"))
+        if listing_sort_date is None:
+            return []
+
+        eligible_targets = []
+        for target in targets:
+            saved_at = _coerce_datetime(target.get("saved_at"))
+            if saved_at is None:
+                continue
+            if listing_sort_date >= saved_at:
+                eligible_targets.append(target)
+        return eligible_targets
+
     try:
         try:
             connection = get_connection()
@@ -302,25 +364,24 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
 
                         if not should_analyze:
                             stats["skipped_seen"] += 1
+                            print(f"[{search_word}] 상태 동일(글로벌) (seq={product_id}, reason={change_reason})")
+
+                        if should_analyze:
                             print(
-                                f"[{search_word}] 상태 동일하여 스킵 "
+                                f"[{search_word}] 분석 큐 등록 대상 감지 "
                                 f"(seq={product_id}, reason={change_reason})"
                             )
-                            continue
+                            stats["new_items"] += 1
 
-                        print(
-                            f"[{search_word}] 분석 큐 등록 대상 감지 "
-                            f"(seq={product_id}, reason={change_reason})"
-                        )
-                        stats["new_items"] += 1
-
-                    if not product_state.get("should_analyze"):
+                    eligible_targets = filter_targets_by_saved_window(observed_product, targets_for_word)
+                    if not eligible_targets:
+                        stats["skipped_before_saved_at"] += len(targets_for_word)
                         continue
 
                     try:
                         enqueue_result = enqueue_analysis_for_product(
                             observed_product,
-                            targets_for_word,
+                            eligible_targets,
                             product_state.get("change_reason"),
                         )
                         created_jobs = enqueue_result.get("created_jobs") or []

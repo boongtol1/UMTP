@@ -206,7 +206,7 @@ def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit):
             SELECT
                 id,
                 user_id,
-                NULL AS watch_rule_id,
+                watch_rule_id,
                 analysis_job_id,
                 product_id,
                 source,
@@ -257,7 +257,7 @@ def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit):
                 SELECT
                     id,
                     user_id,
-                    NULL AS watch_rule_id,
+                    watch_rule_id,
                     analysis_job_id,
                     product_id,
                     source,
@@ -395,35 +395,68 @@ def get_pending_alert_events(limit=20):
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
-        cursor.execute(
-            """
-            SELECT
-                id,
-                user_id,
-                NULL AS watch_rule_id,
-                analysis_job_id,
-                product_id,
-                url,
-                title,
-                price_krw,
-                fair_price_krw,
-                target_price_krw,
-                drop_rate_percent,
-                trigger_reason,
-                message,
-                status,
-                send_attempts,
-                error_message,
-                created_at,
-                sent_at,
-                updated_at
-            FROM alert_events
-            WHERE status = 'pending'
-            ORDER BY created_at ASC
-            LIMIT %s
-            """,
-            (normalized_limit,),
-        )
+        try:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    watch_rule_id,
+                    analysis_job_id,
+                    product_id,
+                    url,
+                    title,
+                    price_krw,
+                    fair_price_krw,
+                    target_price_krw,
+                    drop_rate_percent,
+                    trigger_reason,
+                    message,
+                    status,
+                    send_attempts,
+                    error_message,
+                    created_at,
+                    sent_at,
+                    updated_at
+                FROM alert_events
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+                LIMIT %s
+                """,
+                (normalized_limit,),
+            )
+        except Exception as exc:
+            if "unknown column" not in str(exc).lower():
+                raise
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    NULL AS watch_rule_id,
+                    analysis_job_id,
+                    product_id,
+                    url,
+                    title,
+                    price_krw,
+                    fair_price_krw,
+                    target_price_krw,
+                    drop_rate_percent,
+                    trigger_reason,
+                    message,
+                    status,
+                    send_attempts,
+                    error_message,
+                    created_at,
+                    sent_at,
+                    updated_at
+                FROM alert_events
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+                LIMIT %s
+                """,
+                (normalized_limit,),
+            )
         return cursor.fetchall() or []
     finally:
         if cursor is not None:
@@ -599,33 +632,66 @@ def get_alert_event_by_id(alert_id):
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
-        cursor.execute(
-            """
-            SELECT
-                id,
-                user_id,
-                analysis_job_id,
-                product_id,
-                url,
-                title,
-                price_krw,
-                fair_price_krw,
-                target_price_krw,
-                drop_rate_percent,
-                trigger_reason,
-                message,
-                status,
-                send_attempts,
-                error_message,
-                created_at,
-                sent_at,
-                updated_at
-            FROM alert_events
-            WHERE id = %s
-            LIMIT 1
-            """,
-            (normalized_alert_id,),
-        )
+        try:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    watch_rule_id,
+                    analysis_job_id,
+                    product_id,
+                    url,
+                    title,
+                    price_krw,
+                    fair_price_krw,
+                    target_price_krw,
+                    drop_rate_percent,
+                    trigger_reason,
+                    message,
+                    status,
+                    send_attempts,
+                    error_message,
+                    created_at,
+                    sent_at,
+                    updated_at
+                FROM alert_events
+                WHERE id = %s
+                LIMIT 1
+                """,
+                (normalized_alert_id,),
+            )
+        except Exception as exc:
+            if "unknown column" not in str(exc).lower():
+                raise
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    NULL AS watch_rule_id,
+                    analysis_job_id,
+                    product_id,
+                    url,
+                    title,
+                    price_krw,
+                    fair_price_krw,
+                    target_price_krw,
+                    drop_rate_percent,
+                    trigger_reason,
+                    message,
+                    status,
+                    send_attempts,
+                    error_message,
+                    created_at,
+                    sent_at,
+                    updated_at
+                FROM alert_events
+                WHERE id = %s
+                LIMIT 1
+                """,
+                (normalized_alert_id,),
+            )
         return cursor.fetchone()
     finally:
         if cursor is not None:

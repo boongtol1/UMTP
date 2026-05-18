@@ -62,10 +62,11 @@ class AnalysisJobsTest(unittest.TestCase):
         fake_connection = _FakeConnection(fake_cursor)
 
         with patch("src.analysis_jobs.get_connection", return_value=fake_connection):
-            row = find_analysis_job_by_identity("boongtol", "1001")
+            row = find_analysis_job_by_identity("boongtol", 11, "1001")
 
         self.assertEqual(row.get("id"), 7)
         self.assertIn("WHERE user_id = %s", fake_cursor.executed[0][0])
+        self.assertIn("watch_rule_id", fake_cursor.executed[0][0])
 
     def test_create_analysis_job_dedup(self):
         with patch(
@@ -96,12 +97,14 @@ class AnalysisJobsTest(unittest.TestCase):
                     url="https://web.joongna.com/product/1002",
                     user_id="boongtol",
                     watch_rule_id=2,
+                    sort_date="2026-05-18 13:00:00",
                     trigger_reason="new_product",
                 )
 
         self.assertTrue(result.get("created"))
         self.assertEqual(result.get("job_id"), 11)
         self.assertIn("INSERT INTO analysis_jobs", fake_cursor.executed[0][0])
+        self.assertIn("watch_rule_id", fake_cursor.executed[0][0])
 
     def test_get_pending_analysis_jobs(self):
         fake_cursor = _FakeCursor(rows=[{"id": 1}, {"id": 2}])

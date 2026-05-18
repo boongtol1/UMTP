@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from src.db import get_connection
 
 
@@ -57,6 +59,49 @@ def _normalize_product_id(product_id):
     return _normalize_optional_text(product_id)
 
 
+def _normalize_optional_watch_rule_id(watch_rule_id):
+    normalized = _normalize_optional_int(watch_rule_id, "watch_rule_id")
+    if normalized is None:
+        return None
+    if normalized <= 0:
+        raise ValueError("invalid_watch_rule_id")
+    return normalized
+
+
+def _normalize_sort_date_for_db(sort_date):
+    normalized = _normalize_optional_text(sort_date)
+    if normalized is None:
+        return None
+
+    candidate = normalized.replace("Z", "+00:00")
+    parsed = None
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        pass
+
+    if parsed is None:
+        for date_format in (
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y/%m/%d %H:%M",
+        ):
+            try:
+                parsed = datetime.strptime(normalized, date_format)
+                break
+            except ValueError:
+                continue
+
+    if parsed is None:
+        return None
+
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return parsed.replace(microsecond=0)
+
+
 def _normalize_status(status):
     normalized = _normalize_required_text(status, "status")
     return normalized.lower()
@@ -71,8 +116,9 @@ def _is_duplicate_entry_error(exc):
     return "duplicate" in message and "entry" in message
 
 
-def find_analysis_job_by_identity(user_id, product_id):
+def find_analysis_job_by_identity(user_id, watch_rule_id, product_id):
     normalized_user_id = _normalize_optional_text(user_id)
+    normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
     normalized_product_id = _normalize_product_id(product_id)
 
     if normalized_user_id is None or normalized_product_id is None:
@@ -83,20 +129,50 @@ def find_analysis_job_by_identity(user_id, product_id):
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
-        cursor.execute(
-            """
-            SELECT
-                id,
-                status,
-                created_at
-            FROM analysis_jobs
-            WHERE user_id = %s
-              AND product_id = %s
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (normalized_user_id, normalized_product_id),
-        )
+        try:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    status,
+                    created_at
+                FROM analysis_jobs
+                WHERE user_id = %s
+                  AND (
+                        (watch_rule_id IS NULL AND %s IS NULL)
+                     OR watch_rule_id = %s
+                  )
+                  AND product_id = %s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (
+                    normalized_user_id,
+                    normalized_watch_rule_id,
+                    normalized_watch_rule_id,
+                    normalized_product_id,
+                ),
+            )
+        except Exception as exc:
+            if "unknown column" not in str(exc).lower():
+                raise
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    status,
+                    created_at
+                FROM analysis_jobs
+                WHERE user_id = %s
+                  AND product_id = %s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (
+                    normalized_user_id,
+                    normalized_product_id,
+                ),
+            )
         return cursor.fetchone()
     finally:
         if cursor is not None:
@@ -160,6 +236,7 @@ def create_analysis_job(
     search_keyword=None,
     user_id=None,
     watch_rule_id=None,
+    sort_date=None,
     trigger_reason=None,
     dedupe_within_seconds=300,
 ):
@@ -170,10 +247,15 @@ def create_analysis_job(
     normalized_price_krw = _normalize_optional_int(price_krw, "price_krw")
     normalized_search_keyword = _normalize_optional_text(search_keyword)
     normalized_user_id = _normalize_optional_text(user_id)
-    _normalize_optional_int(watch_rule_id, "watch_rule_id")
+    normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
+    normalized_sort_date = _normalize_sort_date_for_db(sort_date)
     normalized_trigger_reason = _normalize_optional_text(trigger_reason)
 
-    identity_job = find_analysis_job_by_identity(normalized_user_id, normalized_product_id)
+    identity_job = find_analysis_job_by_identity(
+        normalized_user_id,
+        normalized_watch_rule_id,
+        normalized_product_id,
+    )
     if identity_job is not None:
         return {
             "ok": True,
@@ -187,7 +269,7 @@ def create_analysis_job(
     if normalized_user_id is None or normalized_product_id is None:
         existing = find_recent_duplicate_job(
             normalized_product_id,
-            watch_rule_id,
+            normalized_watch_rule_id,
             normalized_trigger_reason,
             within_seconds=dedupe_within_seconds,
         )
@@ -216,10 +298,12 @@ def create_analysis_job(
                     price_krw,
                     search_keyword,
                     user_id,
+                    watch_rule_id,
+                    sort_date,
                     trigger_reason,
                     status
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
                 """,
                 (
                     normalized_source,
@@ -229,12 +313,81 @@ def create_analysis_job(
                     normalized_price_krw,
                     normalized_search_keyword,
                     normalized_user_id,
+                    normalized_watch_rule_id,
+                    normalized_sort_date,
                     normalized_trigger_reason,
                 ),
             )
         except Exception as exc:
-            if _is_duplicate_entry_error(exc):
-                duplicate_job = find_analysis_job_by_identity(normalized_user_id, normalized_product_id)
+            lowered_exc = str(exc).lower()
+            if "unknown column" in lowered_exc:
+                try:
+                    cursor.execute(
+                        """
+                        INSERT INTO analysis_jobs (
+                            source,
+                            product_id,
+                            url,
+                            title,
+                            price_krw,
+                            search_keyword,
+                            user_id,
+                            watch_rule_id,
+                            trigger_reason,
+                            status
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                        """,
+                        (
+                            normalized_source,
+                            normalized_product_id,
+                            normalized_url,
+                            normalized_title,
+                            normalized_price_krw,
+                            normalized_search_keyword,
+                            normalized_user_id,
+                            normalized_watch_rule_id,
+                            normalized_trigger_reason,
+                        ),
+                    )
+                except Exception as second_exc:
+                    lowered_second_exc = str(second_exc).lower()
+                    if "unknown column" not in lowered_second_exc:
+                        raise
+                    cursor.execute(
+                        """
+                        INSERT INTO analysis_jobs (
+                            source,
+                            product_id,
+                            url,
+                            title,
+                            price_krw,
+                            search_keyword,
+                            user_id,
+                            trigger_reason,
+                            status
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                        """,
+                        (
+                            normalized_source,
+                            normalized_product_id,
+                            normalized_url,
+                            normalized_title,
+                            normalized_price_krw,
+                            normalized_search_keyword,
+                            normalized_user_id,
+                            normalized_trigger_reason,
+                        ),
+                    )
+                # Unknown-column fallback succeeded; continue normal flow.
+                pass
+            elif _is_duplicate_entry_error(exc):
+                duplicate_job = find_analysis_job_by_identity(
+                    normalized_user_id,
+                    normalized_watch_rule_id,
+                    normalized_product_id,
+                )
                 if duplicate_job is not None:
                     return {
                         "ok": True,
@@ -243,7 +396,9 @@ def create_analysis_job(
                         "job_id": int(duplicate_job.get("id")),
                         "status": duplicate_job.get("status"),
                     }
-            raise
+                raise
+            else:
+                raise
 
         job_id = int(cursor.lastrowid)
         connection.commit()
@@ -277,6 +432,7 @@ def create_analysis_jobs_for_rules(product, watch_rules, trigger_reason):
             price_krw=product.get("price"),
             search_keyword=product.get("search_keyword") or product.get("search_word"),
             user_id=product.get("user_id"),
+            sort_date=product.get("sort_date"),
             trigger_reason=trigger_reason,
         )
         if result.get("created"):
@@ -290,23 +446,42 @@ def create_analysis_jobs_for_rules(product, watch_rules, trigger_reason):
             "skipped_jobs": skipped_jobs,
         }
 
-    unique_user_ids = []
-    seen_user_ids = set()
+    unique_targets = []
+    seen_target_keys = set()
     for watch_rule in normalized_watch_rules:
         user_id = None
+        watch_rule_id = None
         if isinstance(watch_rule, dict):
             user_id = watch_rule.get("user_id")
+            watch_rule_id = watch_rule.get("setting_id")
+            if watch_rule_id is None:
+                watch_rule_id = watch_rule.get("rule_id")
             nested_rule = watch_rule.get("watch_rule")
             if isinstance(nested_rule, dict):
                 user_id = nested_rule.get("user_id") or user_id
+                if watch_rule_id is None:
+                    watch_rule_id = nested_rule.get("id")
 
         normalized_user_id = _normalize_optional_text(user_id)
-        if normalized_user_id is None or normalized_user_id in seen_user_ids:
+        if normalized_user_id is None:
             continue
-        seen_user_ids.add(normalized_user_id)
-        unique_user_ids.append(normalized_user_id)
+        try:
+            normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
+        except ValueError:
+            continue
 
-    for user_id in unique_user_ids:
+        target_key = (normalized_user_id, normalized_watch_rule_id)
+        if target_key in seen_target_keys:
+            continue
+        seen_target_keys.add(target_key)
+        unique_targets.append(
+            {
+                "user_id": normalized_user_id,
+                "watch_rule_id": normalized_watch_rule_id,
+            }
+        )
+
+    for target in unique_targets:
 
         result = create_analysis_job(
             source="joongna",
@@ -315,7 +490,9 @@ def create_analysis_jobs_for_rules(product, watch_rules, trigger_reason):
             title=product.get("title"),
             price_krw=product.get("price"),
             search_keyword=product.get("search_keyword") or product.get("search_word"),
-            user_id=user_id,
+            user_id=target.get("user_id"),
+            watch_rule_id=target.get("watch_rule_id"),
+            sort_date=product.get("sort_date"),
             trigger_reason=trigger_reason,
         )
         if result.get("created"):
@@ -338,33 +515,66 @@ def get_pending_analysis_jobs(limit=20):
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
-        cursor.execute(
-            """
-            SELECT
-                id,
-                source,
-                product_id,
-                url,
-                title,
-                price_krw,
-                search_keyword,
-                user_id,
-                NULL AS watch_rule_id,
-                trigger_reason,
-                status,
-                error_message,
-                attempts,
-                created_at,
-                started_at,
-                processed_at,
-                updated_at
-            FROM analysis_jobs
-            WHERE status = 'pending'
-            ORDER BY created_at ASC
-            LIMIT %s
-            """,
-            (normalized_limit,),
-        )
+        try:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    source,
+                    product_id,
+                    url,
+                    title,
+                    price_krw,
+                    search_keyword,
+                    user_id,
+                    watch_rule_id,
+                    sort_date,
+                    trigger_reason,
+                    status,
+                    error_message,
+                    attempts,
+                    created_at,
+                    started_at,
+                    processed_at,
+                    updated_at
+                FROM analysis_jobs
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+                LIMIT %s
+                """,
+                (normalized_limit,),
+            )
+        except Exception as exc:
+            if "unknown column" not in str(exc).lower():
+                raise
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    source,
+                    product_id,
+                    url,
+                    title,
+                    price_krw,
+                    search_keyword,
+                    user_id,
+                    NULL AS watch_rule_id,
+                    NULL AS sort_date,
+                    trigger_reason,
+                    status,
+                    error_message,
+                    attempts,
+                    created_at,
+                    started_at,
+                    processed_at,
+                    updated_at
+                FROM analysis_jobs
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+                LIMIT %s
+                """,
+                (normalized_limit,),
+            )
         return cursor.fetchall() or []
     finally:
         if cursor is not None:
@@ -470,32 +680,64 @@ def get_analysis_job(job_id):
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
-        cursor.execute(
-            """
-            SELECT
-                id,
-                source,
-                product_id,
-                url,
-                title,
-                price_krw,
-                search_keyword,
-                user_id,
-                NULL AS watch_rule_id,
-                trigger_reason,
-                status,
-                error_message,
-                attempts,
-                created_at,
-                started_at,
-                processed_at,
-                updated_at
-            FROM analysis_jobs
-            WHERE id = %s
-            LIMIT 1
-            """,
-            (normalized_job_id,),
-        )
+        try:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    source,
+                    product_id,
+                    url,
+                    title,
+                    price_krw,
+                    search_keyword,
+                    user_id,
+                    watch_rule_id,
+                    sort_date,
+                    trigger_reason,
+                    status,
+                    error_message,
+                    attempts,
+                    created_at,
+                    started_at,
+                    processed_at,
+                    updated_at
+                FROM analysis_jobs
+                WHERE id = %s
+                LIMIT 1
+                """,
+                (normalized_job_id,),
+            )
+        except Exception as exc:
+            if "unknown column" not in str(exc).lower():
+                raise
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    source,
+                    product_id,
+                    url,
+                    title,
+                    price_krw,
+                    search_keyword,
+                    user_id,
+                    NULL AS watch_rule_id,
+                    NULL AS sort_date,
+                    trigger_reason,
+                    status,
+                    error_message,
+                    attempts,
+                    created_at,
+                    started_at,
+                    processed_at,
+                    updated_at
+                FROM analysis_jobs
+                WHERE id = %s
+                LIMIT 1
+                """,
+                (normalized_job_id,),
+            )
         return cursor.fetchone()
     finally:
         if cursor is not None:

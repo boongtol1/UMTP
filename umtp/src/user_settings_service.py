@@ -282,7 +282,7 @@ def _fetch_user_overrides_map(cursor, user_id):
                    min_price_krw, max_price_krw,
                    enabled,
                    search_keyword, force_poll, poll_interval_seconds,
-                   last_polled_at, last_poll_requested_at
+                   last_polled_at, last_poll_requested_at, saved_at
                 FROM user_fair_prices
                 WHERE user_id = %s
               AND product_type = %s
@@ -310,6 +310,7 @@ def _fetch_user_overrides_map(cursor, user_id):
             for row in rows:
                 row["min_price_krw"] = None
                 row["max_price_krw"] = None
+                row["saved_at"] = row.get("saved_at") or row.get("last_poll_requested_at")
         except Exception as first_fallback_exc:
             if "unknown column" not in str(first_fallback_exc).lower():
                 raise
@@ -347,6 +348,7 @@ def _fetch_user_overrides_map(cursor, user_id):
                 row["poll_interval_seconds"] = DEFAULT_POLL_INTERVAL_SECONDS
                 row["last_polled_at"] = None
                 row["last_poll_requested_at"] = None
+                row["saved_at"] = None
                 row["min_price_krw"] = None
                 row["max_price_krw"] = None
                 row["target_buy_price_krw"] = None
@@ -373,6 +375,7 @@ def _fetch_user_overrides_map(cursor, user_id):
             "poll_interval_seconds": _safe_int(row.get("poll_interval_seconds")) or DEFAULT_POLL_INTERVAL_SECONDS,
             "last_polled_at": row.get("last_polled_at"),
             "last_poll_requested_at": row.get("last_poll_requested_at"),
+            "saved_at": row.get("saved_at") or row.get("last_poll_requested_at"),
         }
         if user_map[key]["target_buy_price_krw"] is None:
             user_map[key]["target_buy_price_krw"] = compute_target_buy_price_krw(
@@ -451,6 +454,7 @@ def get_user_fair_price_settings(user_id):
         )
         last_polled_at = user_item.get("last_polled_at") if has_user_override else None
         last_poll_requested_at = user_item.get("last_poll_requested_at") if has_user_override else None
+        saved_at = user_item.get("saved_at") if has_user_override else None
 
         if has_user_override:
             effective_fair_price_krw = user_fair_price_krw
@@ -504,6 +508,7 @@ def get_user_fair_price_settings(user_id):
                 "force_poll": bool(force_poll),
                 "last_polled_at": last_polled_at,
                 "last_poll_requested_at": last_poll_requested_at,
+                "saved_at": saved_at,
                 "has_user_override": has_user_override,
             }
         )
@@ -1067,6 +1072,31 @@ def upsert_user_fair_price_setting(
             if not handled_unknown_column and "alert_price_direction" not in lowered_exc:
                 raise
 
+        try:
+            cursor.execute(
+                """
+                UPDATE user_fair_prices
+                SET saved_at = CURRENT_TIMESTAMP
+                WHERE user_id = %s
+                  AND product_type = %s
+                  AND chip = %s
+                  AND screen_inch = %s
+                  AND ram_gb = %s
+                  AND ssd_gb = %s
+                """,
+                (
+                    normalized_user_id,
+                    normalized_product_type,
+                    normalized_chip,
+                    normalized_screen_inch,
+                    normalized_ram_gb,
+                    normalized_ssd_gb,
+                ),
+            )
+        except Exception as exc:
+            if "unknown column" not in str(exc).lower() or "saved_at" not in str(exc).lower():
+                raise
+
         connection.commit()
         return {
             "ok": True,
@@ -1147,6 +1177,7 @@ def _poll_target_row_to_dict(row):
         "max_price_krw": _safe_int(row.get("max_price_krw")),
         "last_polled_at": row.get("last_polled_at"),
         "last_poll_requested_at": row.get("last_poll_requested_at"),
+        "saved_at": row.get("saved_at") or row.get("last_poll_requested_at"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
@@ -1234,6 +1265,7 @@ def get_due_user_fair_price_polling_targets(user_id=None):
                     max_price_krw,
                     last_polled_at,
                     last_poll_requested_at,
+                    saved_at,
                     created_at,
                     updated_at
                 FROM user_fair_prices
@@ -1280,6 +1312,41 @@ def get_due_user_fair_price_polling_targets(user_id=None):
                 for row in rows:
                     row["min_price_krw"] = None
                     row["max_price_krw"] = None
+                    row["saved_at"] = row.get("saved_at") or row.get("last_poll_requested_at")
+            elif "saved_at" in lowered_exc:
+                cursor.execute(
+                    f"""
+                    SELECT
+                        id,
+                        user_id,
+                        product_type,
+                        chip,
+                        screen_inch,
+                        ram_gb,
+                        ssd_gb,
+                        search_keyword,
+                        enabled,
+                        force_poll,
+                        poll_interval_seconds,
+                        fair_price_krw,
+                        alert_drop_rate_percent,
+                        target_buy_price_krw,
+                        alert_price_direction,
+                        min_price_krw,
+                        max_price_krw,
+                        last_polled_at,
+                        last_poll_requested_at,
+                        created_at,
+                        updated_at
+                    FROM user_fair_prices
+                    WHERE {where_clause}
+                    ORDER BY id ASC
+                    """,
+                    tuple(params),
+                )
+                rows = cursor.fetchall() or []
+                for row in rows:
+                    row["saved_at"] = row.get("last_poll_requested_at")
             elif "alert_price_direction" in lowered_exc:
                 cursor.execute(
                     f"""
@@ -1313,6 +1380,7 @@ def get_due_user_fair_price_polling_targets(user_id=None):
                     row["alert_price_direction"] = DEFAULT_ALERT_PRICE_DIRECTION
                     row["min_price_krw"] = None
                     row["max_price_krw"] = None
+                    row["saved_at"] = row.get("saved_at") or row.get("last_poll_requested_at")
                 return [_poll_target_row_to_dict(row) for row in rows]
             logger.warning(
                 "[polling_targets] required polling columns missing (%s); skip polling targets",

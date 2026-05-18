@@ -22,7 +22,7 @@ class _FakeCursor:
         normalized_query = " ".join(query.split()).lower()
 
         if normalized_query.startswith("insert into alert_events") and self.raise_duplicate_on_insert:
-            raise RuntimeError("Duplicate entry 'u1-p1' for key 'uq_alert_events_user_product'")
+            raise RuntimeError("Duplicate entry 'u1-1-p1' for key 'uq_alert_events_user_rule_product'")
 
     def fetchone(self):
         return self.duplicate_row

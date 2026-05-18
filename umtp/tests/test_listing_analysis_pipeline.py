@@ -56,7 +56,8 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
             "product_id": "1001",
             "url": "https://web.joongna.com/product/1001",
             "user_id": "boongtol",
-            "watch_rule_id": 1,
+            "watch_rule_id": None,
+            "sort_date": "2026-05-16 12:00:00",
             "trigger_reason": "price_changed",
             "search_keyword": "맥북",
         }
