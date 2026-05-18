@@ -243,6 +243,11 @@ fun AlertCard(
                 text = "시장가와의 차이: ${formatPercentDisplay(alert.price_gap_percent ?: alert.diff_ratio)}",
                 style = MaterialTheme.typography.bodySmall,
             )
+            Text(
+                text = "계산식: (내가 생각한 시장가 - 등록 가격) / 내가 생각한 시장가 × 100",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.Gray,
+            )
 
             Spacer(modifier = Modifier.height(10.dp))
 
@@ -274,6 +279,7 @@ fun AlertCard(
                 DetailRow(label = "내가 생각한 시장가", value = formatKrwDisplay(alert.user_market_price_krw ?: alert.fair_price_krw))
                 DetailRow(label = "알림 기준 가격", value = formatKrwDisplay(alert.alert_target_price_krw))
                 DetailRow(label = "시장가와의 차이", value = formatPercentDisplay(alert.price_gap_percent ?: alert.diff_ratio))
+                DetailRow(label = "차이율 계산식", value = "(내가 생각한 시장가 - 등록 가격) / 내가 생각한 시장가 × 100")
                 DetailRow(label = "알림 조건", value = resolveAlertConditionLabel(alert))
                 DetailRow(label = "위험도", value = resolveRiskLabel(alert))
                 DetailRow(label = "위험 점수", value = alert.risk_score?.toString() ?: "정보 없음")

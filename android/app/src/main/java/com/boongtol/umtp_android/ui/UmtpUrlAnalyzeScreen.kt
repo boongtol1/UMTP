@@ -133,7 +133,10 @@ private fun formatResponse(response: com.boongtol.umtp_android.network.AnalyzeUr
     response.title?.let { sb.append("제목: $it\n") }
     response.listing_price_krw?.let { sb.append("등록 가격: $it 원\n") }
     response.fair_price_krw?.let { sb.append("적정 가격: $it 원\n") }
-    response.diff_ratio?.let { sb.append("가격 차이: ${String.format(Locale.getDefault(), "%.1f", it * 100)}%\n") }
+    response.diff_ratio?.let {
+        sb.append("가격 차이: ${String.format(Locale.getDefault(), "%.1f", it)}%\n")
+        sb.append("계산식: (적정 가격 - 등록 가격) / 적정 가격 × 100\n")
+    }
     response.is_alert_target?.let { sb.append("알림 대상: $it\n") }
     response.risk_level?.let { sb.append("위험도: $it\n") }
     response.trade_type?.let { sb.append("거래 방식: $it\n") }

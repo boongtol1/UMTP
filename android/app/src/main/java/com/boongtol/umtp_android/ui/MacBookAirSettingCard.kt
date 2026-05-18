@@ -176,6 +176,11 @@ fun MacBookAirSettingCard(
                 style = MaterialTheme.typography.bodySmall
             )
             Text(
+                text = "계산식: (내가 생각한 시장가 - 알림 기준 가격) / 내가 생각한 시장가 × 100",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray,
+            )
+            Text(
                 text = "시장가보다 몇 % 낮거나 높은 가격에서 알림을 받을지 자동 계산합니다.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.Gray,
