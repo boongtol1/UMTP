@@ -17,6 +17,7 @@ try:
     from src.db import get_connection
     from src.joongna_seen_products import mark_seen_product_analyzed
     from src.listing_page_parser import fetch_html, parse_joongna_listing_page
+    from src.notification_worker import dispatch_alert_event_immediately
     from src.risk_analyzer import analyze_risk
     from src.spec_parser import parse_listing_title
     from src.user_fair_price import is_user_fair_price_target_enabled, resolve_fair_price_for_user
@@ -39,6 +40,7 @@ except ModuleNotFoundError:
     from db import get_connection
     from joongna_seen_products import mark_seen_product_analyzed
     from listing_page_parser import fetch_html, parse_joongna_listing_page
+    from notification_worker import dispatch_alert_event_immediately
     from risk_analyzer import analyze_risk
     from spec_parser import parse_listing_title
     from user_fair_price import is_user_fair_price_target_enabled, resolve_fair_price_for_user
@@ -752,7 +754,15 @@ def analyze_product_for_watch_rule(job):
             "created": False,
             "alert_id": None,
         }
+        alert_message = None
         if is_alert_target:
+            alert_message = _build_alert_message(
+                title=title,
+                listing_price_krw=listing_price_krw or 0,
+                fair_price_krw=fair_price_krw or 0,
+                drop_rate_percent=drop_rate_percent,
+                url=url,
+            )
             risk_keywords = risk_result.get("risk_keywords")
             risk_keywords_json = None
             if isinstance(risk_keywords, list):
@@ -775,13 +785,7 @@ def analyze_product_for_watch_rule(job):
                 target_price_krw=target_price_krw,
                 drop_rate_percent=drop_rate_percent,
                 trigger_reason=trigger_reason,
-                message=_build_alert_message(
-                    title=title,
-                    listing_price_krw=listing_price_krw or 0,
-                    fair_price_krw=fair_price_krw or 0,
-                    drop_rate_percent=drop_rate_percent,
-                    url=url,
-                ),
+                message=alert_message,
                 source="joongna",
                 parsed_spec=parsed_spec,
                 alert_drop_rate_percent=alert_drop_rate_percent,
@@ -829,6 +833,35 @@ def analyze_product_for_watch_rule(job):
 
         connection.commit()
 
+        alert_dispatch_result = None
+        created_alert_id = _normalize_optional_int(alert_create_result.get("alert_id"))
+        if alert_create_result.get("created") and created_alert_id is not None:
+            try:
+                alert_dispatch_result = dispatch_alert_event_immediately(
+                    created_alert_id,
+                    fallback_alert={
+                        "id": created_alert_id,
+                        "user_id": user_id,
+                        "title": title,
+                        "url": url,
+                        "price_krw": listing_price_krw,
+                        "fair_price_krw": fair_price_krw,
+                        "target_price_krw": target_price_krw,
+                        "drop_rate_percent": drop_rate_percent,
+                        "trigger_reason": trigger_reason,
+                        "message": alert_message,
+                    },
+                )
+            except Exception as dispatch_exc:
+                alert_dispatch_result = {
+                    "status": "dispatch_exception",
+                    "reason": str(dispatch_exc),
+                }
+                print(
+                    "[analysis_pipeline] immediate alert dispatch failed: "
+                    f"alert_id={created_alert_id}, error={dispatch_exc}"
+                )
+
         return {
             "ok": True,
             "analysis_job_id": job_id,
@@ -848,6 +881,16 @@ def analyze_product_for_watch_rule(job):
             "is_alert_target": is_alert_target,
             "alert_created": bool(alert_create_result.get("created")),
             "alert_event_id": alert_create_result.get("alert_id"),
+            "alert_dispatch_status": (
+                _normalize_optional_text(alert_dispatch_result.get("status"))
+                if isinstance(alert_dispatch_result, dict)
+                else None
+            ),
+            "alert_dispatch_reason": (
+                _normalize_optional_text(alert_dispatch_result.get("reason"))
+                if isinstance(alert_dispatch_result, dict)
+                else None
+            ),
             "alert_skip_reason": alert_skip_reason,
             "fair_price_source": fair_price_source,
         }

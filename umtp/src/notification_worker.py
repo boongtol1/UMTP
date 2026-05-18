@@ -591,6 +591,90 @@ def send_alert_event(alert):
     }
 
 
+def get_alert_event_by_id(alert_id):
+    normalized_alert_id = _normalize_alert_id(alert_id)
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT
+                id,
+                user_id,
+                analysis_job_id,
+                product_id,
+                url,
+                title,
+                price_krw,
+                fair_price_krw,
+                target_price_krw,
+                drop_rate_percent,
+                trigger_reason,
+                message,
+                status,
+                send_attempts,
+                error_message,
+                created_at,
+                sent_at,
+                updated_at
+            FROM alert_events
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (normalized_alert_id,),
+        )
+        return cursor.fetchone()
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def dispatch_alert_event_immediately(alert_id, *, fallback_alert=None):
+    normalized_alert_id = _normalize_alert_id(alert_id)
+
+    claimed = mark_alert_event_sending(normalized_alert_id)
+    if not claimed:
+        return {
+            "ok": True,
+            "alert_id": normalized_alert_id,
+            "status": "skipped_not_pending",
+            "reason": "not_pending",
+        }
+
+    alert_payload = None
+    if isinstance(fallback_alert, dict):
+        alert_payload = dict(fallback_alert)
+        alert_payload["id"] = normalized_alert_id
+
+    if not isinstance(alert_payload, dict):
+        alert_payload = get_alert_event_by_id(normalized_alert_id)
+
+    if not isinstance(alert_payload, dict):
+        mark_alert_event_failed(normalized_alert_id, "alert_event_not_found_after_claim")
+        return {
+            "ok": False,
+            "alert_id": normalized_alert_id,
+            "status": "failed",
+            "reason": "alert_event_not_found_after_claim",
+        }
+
+    try:
+        return send_alert_event(alert_payload)
+    except Exception as exc:
+        mark_alert_event_failed(normalized_alert_id, str(exc))
+        return {
+            "ok": False,
+            "alert_id": normalized_alert_id,
+            "status": "failed",
+            "reason": str(exc),
+        }
+
+
 def process_pending_alert_events(limit=20):
     pending_alerts = get_pending_alert_events(limit=limit)
     stats = {

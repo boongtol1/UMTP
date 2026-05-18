@@ -10,6 +10,7 @@ if PROJECT_ROOT not in sys.path:
 
 from src.notification_worker import (  # noqa: E402
     _build_telegram_message,
+    dispatch_alert_event_immediately,
     process_pending_alert_events,
     send_alert_event,
 )
@@ -151,6 +152,50 @@ class NotificationWorkerTest(unittest.TestCase):
         self.assertEqual(stats.get("failed"), 0)
         self.assertEqual(mock_send_alert.call_count, 0)
         self.assertEqual(stats.get("results")[0].get("status"), "skipped_not_pending")
+
+    def test_dispatch_alert_event_immediately_skips_when_not_pending(self):
+        with patch("src.notification_worker.mark_alert_event_sending", return_value=False):
+            with patch("src.notification_worker.send_alert_event") as mock_send_alert:
+                result = dispatch_alert_event_immediately(
+                    101,
+                    fallback_alert={
+                        "user_id": "boongtol",
+                        "message": "테스트 메시지",
+                    },
+                )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("status"), "skipped_not_pending")
+        self.assertEqual(mock_send_alert.call_count, 0)
+
+    def test_dispatch_alert_event_immediately_sends_with_fallback_payload(self):
+        with patch("src.notification_worker.mark_alert_event_sending", return_value=True):
+            with patch(
+                "src.notification_worker.send_alert_event",
+                return_value={
+                    "ok": True,
+                    "alert_id": 102,
+                    "status": "sent",
+                    "reason": "telegram_sent",
+                },
+            ) as mock_send_alert:
+                with patch("src.notification_worker.get_alert_event_by_id") as mock_get_alert:
+                    result = dispatch_alert_event_immediately(
+                        102,
+                        fallback_alert={
+                            "user_id": "boongtol",
+                            "title": "테스트",
+                            "message": "테스트 메시지",
+                        },
+                    )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("status"), "sent")
+        self.assertEqual(mock_get_alert.call_count, 0)
+        self.assertEqual(mock_send_alert.call_count, 1)
+        sent_payload = mock_send_alert.call_args.args[0]
+        self.assertEqual(sent_payload.get("id"), 102)
+        self.assertEqual(sent_payload.get("user_id"), "boongtol")
 
 
 if __name__ == "__main__":
