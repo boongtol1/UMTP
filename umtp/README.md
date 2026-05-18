@@ -120,6 +120,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - identity 정책: `analysis_jobs`/`alert_events`의 중복 기준은 `(user_id, watch_rule_id, product_id)`입니다.
 - saved_at 정책: UMTP는 사용자가 저장한 시각(`saved_at`) 이후에 등록된 매물(`sort_date >= saved_at`)만 알림 후보로 봅니다.
 - 재저장 정책: 같은 저장 조건에서 저장 버튼을 다시 누르면 `saved_at`이 현재 시각으로 갱신되고, 그 시점부터 새로 조회를 시작합니다.
+- 새로고침 정책: 새로고침은 저장 조건의 `saved_at`을 현재 시각으로 갱신합니다. 전체 새로고침은 활성 규칙 전체를, 단일 새로고침은 선택한 규칙 하나만 갱신합니다. 새로고침 후 UMTP는 `sort_date >= saved_at` 인 매물만 정식 알림 후보로 봅니다.
 - 재알림 정책: 이미 분석한 `product_id`라도 사용자별 저장 규칙 기준으로는 다시 알림 가능하지만, 같은 사용자/같은 규칙/같은 `product_id` 알림은 한 번만 보냅니다.
 - 마이그레이션: 기존 운영 DB는 `sql/migrate_saved_at_alert_window.sql`을 실행해 `saved_at/sort_date` 컬럼과 rule 단위 unique key를 반영합니다.
 - Telegram 발송 기준: 새 `alert_events` insert 성공 시 1회만 발송됩니다.
