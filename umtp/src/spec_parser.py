@@ -1,4 +1,5 @@
 import re
+from typing import Optional
 
 try:
     from src.macbook_air_units import get_macbook_air_base_spec, is_valid_macbook_air_unit
@@ -17,6 +18,7 @@ REQUIRED_FIELDS = ("product_type", "chip", "ram_gb", "ssd_gb")
 MISSING_REQUIRED_REASON = "missing_required_fields"
 INVALID_UNIT_REASON = "invalid_macbook_air_unit"
 MULTIPLE_CHIPS_REASON = "multiple_chips_found"
+AMBIGUOUS_NUMERIC_REASON = "ambiguous_numeric_candidates"
 
 TB_TO_GB_MAP = {
     "1tb": 1024,
@@ -31,6 +33,287 @@ TB_TO_GB_MAP = {
 }
 
 BASE_MODEL_KEYWORD_PATTERN = re.compile(r"(?<![가-힣])(기본형|깡통)(?![가-힣])")
+
+NOISE_CONTEXT_KEYWORDS = {
+    "date": ["월", "일", "년", "년식"],
+    "time": ["시", "분", "시간", "오전", "오후"],
+    "phone": ["010", "011", "016", "017", "018", "019"],
+    "price": ["원", "만원", "만", "가격", "판매가", "택배비", "예약금", "네고"],
+    "location": ["번 출구", "출구", "동", "호", "층", "거리", "km", "m"],
+    "quantity": ["대", "개", "번 사용", "회", "번"],
+    "battery": ["배터리", "성능", "효율", "사이클", "cycle", "충전기", "w", "와트"],
+    "model": ["모델", "모델명", "모델번호", "시리얼", "serial", "주문번호"],
+    "os": ["macos", "ios", "sonoma", "sequoia", "ventura", "monterey"],
+    "core": ["코어", "core", "cpu", "gpu"],
+    "display": ["hz", "니트", "해상도"],
+    "port": ["포트", "usb", "hdmi", "썬더볼트", "thunderbolt"],
+    "condition": ["상태", "점", "찍힘", "기스", "흠집", "곳"],
+    "warranty": ["보증", "애케플", "applecare", "apple care", "개월", "년 남음"],
+}
+
+SPEC_CONTEXT_KEYWORDS = [
+    "m1",
+    "m2",
+    "m3",
+    "m4",
+    "m5",
+    "인치",
+    "inch",
+    "\"",
+    "”",
+    "''",
+    "′′",
+    "형",
+    "ram",
+    "램",
+    "메모리",
+    "memory",
+    "ssd",
+    "저장공간",
+    "용량",
+    "storage",
+    "gb",
+    "기가",
+    "tb",
+    "테라",
+]
+
+RAM_SHORT_TOKENS = ["8g", "16g", "24g", "32g"]
+SSD_SHORT_TOKENS = ["1t", "2t", "4t"]
+
+_SPEC_WINDOW_SIZE = 20
+
+_STRONG_NOISE_PATTERNS = (
+    re.compile(r"\b01[0-9][-\s]?\d{3,4}[-\s]?\d{4}\b", flags=re.IGNORECASE),
+    re.compile(r"\b0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{4}\b", flags=re.IGNORECASE),
+    re.compile(r"\b20\d{2}[./-]\d{1,2}[./-]\d{1,2}\b", flags=re.IGNORECASE),
+    re.compile(r"\b(?:1[0-2]|0?[1-9])/(?:3[01]|[12]?\d)\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d{1,2}\s*월\s*\d{1,2}\s*일\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d{2,4}\s*년(?:식)?\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d{1,2}\s*:\s*\d{2}\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d{1,2}\s*시(?:\s*\d{1,2}\s*분)?\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d{1,2}\s*분\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*시간\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d{1,3}(?:,\d{3})+\s*원\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d+(?:\.\d+)?\s*만원\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*만\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*번\s*출구\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*동\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*호\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*층\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*회\b", flags=re.IGNORECASE),
+    re.compile(r"(?:배터리|효율|성능)\s*\d{1,3}\s*%", flags=re.IGNORECASE),
+    re.compile(r"(?:사이클|cycle)\s*\d+", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*w\b", flags=re.IGNORECASE),
+    re.compile(r"(?:macos|ios|sonoma|sequoia|ventura|monterey)\s*\d+(?:\.\d+)?", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*(?:코어|core)\b", flags=re.IGNORECASE),
+    re.compile(r"\b(?:cpu|gpu)\s*\d+\s*(?:코어|core)?\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d{3,4}\s*[x×]\s*\d{3,4}\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*hz\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*니트\b", flags=re.IGNORECASE),
+    re.compile(r"(?:usb|hdmi|썬더볼트|thunderbolt)\s*\d+(?:\.\d+)?", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*/\s*10\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*점\b", flags=re.IGNORECASE),
+    re.compile(r"(?:찍힘|기스|흠집|곳)\s*\d+\s*개?", flags=re.IGNORECASE),
+    re.compile(r"(?:보증|애케플|applecare|apple care)\s*\d+\s*(?:개월|년|년까지)?", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*개월\b", flags=re.IGNORECASE),
+    re.compile(r"\b\d+\s*년\s*남음\b", flags=re.IGNORECASE),
+)
+
+_SPEC_SPAN_PATTERNS = (
+    re.compile(r"m[1-5]", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(13(?:\.\d+)?|15(?:\.\d+)?)\s*(?:인치|inch|형|\"|”|''|′′)(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(13(?:\.\d+)?|15(?:\.\d+)?)-inch(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(8|16|24|32)\s*gb(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(8|16|24|32)\s*기가(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(8|16|24|32)\s*g(?![a-z0-9가-힣])", flags=re.IGNORECASE),
+    re.compile(r"램\s*(8|16|24|32)(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(8|16|24|32)\s*램(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(256|512|1024|2048|4096)\s*gb(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(256|512|1024|2048|4096)\s*기가(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(256|512|1024|2048|4096)\s*ssd(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(1|2|4)\s*(?:tb|t|테라)(?![a-z0-9가-힣])", flags=re.IGNORECASE),
+    re.compile(
+        r"(?<!\d)(8|16|24|32)\s*/\s*(256|512|1024|2048|4096|1\s*tb|2\s*tb|4\s*tb|1\s*t|2\s*t|4\s*t|1\s*테라|2\s*테라|4\s*테라)(?!\d)",
+        flags=re.IGNORECASE,
+    ),
+)
+
+_NUMERIC_TOKEN_PATTERN = re.compile(r"\d+(?:\.\d+)?")
+_NOISE_CONTEXT_KEYWORDS_LOWER = sorted(
+    {keyword.lower() for keywords in NOISE_CONTEXT_KEYWORDS.values() for keyword in keywords if keyword},
+    key=len,
+    reverse=True,
+)
+_SPEC_CONTEXT_KEYWORDS_LOWER = [keyword.lower() for keyword in SPEC_CONTEXT_KEYWORDS]
+
+
+def _span_overlaps(spans, start, end):
+    for span_start, span_end in spans:
+        if start < span_end and end > span_start:
+            return True
+    return False
+
+
+def _merge_spans(spans):
+    if not spans:
+        return []
+
+    ordered = sorted(spans, key=lambda item: (item[0], item[1]))
+    merged = [ordered[0]]
+    for start, end in ordered[1:]:
+        prev_start, prev_end = merged[-1]
+        if start <= prev_end:
+            merged[-1] = (prev_start, max(prev_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _collect_spec_spans(text):
+    spans = []
+    for pattern in _SPEC_SPAN_PATTERNS:
+        spans.extend((match.start(), match.end()) for match in pattern.finditer(text))
+    return _merge_spans(spans)
+
+
+def _normalize_screen_inch_value(raw_value):
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+    if 12.7 <= value <= 13.9:
+        return 13
+    if 14.7 <= value <= 15.9:
+        return 15
+    if value in (13.0, 15.0):
+        return int(value)
+    return None
+
+
+def _extract_screen_inch_candidates_from_text(text):
+    if not isinstance(text, str) or not text:
+        return []
+
+    candidates = []
+    patterns = (
+        r"(?<!\d)(13(?:\.\d+)?|15(?:\.\d+)?)\s*(?:인치|inch|형|\"|”|''|′′)(?!\d)",
+        r"(?<!\d)(13(?:\.\d+)?|15(?:\.\d+)?)-inch(?!\d)",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            normalized = _normalize_screen_inch_value(match.group(1))
+            if normalized in (13, 15) and normalized not in candidates:
+                candidates.append(normalized)
+    return candidates
+
+
+def _extract_ram_gb_candidates_from_text(text):
+    if not isinstance(text, str) or not text:
+        return []
+
+    candidates = []
+    patterns = (
+        r"(?<!\d)(8|16|24|32)\s*gb(?!\d)",
+        r"(?<!\d)(8|16|24|32)\s*기가(?!\d)",
+        r"램\s*(8|16|24|32)(?!\d)",
+        r"(?<!\d)(8|16|24|32)\s*램(?!\d)",
+        r"(?<!\d)(8|16|24|32)\s*g(?![a-z0-9가-힣])",
+        r"^(8|16|24|32)$",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            ram_gb = int(match.group(1))
+            if ram_gb in SUPPORTED_RAM_GB and ram_gb not in candidates:
+                candidates.append(ram_gb)
+    return candidates
+
+
+def _extract_ssd_gb_candidates_from_text(text):
+    if not isinstance(text, str) or not text:
+        return []
+
+    candidates = []
+    lowered = text.lower()
+
+    for pattern in (
+        r"(?<!\d)(1|2|4)\s*(?:tb|t|테라)(?![a-z0-9가-힣])",
+        r"(?<!\d)(256|512|1024|2048|4096)\s*gb(?!\d)",
+        r"(?<!\d)(256|512|1024|2048|4096)\s*기가(?!\d)",
+        r"(?<!\d)(256|512|1024|2048|4096)\s*ssd(?!\d)",
+        r"^(256|512|1024|2048|4096)$",
+    ):
+        for match in re.finditer(pattern, lowered, flags=re.IGNORECASE):
+            token = match.group(0)
+            if pattern.startswith("(?<!\\d)(1|2|4)"):
+                ssd_gb = TB_TO_GB_MAP.get(re.sub(r"\s+", "", token.lower()))
+            else:
+                ssd_gb = int(match.group(1))
+            if ssd_gb in SUPPORTED_SSD_GB and ssd_gb not in candidates:
+                candidates.append(ssd_gb)
+    return candidates
+
+
+def _apply_removal_mask(text, mask):
+    chars = list(text)
+    for index, should_remove in enumerate(mask):
+        if should_remove:
+            chars[index] = " "
+    return "".join(chars)
+
+
+def _normalize_for_spec_parsing_with_meta(text):
+    raw_text = _normalize_text(text)
+    if not raw_text:
+        return "", []
+
+    lowered = raw_text.lower()
+    removed_noise_fragments = []
+
+    strong_noise_mask = [False] * len(lowered)
+    protected_spans = _collect_spec_spans(lowered)
+    for pattern in _STRONG_NOISE_PATTERNS:
+        for match in pattern.finditer(lowered):
+            start, end = match.start(), match.end()
+            if _span_overlaps(protected_spans, start, end):
+                continue
+            fragment = lowered[start:end].strip()
+            if fragment:
+                removed_noise_fragments.append(fragment)
+            for idx in range(start, end):
+                strong_noise_mask[idx] = True
+    lowered = _apply_removal_mask(lowered, strong_noise_mask)
+
+    context_noise_mask = [False] * len(lowered)
+    protected_spans = _collect_spec_spans(lowered)
+    for match in _NUMERIC_TOKEN_PATTERN.finditer(lowered):
+        start, end = match.start(), match.end()
+        if _span_overlaps(protected_spans, start, end):
+            continue
+
+        window_start = max(0, start - _SPEC_WINDOW_SIZE)
+        window_end = min(len(lowered), end + _SPEC_WINDOW_SIZE)
+        window = lowered[window_start:window_end]
+
+        has_spec_context = any(keyword in window for keyword in _SPEC_CONTEXT_KEYWORDS_LOWER)
+        has_noise_context = any(keyword in window for keyword in _NOISE_CONTEXT_KEYWORDS_LOWER)
+        if has_noise_context and not has_spec_context:
+            fragment = lowered[start:end].strip()
+            if fragment:
+                removed_noise_fragments.append(fragment)
+            for idx in range(start, end):
+                context_noise_mask[idx] = True
+
+    lowered = _apply_removal_mask(lowered, context_noise_mask)
+    normalized = _normalize_text(lowered)
+    dedup_removed = list(dict.fromkeys(fragment for fragment in removed_noise_fragments if fragment))
+    return normalized, dedup_removed
+
+
+def normalize_for_spec_parsing(text: str) -> str:
+    normalized_text, _ = _normalize_for_spec_parsing_with_meta(text)
+    return normalized_text
 
 
 def _normalize_text(text):
@@ -59,6 +342,8 @@ def _normalize_self_check_fields(self_check_fields):
 
 
 def _contains_product_type(text):
+    if not isinstance(text, str):
+        return False
     lowered = text.lower()
     normalized = re.sub(r"\s+", "", lowered)
     return (
@@ -85,69 +370,24 @@ def _extract_unique_chip_candidates(text):
 
 
 def _extract_screen_inch_from_text(text):
-    if not isinstance(text, str):
+    screen_candidates = _extract_screen_inch_candidates_from_text(text)
+    if len(screen_candidates) != 1:
         return None
-
-    match = re.search(r"(?<!\d)(13|15)\s*(인치|inch)(?!\d)", text, flags=re.IGNORECASE)
-    if match:
-        return int(match.group(1))
-
-    match = re.search(r"(?<!\d)(13|15)-inch(?!\d)", text, flags=re.IGNORECASE)
-    if match:
-        return int(match.group(1))
-
-    return None
+    return screen_candidates[0]
 
 
 def _extract_ram_gb_from_text(text):
-    if not isinstance(text, str):
+    ram_candidates = _extract_ram_gb_candidates_from_text(text)
+    if len(ram_candidates) != 1:
         return None
-
-    patterns = (
-        r"(?<!\d)(8|16|24|32)\s*gb(?!\d)",
-        r"(?<!\d)(8|16|24|32)\s*기가(?!\d)",
-        r"램\s*(8|16|24|32)(?!\d)",
-        r"(?<!\d)(8|16|24|32)\s*램(?!\d)",
-        r"^(8|16|24|32)$",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if not match:
-            continue
-
-        ram_gb = int(match.group(1))
-        if ram_gb in SUPPORTED_RAM_GB:
-            return ram_gb
-
-    return None
+    return ram_candidates[0]
 
 
 def _extract_ssd_gb_from_text(text):
-    if not isinstance(text, str):
+    ssd_candidates = _extract_ssd_gb_candidates_from_text(text)
+    if len(ssd_candidates) != 1:
         return None
-
-    lowered = text.lower()
-    normalized = re.sub(r"\s+", "", lowered)
-    for token, converted in TB_TO_GB_MAP.items():
-        if token in normalized:
-            return converted
-
-    patterns = (
-        r"(?<!\d)(256|512|1024|2048|4096)\s*gb(?!\d)",
-        r"(?<!\d)(256|512|1024|2048|4096)\s*기가(?!\d)",
-        r"(?<!\d)(256|512|1024|2048|4096)\s*ssd(?!\d)",
-        r"^(256|512|1024|2048|4096)$",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if not match:
-            continue
-
-        ssd_gb = int(match.group(1))
-        if ssd_gb in SUPPORTED_SSD_GB:
-            return ssd_gb
-
-    return None
+    return ssd_candidates[0]
 
 
 def _record_pattern(detected_patterns, field_name, value, source, raw):
@@ -179,13 +419,28 @@ def _choose_numeric_candidate(values):
     return None, False
 
 
-def parse_listing_title(text, self_check_fields=None):
-    if not isinstance(text, str) or not text.strip():
+def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_text: Optional[str] = None, self_check_fields=None):
+    if not isinstance(title, str) or not title.strip():
         raise ValueError("매물 제목/본문 텍스트는 비어 있을 수 없습니다.")
 
     normalized_self_check = _normalize_self_check_fields(self_check_fields)
+    model_name_raw = normalized_self_check.get("모델명")
+    cpu_raw = normalized_self_check.get("CPU종류")
+    ram_raw = normalized_self_check.get("램 용량")
+    ssd_raw = normalized_self_check.get("SSD용량")
+
+    self_check_segments = []
+    if isinstance(self_check_text, str) and self_check_text.strip():
+        self_check_segments.append(self_check_text)
+    self_check_segments.extend(value for value in normalized_self_check.values() if value)
+
+    combined_text = _normalize_text(" ".join([title, body_text or "", " ".join(self_check_segments)]))
+    normalized_text, removed_noise_fragments = _normalize_for_spec_parsing_with_meta(combined_text)
+    parsing_text = normalized_text or _normalize_text(title.lower())
+
     detected_patterns = {}
     detected_conflicts = []
+    ambiguous_reasons = []
 
     product_type = None
     chip = None
@@ -194,13 +449,15 @@ def parse_listing_title(text, self_check_fields=None):
     ram_gb = None
     ssd_gb = None
     screen_inch_defaulted = False
+    screen_ambiguous = False
+    ram_ambiguous = False
+    ssd_ambiguous = False
 
-    model_name_raw = normalized_self_check.get("모델명")
     has_product_type_in_model = bool(model_name_raw and _contains_product_type(model_name_raw))
-    has_product_type_in_text = _contains_product_type(text)
+    has_product_type_in_text = _contains_product_type(parsing_text) or _contains_product_type(combined_text)
 
-    # Gate spec parsing with product type detection first.
     if not has_product_type_in_model and not has_product_type_in_text:
+        parse_failure_reason = MISSING_REQUIRED_REASON
         return {
             "parse_success": False,
             "product_type": None,
@@ -215,6 +472,15 @@ def parse_listing_title(text, self_check_fields=None):
             "missing_fields": list(REQUIRED_FIELDS),
             "detected_patterns": detected_patterns,
             "detected_conflicts": detected_conflicts,
+            "original_text": combined_text,
+            "normalized_text": parsing_text,
+            "removed_noise_fragments": removed_noise_fragments,
+            "parsed_chip": None,
+            "parsed_screen_inch": None,
+            "parsed_ram_gb": None,
+            "parsed_ssd_gb": None,
+            "parse_failure_reason": parse_failure_reason,
+            "ambiguous_reason": None,
         }
 
     if has_product_type_in_model:
@@ -222,62 +488,56 @@ def parse_listing_title(text, self_check_fields=None):
         _record_pattern(detected_patterns, "product_type", PRODUCT_TYPE, "self_check", model_name_raw)
     elif has_product_type_in_text:
         product_type = PRODUCT_TYPE
-        _record_pattern(detected_patterns, "product_type", PRODUCT_TYPE, "text", text)
+        _record_pattern(detected_patterns, "product_type", PRODUCT_TYPE, "text", title)
 
     model_chip_candidates = _extract_unique_chip_candidates(model_name_raw)
     if len(model_chip_candidates) == 1:
-        chip_model = model_chip_candidates[0]
-        chip = chip_model
-        _record_pattern(detected_patterns, "chip", chip_model, "self_check", model_name_raw)
+        chip = model_chip_candidates[0]
+        _record_pattern(detected_patterns, "chip", chip, "self_check", model_name_raw)
     elif len(model_chip_candidates) >= 2:
         chip_ambiguous = True
-        _record_conflict(
-            detected_conflicts,
-            "chip",
-            "unresolved",
-            None,
-            "self_check",
-            model_chip_candidates,
-        )
+        _record_conflict(detected_conflicts, "chip", "unresolved", None, "self_check", model_chip_candidates)
 
-    cpu_raw = normalized_self_check.get("CPU종류")
     cpu_chip_candidates = _extract_unique_chip_candidates(cpu_raw)
     if len(cpu_chip_candidates) == 1:
         chip_cpu = cpu_chip_candidates[0]
         if chip is not None and chip != chip_cpu:
             chip_ambiguous = True
-            _record_conflict(detected_conflicts, "chip", "self_check", chip_cpu, "self_check", chip)
+            _record_conflict(detected_conflicts, "chip", "self_check", chip, "self_check", chip_cpu)
         chip = chip_cpu
         _record_pattern(detected_patterns, "chip", chip_cpu, "self_check", cpu_raw)
     elif len(cpu_chip_candidates) >= 2:
         chip_ambiguous = True
-        _record_conflict(
-            detected_conflicts,
-            "chip",
-            "unresolved",
-            None,
-            "self_check",
-            cpu_chip_candidates,
-        )
+        _record_conflict(detected_conflicts, "chip", "unresolved", None, "self_check", cpu_chip_candidates)
 
-    ram_raw = normalized_self_check.get("램 용량")
-    ram_from_self_check = _extract_ram_gb_from_text(ram_raw)
-    if ram_from_self_check is not None:
-        ram_gb = ram_from_self_check
-        _record_pattern(detected_patterns, "ram_gb", ram_from_self_check, "self_check", ram_raw)
+    ram_self_candidates = _extract_ram_gb_candidates_from_text(normalize_for_spec_parsing(ram_raw))
+    ram_self_candidate, ram_self_ambiguous = _choose_numeric_candidate(ram_self_candidates)
+    if ram_self_candidate is not None:
+        ram_gb = ram_self_candidate
+        _record_pattern(detected_patterns, "ram_gb", ram_self_candidate, "self_check", ram_raw)
+    if ram_self_ambiguous:
+        ram_ambiguous = True
+        _record_conflict(detected_conflicts, "ram_gb", "unresolved", None, "self_check", ram_self_candidates)
 
-    ssd_raw = normalized_self_check.get("SSD용량")
-    ssd_from_self_check = _extract_ssd_gb_from_text(ssd_raw)
-    if ssd_from_self_check is not None:
-        ssd_gb = ssd_from_self_check
-        _record_pattern(detected_patterns, "ssd_gb", ssd_from_self_check, "self_check", ssd_raw)
+    ssd_self_candidates = _extract_ssd_gb_candidates_from_text(normalize_for_spec_parsing(ssd_raw))
+    ssd_self_candidate, ssd_self_ambiguous = _choose_numeric_candidate(ssd_self_candidates)
+    if ssd_self_candidate is not None:
+        ssd_gb = ssd_self_candidate
+        _record_pattern(detected_patterns, "ssd_gb", ssd_self_candidate, "self_check", ssd_raw)
+    if ssd_self_ambiguous:
+        ssd_ambiguous = True
+        _record_conflict(detected_conflicts, "ssd_gb", "unresolved", None, "self_check", ssd_self_candidates)
 
-    screen_from_model = _extract_screen_inch_from_text(model_name_raw)
-    if screen_from_model is not None:
-        screen_inch = screen_from_model
-        _record_pattern(detected_patterns, "screen_inch", screen_from_model, "self_check", model_name_raw)
+    model_screen_candidates = _extract_screen_inch_candidates_from_text(normalize_for_spec_parsing(model_name_raw))
+    model_screen_candidate, model_screen_ambiguous = _choose_numeric_candidate(model_screen_candidates)
+    if model_screen_candidate is not None:
+        screen_inch = model_screen_candidate
+        _record_pattern(detected_patterns, "screen_inch", model_screen_candidate, "self_check", model_name_raw)
+    if model_screen_ambiguous:
+        screen_ambiguous = True
+        _record_conflict(detected_conflicts, "screen_inch", "unresolved", None, "self_check", model_screen_candidates)
 
-    text_chip_candidates = _extract_unique_chip_candidates(text)
+    text_chip_candidates = _extract_unique_chip_candidates(parsing_text)
     if len(text_chip_candidates) == 1:
         chip_from_text = text_chip_candidates[0]
         if chip is None:
@@ -288,18 +548,47 @@ def parse_listing_title(text, self_check_fields=None):
             _record_conflict(detected_conflicts, "chip", "self_check", chip, "text", chip_from_text)
     elif len(text_chip_candidates) >= 2:
         chip_ambiguous = True
-        _record_conflict(
-            detected_conflicts,
-            "chip",
-            "unresolved",
-            None,
-            "text",
-            text_chip_candidates,
-        )
+        _record_conflict(detected_conflicts, "chip", "unresolved", None, "text", text_chip_candidates)
 
-    numeric_candidates = extract_numeric_candidates(text)
+    text_screen_candidates = _extract_screen_inch_candidates_from_text(parsing_text)
+    text_screen_candidate, text_screen_ambiguous = _choose_numeric_candidate(text_screen_candidates)
+    if screen_inch is None and text_screen_candidate is not None:
+        screen_inch = text_screen_candidate
+        _record_pattern(detected_patterns, "screen_inch", text_screen_candidate, "text", text_screen_candidate)
+    elif screen_inch is not None and text_screen_candidate is not None and screen_inch != text_screen_candidate:
+        screen_ambiguous = True
+        _record_conflict(detected_conflicts, "screen_inch", "self_check", screen_inch, "text", text_screen_candidate)
+    if text_screen_ambiguous:
+        screen_ambiguous = True
+        _record_conflict(detected_conflicts, "screen_inch", "unresolved", None, "text", text_screen_candidates)
 
-    screen_candidate, screen_ambiguous = _choose_numeric_candidate(numeric_candidates["screen_candidates"])
+    text_ram_candidates = _extract_ram_gb_candidates_from_text(parsing_text)
+    text_ram_candidate, text_ram_ambiguous = _choose_numeric_candidate(text_ram_candidates)
+    if ram_gb is None and text_ram_candidate is not None:
+        ram_gb = text_ram_candidate
+        _record_pattern(detected_patterns, "ram_gb", text_ram_candidate, "text", text_ram_candidate)
+    elif ram_gb is not None and text_ram_candidate is not None and ram_gb != text_ram_candidate:
+        ram_ambiguous = True
+        _record_conflict(detected_conflicts, "ram_gb", "self_check", ram_gb, "text", text_ram_candidate)
+    if text_ram_ambiguous:
+        ram_ambiguous = True
+        _record_conflict(detected_conflicts, "ram_gb", "unresolved", None, "text", text_ram_candidates)
+
+    text_ssd_candidates = _extract_ssd_gb_candidates_from_text(parsing_text)
+    text_ssd_candidate, text_ssd_ambiguous = _choose_numeric_candidate(text_ssd_candidates)
+    if ssd_gb is None and text_ssd_candidate is not None:
+        ssd_gb = text_ssd_candidate
+        _record_pattern(detected_patterns, "ssd_gb", text_ssd_candidate, "text", text_ssd_candidate)
+    elif ssd_gb is not None and text_ssd_candidate is not None and ssd_gb != text_ssd_candidate:
+        ssd_ambiguous = True
+        _record_conflict(detected_conflicts, "ssd_gb", "self_check", ssd_gb, "text", text_ssd_candidate)
+    if text_ssd_ambiguous:
+        ssd_ambiguous = True
+        _record_conflict(detected_conflicts, "ssd_gb", "unresolved", None, "text", text_ssd_candidates)
+
+    numeric_candidates = extract_numeric_candidates(parsing_text)
+
+    screen_candidate, numeric_screen_ambiguous = _choose_numeric_candidate(numeric_candidates["screen_candidates"])
     if screen_inch is None and screen_candidate is not None:
         screen_inch = screen_candidate
         _record_pattern(
@@ -310,9 +599,10 @@ def parse_listing_title(text, self_check_fields=None):
             numeric_candidates["detected_patterns"].get("screen_inch"),
         )
     elif screen_inch is not None and screen_candidate is not None and screen_inch != screen_candidate:
+        screen_ambiguous = True
         _record_conflict(detected_conflicts, "screen_inch", "self_check", screen_inch, "text", screen_candidate)
 
-    ram_candidate, ram_ambiguous = _choose_numeric_candidate(numeric_candidates["ram_candidates"])
+    ram_candidate, numeric_ram_ambiguous = _choose_numeric_candidate(numeric_candidates["ram_candidates"])
     if ram_gb is None and ram_candidate is not None:
         ram_gb = ram_candidate
         _record_pattern(
@@ -323,9 +613,10 @@ def parse_listing_title(text, self_check_fields=None):
             numeric_candidates["detected_patterns"].get("ram_gb"),
         )
     elif ram_gb is not None and ram_candidate is not None and ram_gb != ram_candidate:
+        ram_ambiguous = True
         _record_conflict(detected_conflicts, "ram_gb", "self_check", ram_gb, "text", ram_candidate)
 
-    ssd_candidate, ssd_ambiguous = _choose_numeric_candidate(numeric_candidates["ssd_candidates"])
+    ssd_candidate, numeric_ssd_ambiguous = _choose_numeric_candidate(numeric_candidates["ssd_candidates"])
     if ssd_gb is None and ssd_candidate is not None:
         ssd_gb = ssd_candidate
         _record_pattern(
@@ -336,9 +627,11 @@ def parse_listing_title(text, self_check_fields=None):
             numeric_candidates["detected_patterns"].get("ssd_gb"),
         )
     elif ssd_gb is not None and ssd_candidate is not None and ssd_gb != ssd_candidate:
+        ssd_ambiguous = True
         _record_conflict(detected_conflicts, "ssd_gb", "self_check", ssd_gb, "text", ssd_candidate)
 
-    if screen_ambiguous and screen_inch is None:
+    if numeric_screen_ambiguous and screen_inch is None:
+        screen_ambiguous = True
         _record_conflict(
             detected_conflicts,
             "screen_inch",
@@ -347,33 +640,19 @@ def parse_listing_title(text, self_check_fields=None):
             "text",
             numeric_candidates["screen_candidates"],
         )
-
-    if ram_ambiguous and ram_gb is None:
-        _record_conflict(
-            detected_conflicts,
-            "ram_gb",
-            "unresolved",
-            None,
-            "text",
-            numeric_candidates["ram_candidates"],
-        )
-
-    if ssd_ambiguous and ssd_gb is None:
-        _record_conflict(
-            detected_conflicts,
-            "ssd_gb",
-            "unresolved",
-            None,
-            "text",
-            numeric_candidates["ssd_candidates"],
-        )
+    if numeric_ram_ambiguous and ram_gb is None:
+        ram_ambiguous = True
+        _record_conflict(detected_conflicts, "ram_gb", "unresolved", None, "text", numeric_candidates["ram_candidates"])
+    if numeric_ssd_ambiguous and ssd_gb is None:
+        ssd_ambiguous = True
+        _record_conflict(detected_conflicts, "ssd_gb", "unresolved", None, "text", numeric_candidates["ssd_candidates"])
 
     if product_type == PRODUCT_TYPE and screen_inch is None:
         screen_inch = DEFAULT_SCREEN_INCH
         screen_inch_defaulted = True
         _record_pattern(detected_patterns, "screen_inch", DEFAULT_SCREEN_INCH, "default", None)
 
-    has_base_model_keyword = contains_base_model_keyword(text) or contains_base_model_keyword(model_name_raw)
+    has_base_model_keyword = contains_base_model_keyword(parsing_text) or contains_base_model_keyword(model_name_raw)
     should_apply_base_fallback = (
         product_type == PRODUCT_TYPE
         and chip is not None
@@ -392,12 +671,7 @@ def parse_listing_title(text, self_check_fields=None):
                 if ssd_gb is not None:
                     _record_pattern(detected_patterns, "ssd_gb", ssd_gb, "fallback_base_model", "기본형/깡통")
 
-    parsed_fields = {
-        "product_type": product_type,
-        "chip": chip,
-        "ram_gb": ram_gb,
-        "ssd_gb": ssd_gb,
-    }
+    parsed_fields = {"product_type": product_type, "chip": chip, "ram_gb": ram_gb, "ssd_gb": ssd_gb}
     missing_fields = [field for field in REQUIRED_FIELDS if parsed_fields.get(field) is None]
 
     confidence_score = 0
@@ -419,7 +693,9 @@ def parse_listing_title(text, self_check_fields=None):
 
     if chip_ambiguous:
         parse_success = False
+        chip = None
         unit_validation_reason = MULTIPLE_CHIPS_REASON
+        ambiguous_reasons.append(MULTIPLE_CHIPS_REASON)
     elif not parse_success:
         unit_validation_reason = MISSING_REQUIRED_REASON
     elif product_type == PRODUCT_TYPE:
@@ -430,8 +706,21 @@ def parse_listing_title(text, self_check_fields=None):
     else:
         unit_validation_reason = MISSING_REQUIRED_REASON
 
+    if screen_ambiguous:
+        ambiguous_reasons.append("screen_inch_ambiguous")
+    if ram_ambiguous:
+        ambiguous_reasons.append("ram_gb_ambiguous")
+    if ssd_ambiguous:
+        ambiguous_reasons.append("ssd_gb_ambiguous")
+    if parse_success and any([screen_ambiguous, ram_ambiguous, ssd_ambiguous]):
+        parse_success = False
+        unit_validation_reason = AMBIGUOUS_NUMERIC_REASON
+
     if parse_success:
         unit_valid = True
+
+    ambiguous_reason = ", ".join(list(dict.fromkeys(ambiguous_reasons))) if ambiguous_reasons else None
+    parse_failure_reason = None if parse_success else (ambiguous_reason or unit_validation_reason or MISSING_REQUIRED_REASON)
 
     return {
         "parse_success": parse_success,
@@ -447,4 +736,17 @@ def parse_listing_title(text, self_check_fields=None):
         "missing_fields": missing_fields,
         "detected_patterns": detected_patterns,
         "detected_conflicts": detected_conflicts,
+        "original_text": combined_text,
+        "normalized_text": parsing_text,
+        "removed_noise_fragments": removed_noise_fragments,
+        "parsed_chip": chip,
+        "parsed_screen_inch": screen_inch,
+        "parsed_ram_gb": ram_gb,
+        "parsed_ssd_gb": ssd_gb,
+        "parse_failure_reason": parse_failure_reason,
+        "ambiguous_reason": ambiguous_reason,
     }
+
+
+def parse_listing_title(text, self_check_fields=None):
+    return parse_listing_text(title=text, self_check_fields=self_check_fields)

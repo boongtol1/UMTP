@@ -8,7 +8,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.macbook_air_units import get_macbook_air_base_spec  # noqa: E402
-from src.spec_parser import contains_base_model_keyword, parse_listing_title  # noqa: E402
+from src.spec_parser import contains_base_model_keyword, parse_listing_text, parse_listing_title  # noqa: E402
 
 
 class SpecParserBaseModelFallbackTest(unittest.TestCase):
@@ -117,6 +117,98 @@ class SpecParserBaseModelFallbackTest(unittest.TestCase):
         parsed = parse_listing_title("맥북에어 m1 m1 8gb 256gb")
         self.assertTrue(parsed["parse_success"])
         self.assertEqual(parsed["chip"], "M1")
+
+    def test_noise_filter_keeps_spec_and_removes_purchase_date(self):
+        parsed = parse_listing_title("맥북에어 M5 15인치 16GB 512GB 4월13일 구매")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["chip"], "M5")
+        self.assertEqual(parsed["screen_inch"], 15)
+        self.assertEqual(parsed["ram_gb"], 16)
+        self.assertEqual(parsed["ssd_gb"], 512)
+
+    def test_noise_filter_does_not_use_cycle_count_as_screen(self):
+        parsed = parse_listing_title("맥북에어 M5 16GB 512GB 사이클 13회")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["chip"], "M5")
+        self.assertEqual(parsed["screen_inch"], 13)
+        self.assertEqual(parsed["ram_gb"], 16)
+        self.assertEqual(parsed["ssd_gb"], 512)
+
+    def test_noise_filter_removes_phone_number(self):
+        parsed = parse_listing_title("맥북에어 M5 16GB 512GB 010-1234-5678")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["chip"], "M5")
+        self.assertEqual(parsed["screen_inch"], 13)
+        self.assertEqual(parsed["ram_gb"], 16)
+        self.assertEqual(parsed["ssd_gb"], 512)
+
+    def test_noise_filter_removes_price(self):
+        parsed = parse_listing_title("맥북에어 M5 15인치 16GB 512GB 165만원")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["chip"], "M5")
+        self.assertEqual(parsed["screen_inch"], 15)
+        self.assertEqual(parsed["ram_gb"], 16)
+        self.assertEqual(parsed["ssd_gb"], 512)
+
+    def test_noise_filter_does_not_parse_macos_version_as_screen(self):
+        parsed = parse_listing_title("맥북에어 M5 16GB 512GB macOS 15")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["chip"], "M5")
+        self.assertEqual(parsed["screen_inch"], 13)
+        self.assertEqual(parsed["ram_gb"], 16)
+        self.assertEqual(parsed["ssd_gb"], 512)
+
+    def test_noise_filter_does_not_parse_core_count_as_ram(self):
+        parsed = parse_listing_title("맥북에어 M5 15인치 16GB 512GB 8코어 GPU")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["chip"], "M5")
+        self.assertEqual(parsed["screen_inch"], 15)
+        self.assertEqual(parsed["ram_gb"], 16)
+        self.assertEqual(parsed["ssd_gb"], 512)
+
+    def test_short_tokens_parse_quote_screen_ram_and_tb(self):
+        parsed = parse_listing_title("맥북에어 M5 15'' 16g 1t")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["chip"], "M5")
+        self.assertEqual(parsed["screen_inch"], 15)
+        self.assertEqual(parsed["ram_gb"], 16)
+        self.assertEqual(parsed["ssd_gb"], 1024)
+
+    def test_decimal_screen_and_short_tokens_parse(self):
+        parsed = parse_listing_title("맥북에어 M5 13.6인치 24g 2t")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["chip"], "M5")
+        self.assertEqual(parsed["screen_inch"], 13)
+        self.assertEqual(parsed["ram_gb"], 24)
+        self.assertEqual(parsed["ssd_gb"], 2048)
+
+    def test_hyphen_screen_and_short_tokens_parse(self):
+        parsed = parse_listing_title("맥북에어 M5 15-inch 32g 4t")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["chip"], "M5")
+        self.assertEqual(parsed["screen_inch"], 15)
+        self.assertEqual(parsed["ram_gb"], 32)
+        self.assertEqual(parsed["ssd_gb"], 4096)
+
+    def test_distance_minutes_not_treated_as_screen(self):
+        parsed = parse_listing_title("맥북에어 M5 15분 거리 16g 1t")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["chip"], "M5")
+        self.assertEqual(parsed["screen_inch"], 13)
+        self.assertEqual(parsed["ram_gb"], 16)
+        self.assertEqual(parsed["ssd_gb"], 1024)
+
+    def test_parse_listing_text_combines_title_body_and_self_check_text(self):
+        parsed = parse_listing_text(
+            title="맥북에어 M5",
+            body_text="15인치 16GB",
+            self_check_text="SSD 512GB",
+        )
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["chip"], "M5")
+        self.assertEqual(parsed["screen_inch"], 15)
+        self.assertEqual(parsed["ram_gb"], 16)
+        self.assertEqual(parsed["ssd_gb"], 512)
 
 
 if __name__ == "__main__":
