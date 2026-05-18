@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 
@@ -14,9 +15,20 @@ from src.user_settings_service import _poll_target_row_to_dict, upsert_user_fair
 class _FakeCursor:
     def __init__(self):
         self.executed = []
+        self._last_query = ""
 
     def execute(self, query, params=None):
         self.executed.append((query, params))
+        self._last_query = query or ""
+
+    def fetchone(self):
+        lowered = " ".join((self._last_query or "").lower().split())
+        if lowered.startswith("select current_timestamp"):
+            return (datetime(2026, 5, 18, 16, 0, 0),)
+        return None
+
+    def fetchall(self):
+        return []
 
     def close(self):
         return None
@@ -96,8 +108,13 @@ class UserSettingsTargetBuyPriceTest(unittest.TestCase):
                     )
 
         self.assertTrue(result.get("ok"))
-        self.assertEqual(len(fake_cursor.executed), 1)
-        executed_query = fake_cursor.executed[0][0]
+        insert_queries = [
+            query
+            for query, _params in fake_cursor.executed
+            if "insert into user_fair_prices" in " ".join(query.lower().split())
+        ]
+        self.assertEqual(len(insert_queries), 1)
+        executed_query = insert_queries[0]
         lowered = " ".join(executed_query.lower().split())
         self.assertIn("insert into user_fair_prices", lowered)
         self.assertIn("fair_price_krw", lowered)

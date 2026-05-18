@@ -1,9 +1,12 @@
 import logging
+from datetime import datetime
 from decimal import Decimal
 
 from src.alert_price_direction import (
     DEFAULT_ALERT_PRICE_DIRECTION,
     compute_target_buy_price_krw,
+    is_listing_alert_match,
+    passes_price_bounds,
     is_valid_alert_drop_rate_percent,
     is_valid_alert_price_direction,
     normalize_alert_price_direction,
@@ -131,6 +134,376 @@ def _normalize_alert_bounds(
         return normalized_min, None
 
     return None, normalized_max
+
+
+def _is_unknown_column_error(exc, *column_names):
+    lowered_exc = str(exc).lower()
+    if "unknown column" not in lowered_exc:
+        return False
+    if not column_names:
+        return True
+    return any(column_name.lower() in lowered_exc for column_name in column_names)
+
+
+def _coerce_datetime(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.replace(tzinfo=None)
+        return value
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        normalized = normalized.replace("T", " ")
+        if normalized.endswith("Z"):
+            normalized = normalized[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            parsed = None
+            for date_format in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"):
+                try:
+                    parsed = datetime.strptime(normalized, date_format)
+                    break
+                except ValueError:
+                    continue
+            if parsed is None:
+                return None
+        if parsed.tzinfo is not None:
+            return parsed.replace(tzinfo=None)
+        return parsed
+    return None
+
+
+def _format_saved_at_notice_message(missed_candidate_count):
+    normalized_count = _safe_int(missed_candidate_count) or 0
+    return f"조건 변경 사이에 새 기준에 맞는 매물이 {normalized_count}개 있었어요."
+
+
+def _build_rule_snapshot(
+    *,
+    fair_price_krw,
+    alert_drop_rate_percent,
+    target_buy_price_krw=None,
+    alert_price_direction=DEFAULT_ALERT_PRICE_DIRECTION,
+    min_price_krw=None,
+    max_price_krw=None,
+    enabled=True,
+):
+    normalized_fair_price_krw = _safe_int(fair_price_krw)
+    normalized_alert_drop_rate_percent = _safe_float(alert_drop_rate_percent)
+    normalized_target_buy_price_krw = _safe_int(target_buy_price_krw)
+    normalized_alert_price_direction = normalize_alert_price_direction(alert_price_direction)
+    normalized_min_price_krw = _safe_int(min_price_krw)
+    normalized_max_price_krw = _safe_int(max_price_krw)
+    normalized_enabled = _safe_bool(enabled, default=True)
+
+    if normalized_target_buy_price_krw is None:
+        normalized_target_buy_price_krw = compute_target_buy_price_krw(
+            normalized_fair_price_krw,
+            normalized_alert_drop_rate_percent,
+        )
+
+    return {
+        "fair_price_krw": normalized_fair_price_krw,
+        "alert_drop_rate_percent": normalized_alert_drop_rate_percent,
+        "target_buy_price_krw": normalized_target_buy_price_krw,
+        "alert_price_direction": normalized_alert_price_direction,
+        "min_price_krw": normalized_min_price_krw,
+        "max_price_krw": normalized_max_price_krw,
+        "enabled": normalized_enabled,
+    }
+
+
+def _is_price_match_for_rule(listing_price_krw, rule_snapshot):
+    if not isinstance(rule_snapshot, dict):
+        return False
+    if not _safe_bool(rule_snapshot.get("enabled"), default=True):
+        return False
+
+    normalized_listing_price_krw = _safe_int(listing_price_krw)
+    if normalized_listing_price_krw is None:
+        return False
+
+    target_buy_price_krw = _safe_int(rule_snapshot.get("target_buy_price_krw"))
+    if target_buy_price_krw is None:
+        target_buy_price_krw = compute_target_buy_price_krw(
+            rule_snapshot.get("fair_price_krw"),
+            rule_snapshot.get("alert_drop_rate_percent"),
+        )
+    if target_buy_price_krw is None:
+        return False
+
+    alert_price_direction = normalize_alert_price_direction(rule_snapshot.get("alert_price_direction"))
+    if not is_listing_alert_match(
+        normalized_listing_price_krw,
+        target_buy_price_krw,
+        alert_price_direction,
+    ):
+        return False
+
+    return passes_price_bounds(
+        normalized_listing_price_krw,
+        alert_price_direction,
+        min_price_krw=rule_snapshot.get("min_price_krw"),
+        max_price_krw=rule_snapshot.get("max_price_krw"),
+    )
+
+
+def _fetch_existing_user_fair_price_rule_state(
+    cursor,
+    *,
+    user_id,
+    product_type,
+    chip,
+    screen_inch,
+    ram_gb,
+    ssd_gb,
+):
+    params = (
+        user_id,
+        product_type,
+        chip,
+        screen_inch,
+        ram_gb,
+        ssd_gb,
+    )
+    queries = (
+        (
+            """
+            SELECT
+                id,
+                saved_at,
+                last_poll_requested_at,
+                fair_price_krw,
+                alert_drop_rate_percent,
+                target_buy_price_krw,
+                alert_price_direction,
+                min_price_krw,
+                max_price_krw,
+                enabled
+            FROM user_fair_prices
+            WHERE user_id = %s
+              AND product_type = %s
+              AND chip = %s
+              AND screen_inch = %s
+              AND ram_gb = %s
+              AND ssd_gb = %s
+            LIMIT 1
+            """,
+            (
+                "id",
+                "saved_at",
+                "last_poll_requested_at",
+                "fair_price_krw",
+                "alert_drop_rate_percent",
+                "target_buy_price_krw",
+                "alert_price_direction",
+                "min_price_krw",
+                "max_price_krw",
+                "enabled",
+            ),
+        ),
+        (
+            """
+            SELECT
+                id,
+                saved_at,
+                last_poll_requested_at,
+                fair_price_krw,
+                alert_drop_rate_percent,
+                target_buy_price_krw,
+                alert_price_direction,
+                enabled
+            FROM user_fair_prices
+            WHERE user_id = %s
+              AND product_type = %s
+              AND chip = %s
+              AND screen_inch = %s
+              AND ram_gb = %s
+              AND ssd_gb = %s
+            LIMIT 1
+            """,
+            (
+                "id",
+                "saved_at",
+                "last_poll_requested_at",
+                "fair_price_krw",
+                "alert_drop_rate_percent",
+                "target_buy_price_krw",
+                "alert_price_direction",
+                "enabled",
+            ),
+        ),
+        (
+            """
+            SELECT
+                id,
+                saved_at,
+                last_poll_requested_at,
+                fair_price_krw,
+                alert_drop_rate_percent,
+                enabled
+            FROM user_fair_prices
+            WHERE user_id = %s
+              AND product_type = %s
+              AND chip = %s
+              AND screen_inch = %s
+              AND ram_gb = %s
+              AND ssd_gb = %s
+            LIMIT 1
+            """,
+            (
+                "id",
+                "saved_at",
+                "last_poll_requested_at",
+                "fair_price_krw",
+                "alert_drop_rate_percent",
+                "enabled",
+            ),
+        ),
+        (
+            """
+            SELECT
+                id,
+                last_poll_requested_at,
+                fair_price_krw,
+                alert_drop_rate_percent
+            FROM user_fair_prices
+            WHERE user_id = %s
+              AND product_type = %s
+              AND chip = %s
+              AND screen_inch = %s
+              AND ram_gb = %s
+              AND ssd_gb = %s
+            LIMIT 1
+            """,
+            (
+                "id",
+                "last_poll_requested_at",
+                "fair_price_krw",
+                "alert_drop_rate_percent",
+            ),
+        ),
+    )
+
+    for query, columns in queries:
+        try:
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            row_data = {}
+            for index, column_name in enumerate(columns):
+                if index < len(row):
+                    row_data[column_name] = row[index]
+            previous_saved_at = _coerce_datetime(row_data.get("saved_at")) or _coerce_datetime(
+                row_data.get("last_poll_requested_at")
+            )
+            return {
+                "rule_id": _safe_int(row_data.get("id")),
+                "previous_saved_at": previous_saved_at,
+                "rule_snapshot": _build_rule_snapshot(
+                    fair_price_krw=row_data.get("fair_price_krw"),
+                    alert_drop_rate_percent=row_data.get("alert_drop_rate_percent"),
+                    target_buy_price_krw=row_data.get("target_buy_price_krw"),
+                    alert_price_direction=row_data.get("alert_price_direction"),
+                    min_price_krw=row_data.get("min_price_krw"),
+                    max_price_krw=row_data.get("max_price_krw"),
+                    enabled=row_data.get("enabled"),
+                ),
+            }
+        except Exception as exc:
+            if not _is_unknown_column_error(exc):
+                raise
+            continue
+
+    return None
+
+
+def _count_missed_candidates_between_saved_windows(
+    cursor,
+    *,
+    user_id,
+    rule_id,
+    previous_saved_at,
+    current_saved_at,
+    old_rule_snapshot,
+    new_rule_snapshot,
+):
+    normalized_rule_id = _safe_int(rule_id)
+    if normalized_rule_id is None or normalized_rule_id <= 0:
+        return 0
+
+    previous_saved_at_dt = _coerce_datetime(previous_saved_at)
+    current_saved_at_dt = _coerce_datetime(current_saved_at)
+    if previous_saved_at_dt is None or current_saved_at_dt is None:
+        return 0
+    if previous_saved_at_dt >= current_saved_at_dt:
+        return 0
+    if not _safe_bool(new_rule_snapshot.get("enabled"), default=True):
+        return 0
+
+    try:
+        cursor.execute(
+            """
+            SELECT product_id, sort_date, price_krw
+            FROM analysis_jobs
+            WHERE user_id = %s
+              AND watch_rule_id = %s
+              AND sort_date IS NOT NULL
+              AND sort_date >= %s
+              AND sort_date < %s
+              AND price_krw IS NOT NULL
+            ORDER BY sort_date ASC
+            """,
+            (
+                user_id,
+                normalized_rule_id,
+                previous_saved_at_dt,
+                current_saved_at_dt,
+            ),
+        )
+    except Exception as exc:
+        if _is_unknown_column_error(exc):
+            return 0
+        raise
+
+    rows = cursor.fetchall() or []
+    if not rows:
+        return 0
+
+    missed_count = 0
+    counted_product_ids = set()
+    for row in rows:
+        if not isinstance(row, (tuple, list)) or len(row) < 3:
+            continue
+        product_id = _safe_text(row[0])
+        listing_sort_date = _coerce_datetime(row[1])
+        listing_price_krw = _safe_int(row[2])
+        if listing_sort_date is None or listing_price_krw is None:
+            continue
+        if listing_sort_date < previous_saved_at_dt or listing_sort_date >= current_saved_at_dt:
+            continue
+
+        if product_id is not None:
+            dedupe_key = product_id
+            if dedupe_key in counted_product_ids:
+                continue
+        else:
+            dedupe_key = f"anon:{listing_sort_date.isoformat()}:{listing_price_krw}"
+            if dedupe_key in counted_product_ids:
+                continue
+
+        old_rule_match = _is_price_match_for_rule(listing_price_krw, old_rule_snapshot)
+        new_rule_match = _is_price_match_for_rule(listing_price_krw, new_rule_snapshot)
+        if new_rule_match and not old_rule_match:
+            counted_product_ids.add(dedupe_key)
+            missed_count += 1
+
+    return missed_count
 
 
 def _build_recommended_search_keyword(product_type, chip, screen_inch=None, ram_gb=None, ssd_gb=None):
@@ -793,9 +1166,50 @@ def upsert_user_fair_price_setting(
     connection = None
     cursor = None
     immediate_poll_requested = bool(enabled)
+    previous_saved_at = None
+    current_saved_at = None
+    missed_candidate_count = 0
+    rule_id = None
+    old_rule_snapshot = None
+    new_rule_snapshot = _build_rule_snapshot(
+        fair_price_krw=normalized_fair_price_krw,
+        alert_drop_rate_percent=normalized_alert_drop_rate_percent,
+        target_buy_price_krw=compute_target_buy_price_krw(
+            normalized_fair_price_krw,
+            normalized_alert_drop_rate_percent,
+        ),
+        alert_price_direction=normalized_alert_price_direction,
+        min_price_krw=normalized_min_price_krw,
+        max_price_krw=normalized_max_price_krw,
+        enabled=enabled,
+    )
     try:
         connection = get_connection()
         cursor = connection.cursor()
+        existing_rule_state = _fetch_existing_user_fair_price_rule_state(
+            cursor,
+            user_id=normalized_user_id,
+            product_type=normalized_product_type,
+            chip=normalized_chip,
+            screen_inch=normalized_screen_inch,
+            ram_gb=normalized_ram_gb,
+            ssd_gb=normalized_ssd_gb,
+        )
+        if isinstance(existing_rule_state, dict):
+            previous_saved_at = _coerce_datetime(existing_rule_state.get("previous_saved_at"))
+            old_rule_snapshot = existing_rule_state.get("rule_snapshot")
+            rule_id = _safe_int(existing_rule_state.get("rule_id"))
+
+        try:
+            cursor.execute("SELECT CURRENT_TIMESTAMP")
+            now_row = cursor.fetchone()
+            if now_row is not None and len(now_row) > 0:
+                current_saved_at = _coerce_datetime(now_row[0])
+        except Exception:
+            current_saved_at = None
+        if current_saved_at is None:
+            current_saved_at = datetime.now()
+
         try:
             cursor.execute(
                 """
@@ -1089,7 +1503,9 @@ def upsert_user_fair_price_setting(
             cursor.execute(
                 """
                 UPDATE user_fair_prices
-                SET saved_at = CURRENT_TIMESTAMP
+                SET
+                    saved_at = %s,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE user_id = %s
                   AND product_type = %s
                   AND chip = %s
@@ -1098,6 +1514,7 @@ def upsert_user_fair_price_setting(
                   AND ssd_gb = %s
                 """,
                 (
+                    current_saved_at,
                     normalized_user_id,
                     normalized_product_type,
                     normalized_chip,
@@ -1110,12 +1527,36 @@ def upsert_user_fair_price_setting(
             if "unknown column" not in str(exc).lower() or "saved_at" not in str(exc).lower():
                 raise
 
+        if (
+            previous_saved_at is not None
+            and current_saved_at is not None
+            and old_rule_snapshot is not None
+            and rule_id is not None
+        ):
+            missed_candidate_count = _count_missed_candidates_between_saved_windows(
+                cursor,
+                user_id=normalized_user_id,
+                rule_id=rule_id,
+                previous_saved_at=previous_saved_at,
+                current_saved_at=current_saved_at,
+                old_rule_snapshot=old_rule_snapshot,
+                new_rule_snapshot=new_rule_snapshot,
+            )
+
         connection.commit()
+        response_message = "사용자 공정가 설정 저장 완료"
+        if missed_candidate_count > 0:
+            response_message = _format_saved_at_notice_message(missed_candidate_count)
+
         return {
             "ok": True,
-            "message": "사용자 공정가 설정 저장 완료",
+            "message": response_message,
             "immediate_poll_requested": immediate_poll_requested,
+            "saved_at": current_saved_at,
+            "previous_saved_at": previous_saved_at,
+            "missed_candidate_count": missed_candidate_count,
             "item": {
+                "id": rule_id,
                 "user_id": normalized_user_id,
                 "product_type": normalized_product_type,
                 "chip": normalized_chip,
