@@ -6,13 +6,35 @@ from dotenv import load_dotenv
 try:
     from src.alert_price_direction import ABOVE_OR_EQUAL, BELOW_OR_EQUAL, normalize_alert_price_direction
     from src.db import get_connection
+    from src.push_token_service import (
+        deactivate_user_push_token,
+        list_active_user_push_tokens,
+        mark_user_push_token_sent,
+    )
     from src.telegram_notifier import send_telegram_alert
     from src.user_alert_settings import resolve_user_alert_delivery_policy
 except ModuleNotFoundError:
     from alert_price_direction import ABOVE_OR_EQUAL, BELOW_OR_EQUAL, normalize_alert_price_direction
     from db import get_connection
+    from push_token_service import (
+        deactivate_user_push_token,
+        list_active_user_push_tokens,
+        mark_user_push_token_sent,
+    )
     from telegram_notifier import send_telegram_alert
     from user_alert_settings import resolve_user_alert_delivery_policy
+
+try:  # pragma: no cover - optional runtime dependency
+    import firebase_admin
+    from firebase_admin import credentials, messaging
+except Exception:  # pragma: no cover
+    firebase_admin = None
+    credentials = None
+    messaging = None
+
+
+_FIREBASE_INIT_ATTEMPTED = False
+_FIREBASE_INIT_ERROR = None
 
 
 def _normalize_optional_text(value):
@@ -356,6 +378,147 @@ def _telegram_configured():
     return bool(bot_token)
 
 
+def _fcm_configured():
+    load_dotenv()
+    has_json = bool((os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON") or "").strip())
+    has_file = bool((os.getenv("FIREBASE_SERVICE_ACCOUNT_FILE") or "").strip())
+    has_google_cred_file = bool((os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "").strip())
+    return has_json or has_file or has_google_cred_file
+
+
+def _ensure_firebase_initialized():
+    global _FIREBASE_INIT_ATTEMPTED, _FIREBASE_INIT_ERROR
+
+    if _FIREBASE_INIT_ATTEMPTED:
+        return _FIREBASE_INIT_ERROR is None, _FIREBASE_INIT_ERROR
+
+    _FIREBASE_INIT_ATTEMPTED = True
+
+    if firebase_admin is None or credentials is None:
+        _FIREBASE_INIT_ERROR = "firebase_admin_not_installed"
+        return False, _FIREBASE_INIT_ERROR
+
+    try:
+        if firebase_admin._apps:
+            _FIREBASE_INIT_ERROR = None
+            return True, None
+    except Exception:
+        pass
+
+    load_dotenv()
+    credential_json = _normalize_optional_text(os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON"))
+    credential_file = _normalize_optional_text(os.getenv("FIREBASE_SERVICE_ACCOUNT_FILE"))
+    project_id = _normalize_optional_text(os.getenv("FIREBASE_PROJECT_ID"))
+
+    options = {}
+    if project_id is not None:
+        options["projectId"] = project_id
+
+    try:
+        if credential_json is not None:
+            credential_obj = credentials.Certificate(json.loads(credential_json))
+            firebase_admin.initialize_app(credential=credential_obj, options=options or None)
+        elif credential_file is not None:
+            credential_obj = credentials.Certificate(credential_file)
+            firebase_admin.initialize_app(credential=credential_obj, options=options or None)
+        else:
+            firebase_admin.initialize_app(options=options or None)
+
+        _FIREBASE_INIT_ERROR = None
+        return True, None
+    except Exception as exc:
+        _FIREBASE_INIT_ERROR = str(exc)
+        return False, _FIREBASE_INIT_ERROR
+
+
+def _is_unregistered_push_token_error(error_text):
+    lowered = (error_text or "").lower()
+    return (
+        "unregistered" in lowered
+        or "registration token is not a valid fcm registration token" in lowered
+        or "requested entity was not found" in lowered
+        or "notfound" in lowered
+    )
+
+
+def _build_push_notification_payload(alert):
+    title = _normalize_optional_text(alert.get("title")) or "UMTP 새 매물 알림"
+    listing_price_krw = _safe_int(alert.get("price_krw"))
+    risk_level = _normalize_optional_text(alert.get("risk_level"))
+    risk_label = _build_formatted_risk_label(risk_level)
+
+    body = _normalize_optional_text(alert.get("body_excerpt"))
+    if body is None:
+        body = _normalize_optional_text(alert.get("message"))
+    if body is None:
+        segments = []
+        if listing_price_krw is not None:
+            segments.append(f"{listing_price_krw:,}원")
+        if risk_label != "정보 없음":
+            segments.append(f"위험도 {risk_label}")
+        body = " · ".join(segments) if segments else "새로운 매물이 등록되었습니다."
+
+    data_payload = {
+        "alert_id": str(_safe_int(alert.get("id")) or ""),
+        "listing_title": title,
+        "listing_price_krw": str(listing_price_krw) if listing_price_krw is not None else "",
+        "risk_level": _normalize_optional_text(alert.get("risk_level")) or "",
+        "product_id": _normalize_optional_text(alert.get("product_id")) or "",
+        "url": _normalize_optional_text(alert.get("url")) or "",
+        "trigger_reason": _normalize_optional_text(alert.get("trigger_reason")) or "",
+    }
+    data_payload = {key: value for key, value in data_payload.items() if isinstance(value, str)}
+    return title, body, data_payload
+
+
+def _send_fcm_to_user(user_id, alert):
+    normalized_user_id = _normalize_optional_text(user_id)
+    if normalized_user_id is None:
+        return {"sent": 0, "failed": 0, "reason": "invalid_user_id", "attempted": 0}
+
+    push_tokens = list_active_user_push_tokens(normalized_user_id, platform="android")
+    if not push_tokens:
+        return {"sent": 0, "failed": 0, "reason": "no_active_push_tokens", "attempted": 0}
+
+    if not _fcm_configured():
+        return {"sent": 0, "failed": 0, "reason": "fcm_credentials_missing", "attempted": 0}
+
+    ready, init_error = _ensure_firebase_initialized()
+    if not ready:
+        return {"sent": 0, "failed": len(push_tokens), "reason": init_error or "firebase_init_failed", "attempted": len(push_tokens)}
+
+    title, body, data_payload = _build_push_notification_payload(alert)
+    sent_count = 0
+    failed_count = 0
+
+    for token_row in push_tokens:
+        token_id = token_row.get("id")
+        token = _normalize_optional_text(token_row.get("token"))
+        if token is None:
+            failed_count += 1
+            continue
+
+        try:
+            message = messaging.Message(  # type: ignore[union-attr]
+                token=token,
+                notification=messaging.Notification(title=title, body=body),  # type: ignore[union-attr]
+                data=data_payload,
+            )
+            messaging.send(message)  # type: ignore[union-attr]
+            if token_id is not None:
+                mark_user_push_token_sent(token_id)
+            sent_count += 1
+        except Exception as exc:
+            failed_count += 1
+            error_text = str(exc)
+            if token_id is not None and _is_unregistered_push_token_error(error_text):
+                deactivate_user_push_token(token_id, error_message=error_text)
+
+    if sent_count > 0:
+        return {"sent": sent_count, "failed": failed_count, "reason": "fcm_sent", "attempted": len(push_tokens)}
+    return {"sent": 0, "failed": failed_count, "reason": "fcm_send_failed", "attempted": len(push_tokens)}
+
+
 def _build_telegram_message(alert):
     message = _normalize_optional_text(alert.get("message"))
     if message:
@@ -562,7 +725,7 @@ def send_alert_event(alert):
     allow_global_fallback = bool(delivery_policy.get("allow_global_fallback"))
 
     if not user_alert_enabled:
-        print(f"[notification_worker] telegram skipped: alerts disabled for user_id={user_id}")
+        print(f"[notification_worker] delivery skipped: alerts disabled for user_id={user_id}")
         mark_alert_event_app_only(alert_id)
         return {
             "ok": True,
@@ -571,56 +734,85 @@ def send_alert_event(alert):
             "reason": "alerts_disabled",
         }
 
+    push_result = _send_fcm_to_user(user_id, alert)
+    push_sent = int(push_result.get("sent", 0))
+    push_attempted = int(push_result.get("attempted", 0))
+    push_reason = _normalize_optional_text(push_result.get("reason"))
+
+    telegram_status = "skipped"
+    telegram_reason = None
+    telegram_sent = False
+    telegram_attempted = False
+
     telegram_ready = _telegram_configured()
-
     if not telegram_ready:
-        print(f"[notification_worker] telegram skipped: bot token missing for user_id={user_id}")
-        mark_alert_event_app_only(alert_id)
-        return {
-            "ok": True,
-            "alert_id": alert_id,
-            "status": "app_only",
-            "reason": "telegram_bot_token_missing",
-        }
+        telegram_reason = "telegram_bot_token_missing"
+    elif user_chat_id is None and not allow_global_fallback:
+        telegram_reason = "missing_telegram_chat_id"
+    else:
+        if user_chat_id is None and allow_global_fallback:
+            print(
+                f"[notification_worker] telegram fallback: using global chat id for user_id={user_id} "
+                "(deprecated)"
+            )
 
-    if user_chat_id is None and not allow_global_fallback:
-        print(f"[notification_worker] telegram skipped: missing telegram_chat_id for user_id={user_id}")
-        mark_alert_event_app_only(alert_id)
-        return {
-            "ok": True,
-            "alert_id": alert_id,
-            "status": "app_only",
-            "reason": "missing_telegram_chat_id",
-        }
-
-    if user_chat_id is None and allow_global_fallback:
-        print(
-            f"[notification_worker] telegram fallback: using global chat id for user_id={user_id} "
-            "(deprecated)"
+        telegram_attempted = True
+        telegram_message = _build_telegram_message(alert)
+        sent_ok = send_telegram_alert(
+            telegram_message,
+            chat_id=user_chat_id,
+            allow_global_fallback=allow_global_fallback,
         )
+        if sent_ok:
+            telegram_status = "sent"
+            telegram_reason = "telegram_sent"
+            telegram_sent = True
+        else:
+            telegram_status = "failed"
+            telegram_reason = "telegram_send_failed"
 
-    telegram_message = _build_telegram_message(alert)
-    sent_ok = send_telegram_alert(
-        telegram_message,
-        chat_id=user_chat_id,
-        allow_global_fallback=allow_global_fallback,
-    )
-
-    if sent_ok:
+    if push_sent > 0 or telegram_sent:
         mark_alert_event_sent(alert_id)
+        if push_sent > 0 and telegram_sent:
+            reason = "push_and_telegram_sent"
+        elif push_sent > 0:
+            reason = "push_sent"
+        else:
+            reason = "telegram_sent"
         return {
             "ok": True,
             "alert_id": alert_id,
             "status": "sent",
-            "reason": "telegram_sent",
+            "reason": reason,
+            "push_sent_count": push_sent,
+            "push_reason": push_reason,
+            "telegram_status": telegram_status,
+            "telegram_reason": telegram_reason,
         }
 
-    mark_alert_event_failed(alert_id, "telegram_send_failed")
+    if push_attempted > 0 or telegram_attempted:
+        failure_reason = telegram_reason or push_reason or "notification_send_failed"
+        mark_alert_event_failed(alert_id, failure_reason)
+        return {
+            "ok": False,
+            "alert_id": alert_id,
+            "status": "failed",
+            "reason": failure_reason,
+            "push_sent_count": push_sent,
+            "push_reason": push_reason,
+            "telegram_status": telegram_status,
+            "telegram_reason": telegram_reason,
+        }
+
+    mark_alert_event_app_only(alert_id)
+    app_only_reason = telegram_reason or push_reason or "no_delivery_channel"
     return {
-        "ok": False,
+        "ok": True,
         "alert_id": alert_id,
-        "status": "failed",
-        "reason": "telegram_send_failed",
+        "status": "app_only",
+        "reason": app_only_reason,
+        "push_reason": push_reason,
+        "telegram_reason": telegram_reason,
     }
 
 

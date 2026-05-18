@@ -72,17 +72,18 @@ class NotificationWorkerTest(unittest.TestCase):
                 "allow_global_fallback": False,
             },
         ):
-            with patch("src.notification_worker._telegram_configured", return_value=True):
-                with patch("src.notification_worker.mark_alert_event_app_only") as mock_mark_app_only:
-                    with patch("src.notification_worker.send_telegram_alert") as mock_send_telegram:
-                        result = send_alert_event(
-                            {
-                                "id": 2,
-                                "user_id": "boongtol",
-                                "title": "테스트",
-                                "message": "테스트 메시지",
-                            }
-                        )
+            with patch("src.notification_worker._send_fcm_to_user", return_value={"sent": 0, "failed": 0, "attempted": 0, "reason": "no_active_push_tokens"}):
+                with patch("src.notification_worker._telegram_configured", return_value=True):
+                    with patch("src.notification_worker.mark_alert_event_app_only") as mock_mark_app_only:
+                        with patch("src.notification_worker.send_telegram_alert") as mock_send_telegram:
+                            result = send_alert_event(
+                                {
+                                    "id": 2,
+                                    "user_id": "boongtol",
+                                    "title": "테스트",
+                                    "message": "테스트 메시지",
+                                }
+                            )
 
         self.assertTrue(result.get("ok"))
         self.assertEqual(result.get("status"), "app_only")
@@ -99,23 +100,52 @@ class NotificationWorkerTest(unittest.TestCase):
                 "allow_global_fallback": False,
             },
         ):
-            with patch("src.notification_worker._telegram_configured", return_value=True):
-                with patch("src.notification_worker.send_telegram_alert", return_value=True) as mock_send_telegram:
-                    with patch("src.notification_worker.mark_alert_event_sent") as mock_mark_sent:
-                        result = send_alert_event(
-                            {
-                                "id": 3,
-                                "user_id": "boongtol",
-                                "title": "테스트",
-                                "message": "테스트 메시지",
-                            }
-                        )
+            with patch("src.notification_worker._send_fcm_to_user", return_value={"sent": 0, "failed": 0, "attempted": 0, "reason": "no_active_push_tokens"}):
+                with patch("src.notification_worker._telegram_configured", return_value=True):
+                    with patch("src.notification_worker.send_telegram_alert", return_value=True) as mock_send_telegram:
+                        with patch("src.notification_worker.mark_alert_event_sent") as mock_mark_sent:
+                            result = send_alert_event(
+                                {
+                                    "id": 3,
+                                    "user_id": "boongtol",
+                                    "title": "테스트",
+                                    "message": "테스트 메시지",
+                                }
+                            )
 
         self.assertTrue(result.get("ok"))
         self.assertEqual(result.get("status"), "sent")
         self.assertEqual(result.get("reason"), "telegram_sent")
         self.assertEqual(mock_mark_sent.call_count, 1)
         self.assertEqual(mock_send_telegram.call_args.kwargs.get("chat_id"), "123456")
+
+    def test_send_alert_event_sent_when_push_success_without_telegram(self):
+        with patch(
+            "src.notification_worker.resolve_user_alert_delivery_policy",
+            return_value={
+                "enabled": True,
+                "telegram_chat_id": None,
+                "allow_global_fallback": False,
+            },
+        ):
+            with patch("src.notification_worker._send_fcm_to_user", return_value={"sent": 1, "failed": 0, "attempted": 1, "reason": "fcm_sent"}):
+                with patch("src.notification_worker._telegram_configured", return_value=True):
+                    with patch("src.notification_worker.mark_alert_event_sent") as mock_mark_sent:
+                        with patch("src.notification_worker.send_telegram_alert") as mock_send_telegram:
+                            result = send_alert_event(
+                                {
+                                    "id": 4,
+                                    "user_id": "boongtol",
+                                    "title": "푸시 테스트",
+                                    "message": "푸시 테스트 메시지",
+                                }
+                            )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("status"), "sent")
+        self.assertEqual(result.get("reason"), "push_sent")
+        self.assertEqual(mock_mark_sent.call_count, 1)
+        self.assertEqual(mock_send_telegram.call_count, 0)
 
     def test_process_pending_alert_events_continues_after_failure(self):
         pending_alerts = [

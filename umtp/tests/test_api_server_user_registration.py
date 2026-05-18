@@ -145,6 +145,37 @@ class ApiServerUserRegistrationTest(unittest.TestCase):
         mock_register_user.assert_called_once_with(user_id="boongtol")
         mock_refresh_single_rule.assert_called_once_with("boongtol", 321)
 
+    @patch(
+        "src.api_server.upsert_user_push_token",
+        return_value={"ok": True, "message": "푸시 토큰 저장 완료"},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_push_token_endpoint_registers_user_and_upserts_token(
+        self,
+        mock_register_user,
+        mock_upsert_push_token,
+    ):
+        request = api_server.PushTokenRequest(token="x" * 128, platform="android")
+        response = api_server.users_push_token_upsert(" boongtol ", request)
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("message"), "푸시 토큰 저장 완료")
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_upsert_push_token.assert_called_once_with(
+            user_id="boongtol",
+            token="x" * 128,
+            platform="android",
+        )
+
+    @patch("src.api_server.register_user", return_value={"ok": False, "reason": "user_not_registered"})
+    def test_push_token_endpoint_handles_registration_failure(self, mock_register_user):
+        request = api_server.PushTokenRequest(token="x" * 128, platform="android")
+        response = api_server.users_push_token_upsert("boongtol", request)
+
+        self.assertFalse(response.get("ok"))
+        self.assertIn("사용자 등록 실패", response.get("reason", ""))
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,6 +12,7 @@ from src.alert_price_direction import (
 )
 from src.analysis_service import analyze_url_for_user
 from src.notification_worker import list_alert_events_for_user
+from src.push_token_service import upsert_user_push_token
 from src.user_settings_service import (
     get_all_macbook_air_units_sorted,
     get_recommended_setting_keywords,
@@ -86,6 +87,11 @@ class UserFairPriceUpsertRequest(BaseModel):
     enabled: bool
     search_keyword: Optional[str] = Field(default=None, max_length=255)
     poll_interval_seconds: int = Field(default=60, ge=1)
+
+
+class PushTokenRequest(BaseModel):
+    token: str = Field(..., min_length=20, max_length=1024)
+    platform: str = Field(default="android", min_length=1, max_length=30)
 
 
 @app.get("/health")
@@ -181,6 +187,47 @@ def users_register(request: UserRegisterRequest):
             "reason": f"사용자 등록 실패: {exc}",
             "message": f"사용자 등록 실패: {exc}",
             "user_id": user_id,
+        }
+
+
+@app.post("/users/{user_id}/push-token")
+def users_push_token_upsert(user_id: str, request: PushTokenRequest):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id", "message": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(normalized_user_id, source="api/users/push-token")
+        result = upsert_user_push_token(
+            user_id=resolved_user_id,
+            token=request.token,
+            platform=request.platform,
+        )
+        if result.get("ok"):
+            return {
+                "ok": True,
+                "message": "푸시 토큰 저장 완료",
+            }
+        return {
+            "ok": False,
+            "reason": result.get("reason") or "push_token_upsert_failed",
+            "message": result.get("message") or "푸시 토큰 저장 실패",
+        }
+    except ValueError:
+        return {"ok": False, "reason": "invalid_user_id", "message": "invalid_user_id"}
+    except RuntimeError as exc:
+        return {
+            "ok": False,
+            "reason": f"사용자 등록 실패: {exc}",
+            "message": f"사용자 등록 실패: {exc}",
+            "user_id": normalized_user_id,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": f"푸시 토큰 저장 실패: {exc}",
+            "message": f"푸시 토큰 저장 실패: {exc}",
+            "user_id": normalized_user_id,
         }
 
 

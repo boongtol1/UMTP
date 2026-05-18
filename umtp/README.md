@@ -121,9 +121,12 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - saved_at 정책: UMTP는 사용자가 저장한 시각(`saved_at`) 이후에 등록된 매물(`sort_date >= saved_at`)만 알림 후보로 봅니다.
 - 재저장 정책: 같은 저장 조건에서 저장 버튼을 다시 누르면 `saved_at`이 현재 시각으로 갱신되고, 그 시점부터 새로 조회를 시작합니다.
 - 새로고침 정책: 새로고침은 저장 조건의 `saved_at`을 현재 시각으로 갱신합니다. 전체 새로고침은 활성 규칙 전체를, 단일 새로고침은 선택한 규칙 하나만 갱신합니다. 새로고침 후 UMTP는 `sort_date >= saved_at` 인 매물만 정식 알림 후보로 봅니다.
+- 조건 변경 참고 메시지 정책: 조건을 다시 저장할 때 이전 `saved_at`과 새 `saved_at` 사이에 등록된 매물 중 새 조건에는 맞지만 이전 조건에는 맞지 않았던 매물은 정식 알림이 아니라 참고 메시지로만 표시합니다. 정식 알림 기준은 항상 `sort_date >= 현재 saved_at` 입니다.
 - 재알림 정책: 이미 분석한 `product_id`라도 사용자별 저장 규칙 기준으로는 다시 알림 가능하지만, 같은 사용자/같은 규칙/같은 `product_id` 알림은 한 번만 보냅니다.
 - 마이그레이션: 기존 운영 DB는 `sql/migrate_saved_at_alert_window.sql`을 실행해 `saved_at/sort_date` 컬럼과 rule 단위 unique key를 반영합니다.
 - Telegram 발송 기준: 새 `alert_events` insert 성공 시 1회만 발송됩니다.
+- 1.10 진행 현황: Android FCM 푸시를 위한 `POST /users/{user_id}/push-token` API와 `user_push_tokens` 저장소를 추가했습니다.
+- 1.10 알림 전달 정책: notification worker는 사용자 활성 푸시 토큰이 있으면 FCM 푸시를 우선 시도하고, Telegram은 기존 정책대로 병행 처리합니다. 둘 다 실패하면 `failed`, 둘 다 전송 채널이 없으면 `app_only`로 남습니다.
 - 1.9 진행 현황: Android 설정 화면에서 사용자는 차이비율을 직접 입력하지 않고 `내 기준 적정 가격`과 `내가 사고 싶은 가격`만 입력합니다.
 - 1.9 자동 계산: 앱이 할인 정도를 읽기 전용 설명으로 표시하고, 최종 기준은 서버 응답 `alert_drop_rate_percent`를 사용합니다.
 - 1.9 검색어 UX: 검색어를 직접 입력하거나 추천 검색어를 불러와 선택할 수 있습니다.
@@ -156,6 +159,9 @@ DB_NAME=UMTP_RB
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 UMTP_ALLOW_GLOBAL_TELEGRAM_FALLBACK=false
+FIREBASE_SERVICE_ACCOUNT_FILE=
+FIREBASE_SERVICE_ACCOUNT_JSON=
+FIREBASE_PROJECT_ID=
 ```
 
 ### 3) 테이블 생성 방법
@@ -799,6 +805,7 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_user_fair_prices_polling_
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_target_buy_price_generated_column.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_analysis_jobs.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_or_alter_alert_events.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_user_push_tokens.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_listing_analysis_results_pipeline.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_identity_user_product.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_joongna_sort_date_tracking.sql
