@@ -15,6 +15,8 @@ class SpecParserBaseModelFallbackTest(unittest.TestCase):
     def test_contains_base_model_keyword_matches_supported_tokens_only(self):
         self.assertTrue(contains_base_model_keyword("맥북에어 m2 기본형"))
         self.assertTrue(contains_base_model_keyword("맥북에어(m2)깡통"))
+        self.assertTrue(contains_base_model_keyword("맥북에어 m5 기본형입니다"))
+        self.assertTrue(contains_base_model_keyword("맥북에어 m5 깡통이에요"))
         self.assertFalse(contains_base_model_keyword("맥북에어 기본 충전기 포함"))
         self.assertFalse(contains_base_model_keyword("맥북에어 base model"))
         self.assertFalse(contains_base_model_keyword("맥북에어 베이스"))

@@ -32,7 +32,7 @@ TB_TO_GB_MAP = {
     "4테라": 4096,
 }
 
-BASE_MODEL_KEYWORD_PATTERN = re.compile(r"(?<![가-힣])(기본형|깡통)(?![가-힣])")
+BASE_MODEL_KEYWORD_PATTERN = re.compile(r"(기본형|깡통)")
 
 NOISE_CONTEXT_KEYWORDS = {
     "date": ["월", "일", "년", "년식"],
