@@ -16,6 +16,8 @@ from src.user_settings_service import (
     get_all_macbook_air_units_sorted,
     get_recommended_setting_keywords,
     get_user_fair_price_settings,
+    refresh_user_fair_price_saved_at_for_active_rules,
+    refresh_user_fair_price_saved_at_for_single_rule,
     register_user,
     upsert_user_fair_price_setting,
 )
@@ -208,6 +210,55 @@ def user_fair_prices_upsert(request: UserFairPriceUpsertRequest):
         return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
     except Exception as exc:
         return {"ok": False, "reason": f"사용자 공정가 설정 저장 실패: {exc}"}
+
+
+@app.post("/users/{user_id}/rules/refresh")
+def refresh_user_rules_saved_at(user_id: str):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(normalized_user_id, source="api/users/rules/refresh")
+        result = refresh_user_fair_price_saved_at_for_active_rules(resolved_user_id)
+        if result.get("ok"):
+            result.setdefault("user_id", resolved_user_id)
+        return result
+    except ValueError:
+        return {"ok": False, "reason": "invalid_user_id"}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}", "user_id": normalized_user_id}
+    except Exception as exc:
+        return {"ok": False, "reason": f"저장 조건 새로고침 실패: {exc}", "user_id": normalized_user_id}
+
+
+@app.post("/users/{user_id}/rules/{rule_id}/refresh")
+def refresh_single_user_rule_saved_at(user_id: str, rule_id: int):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/users/rules/{rule_id}/refresh",
+        )
+        result = refresh_user_fair_price_saved_at_for_single_rule(resolved_user_id, rule_id)
+        if result.get("ok"):
+            result.setdefault("user_id", resolved_user_id)
+            result.setdefault("rule_id", rule_id)
+        return result
+    except ValueError:
+        return {"ok": False, "reason": "invalid_user_id"}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}", "user_id": normalized_user_id}
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": f"저장 조건 단일 새로고침 실패: {exc}",
+            "user_id": normalized_user_id,
+            "rule_id": rule_id,
+        }
 
 
 @app.get("/alerts")

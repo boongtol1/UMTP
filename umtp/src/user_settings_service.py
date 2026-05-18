@@ -90,6 +90,16 @@ def _normalize_poll_interval_seconds(value):
     return normalized
 
 
+def _normalize_rule_id(rule_id):
+    try:
+        normalized = int(rule_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid_rule_id") from exc
+    if normalized <= 0:
+        raise ValueError("invalid_rule_id")
+    return normalized
+
+
 def _normalize_optional_price_bound(value, *, field_name):
     if value is None:
         return None
@@ -277,7 +287,7 @@ def _fetch_user_overrides_map(cursor, user_id):
     try:
         cursor.execute(
                 """
-                SELECT product_type, chip, screen_inch, ram_gb, ssd_gb,
+                SELECT id, product_type, chip, screen_inch, ram_gb, ssd_gb,
                    fair_price_krw, alert_drop_rate_percent, target_buy_price_krw, alert_price_direction,
                    min_price_krw, max_price_krw,
                    enabled,
@@ -296,7 +306,7 @@ def _fetch_user_overrides_map(cursor, user_id):
         try:
             cursor.execute(
                 """
-                SELECT product_type, chip, screen_inch, ram_gb, ssd_gb,
+                SELECT id, product_type, chip, screen_inch, ram_gb, ssd_gb,
                    fair_price_krw, alert_drop_rate_percent, target_buy_price_krw, alert_price_direction, enabled,
                    search_keyword, force_poll, poll_interval_seconds,
                    last_polled_at, last_poll_requested_at
@@ -317,7 +327,7 @@ def _fetch_user_overrides_map(cursor, user_id):
             try:
                 cursor.execute(
                 """
-                SELECT product_type, chip, screen_inch, ram_gb, ssd_gb,
+                SELECT id, product_type, chip, screen_inch, ram_gb, ssd_gb,
                        fair_price_krw, alert_drop_rate_percent, enabled
                 FROM user_fair_prices
                 WHERE user_id = %s
@@ -331,7 +341,7 @@ def _fetch_user_overrides_map(cursor, user_id):
                     raise
                 cursor.execute(
                     """
-                    SELECT product_type, chip, screen_inch, ram_gb, ssd_gb,
+                    SELECT id, product_type, chip, screen_inch, ram_gb, ssd_gb,
                            fair_price_krw, alert_drop_rate_percent
                     FROM user_fair_prices
                     WHERE user_id = %s
@@ -363,6 +373,7 @@ def _fetch_user_overrides_map(cursor, user_id):
             row["ssd_gb"],
         )
         user_map[key] = {
+            "id": _safe_int(row.get("id")),
             "fair_price_krw": _safe_int(row.get("fair_price_krw")),
             "alert_drop_rate_percent": _safe_float(row.get("alert_drop_rate_percent")),
             "target_buy_price_krw": _safe_int(row.get("target_buy_price_krw")),
@@ -455,6 +466,7 @@ def get_user_fair_price_settings(user_id):
         last_polled_at = user_item.get("last_polled_at") if has_user_override else None
         last_poll_requested_at = user_item.get("last_poll_requested_at") if has_user_override else None
         saved_at = user_item.get("saved_at") if has_user_override else None
+        user_rule_id = user_item.get("id") if has_user_override else None
 
         if has_user_override:
             effective_fair_price_krw = user_fair_price_krw
@@ -478,6 +490,7 @@ def get_user_fair_price_settings(user_id):
 
         items.append(
             {
+                "id": user_rule_id,
                 "product_type": unit["product_type"],
                 "chip": unit["chip"],
                 "screen_inch": unit["screen_inch"],
@@ -1430,6 +1443,96 @@ def mark_user_fair_price_polled(setting_id):
                 (normalized_setting_id,),
             )
         connection.commit()
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def refresh_user_fair_price_saved_at_for_active_rules(user_id):
+    if not isinstance(user_id, str) or not user_id.strip():
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    normalized_user_id = user_id.strip()
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            UPDATE user_fair_prices
+            SET
+                saved_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = %s
+              AND enabled = TRUE
+            """,
+            (normalized_user_id,),
+        )
+        refreshed_rule_count = cursor.rowcount
+        connection.commit()
+        return {
+            "ok": True,
+            "user_id": normalized_user_id,
+            "refreshed_rule_count": refreshed_rule_count,
+            "message": "활성 저장 조건 saved_at 갱신 완료",
+        }
+    except Exception as exc:
+        lowered_exc = str(exc).lower()
+        if "unknown column" in lowered_exc and "saved_at" in lowered_exc:
+            return {"ok": False, "reason": "missing_saved_at_column"}
+        raise
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def refresh_user_fair_price_saved_at_for_single_rule(user_id, rule_id):
+    if not isinstance(user_id, str) or not user_id.strip():
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    normalized_user_id = user_id.strip()
+    try:
+        normalized_rule_id = _normalize_rule_id(rule_id)
+    except ValueError:
+        return {"ok": False, "reason": "invalid_rule_id"}
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            UPDATE user_fair_prices
+            SET
+                saved_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = %s
+              AND id = %s
+              AND enabled = TRUE
+            """,
+            (normalized_user_id, normalized_rule_id),
+        )
+        affected_rows = cursor.rowcount
+        connection.commit()
+        if affected_rows <= 0:
+            return {"ok": False, "reason": "active_rule_not_found"}
+        return {
+            "ok": True,
+            "user_id": normalized_user_id,
+            "rule_id": normalized_rule_id,
+            "message": "저장 조건 saved_at 갱신 완료",
+        }
+    except Exception as exc:
+        lowered_exc = str(exc).lower()
+        if "unknown column" in lowered_exc and "saved_at" in lowered_exc:
+            return {"ok": False, "reason": "missing_saved_at_column"}
+        raise
     finally:
         if cursor is not None:
             cursor.close()

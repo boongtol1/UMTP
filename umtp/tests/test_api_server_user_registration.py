@@ -110,6 +110,41 @@ class ApiServerUserRegistrationTest(unittest.TestCase):
         mock_register_user.assert_called_once_with(user_id="boongtol")
         mock_list_alerts.assert_called_once_with("boongtol", limit=10)
 
+    @patch(
+        "src.api_server.refresh_user_fair_price_saved_at_for_active_rules",
+        return_value={"ok": True, "refreshed_rule_count": 2},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_refresh_user_rules_saved_at_registers_user_before_refresh(
+        self,
+        mock_register_user,
+        mock_refresh_rules,
+    ):
+        response = api_server.refresh_user_rules_saved_at(" boongtol ")
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("user_id"), "boongtol")
+        self.assertEqual(response.get("refreshed_rule_count"), 2)
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_refresh_rules.assert_called_once_with("boongtol")
+
+    @patch(
+        "src.api_server.refresh_user_fair_price_saved_at_for_single_rule",
+        return_value={"ok": False, "reason": "active_rule_not_found"},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_refresh_single_rule_returns_not_found_when_rule_is_not_active(
+        self,
+        mock_register_user,
+        mock_refresh_single_rule,
+    ):
+        response = api_server.refresh_single_user_rule_saved_at("boongtol", 321)
+
+        self.assertFalse(response.get("ok"))
+        self.assertEqual(response.get("reason"), "active_rule_not_found")
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_refresh_single_rule.assert_called_once_with("boongtol", 321)
+
 
 if __name__ == "__main__":
     unittest.main()
