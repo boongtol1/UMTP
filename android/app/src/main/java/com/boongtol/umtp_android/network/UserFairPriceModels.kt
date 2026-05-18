@@ -97,7 +97,8 @@ data class UserFairPriceUpsertResponse(
     val ok: Boolean,
     val message: String? = null,
     val reason: String? = null,
-    val immediate_poll_requested: Boolean? = null
+    val immediate_poll_requested: Boolean? = null,
+    val missed_candidate_count: Int? = null
 )
 
 data class UserRulesRefreshResponse(

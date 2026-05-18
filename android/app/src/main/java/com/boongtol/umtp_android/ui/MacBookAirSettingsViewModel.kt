@@ -339,10 +339,13 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 )
                 val response = UmtpApiClient.apiService.upsertUserFairPrice(request)
                 if (response.ok) {
-                    _toastMessage.value = if (response.immediate_poll_requested == true) {
-                        "저장 완료 (즉시 검색 요청됨)"
+                    val missedCandidateCount = response.missed_candidate_count ?: 0
+                    _toastMessage.value = if (missedCandidateCount > 0) {
+                        response.message ?: "조건 변경 사이에 새 기준에 맞는 매물이 ${missedCandidateCount}개 있었어요."
+                    } else if (response.immediate_poll_requested == true) {
+                        response.message ?: "저장 완료 (즉시 검색 요청됨)"
                     } else {
-                        "저장 완료"
+                        response.message ?: "저장 완료"
                     }
                     loadUserSettings(uid)
                 } else {
