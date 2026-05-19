@@ -200,7 +200,14 @@ fun MainTabScreen(
                     refreshStatusMessage = alertsRefreshStatusMessage,
                     lastRefreshAtText = lastAlertsRefreshLabel,
                     onRefresh = { viewModel.fetchAlerts(userId, showFeedback = true) },
-                    onMarkAlertRead = { alertId -> viewModel.markAlertAsRead(userId, alertId) },
+                    onMarkAlertRead = { alertId, completion ->
+                        viewModel.markAlertAsRead(
+                            uid = userId,
+                            alertEventId = alertId,
+                            showFeedback = true,
+                            onComplete = completion,
+                        )
+                    },
                     onMarkAllAsRead = { viewModel.markAllAlertsAsRead(userId) },
                     initialTargetAlertId = targetAlertId,
                     onTargetAlertFound = { targetAlertId = null }

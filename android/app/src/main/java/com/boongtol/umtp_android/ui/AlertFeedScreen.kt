@@ -56,7 +56,7 @@ fun AlertFeedScreen(
     refreshStatusMessage: String? = null,
     lastRefreshAtText: String? = null,
     onRefresh: () -> Unit,
-    onMarkAlertRead: (Long) -> Unit = {},
+    onMarkAlertRead: (Long, (Boolean) -> Unit) -> Unit = { _, callback -> callback(false) },
     onMarkAllAsRead: () -> Unit = {},
     initialTargetAlertId: String? = null,
     onTargetAlertFound: () -> Unit = {},
@@ -71,7 +71,6 @@ fun AlertFeedScreen(
                 val targetAlert = alerts.firstOrNull { it.id == targetId }
                 if (targetAlert != null) {
                     selectedAlert = targetAlert
-                    onMarkAlertRead(targetAlert.id)
                     onTargetAlertFound()
                 }
             }
@@ -83,7 +82,15 @@ fun AlertFeedScreen(
             alert = selectedAlert!!,
             onBack = {
                 selectedAlert = null
-                onRefresh()
+            },
+            onMarkReviewed = { alertId, completion ->
+                onMarkAlertRead(alertId) { success ->
+                    if (success) {
+                        onRefresh()
+                        selectedAlert = null
+                    }
+                    completion(success)
+                }
             },
             onOpenUrl = { alert ->
                 val resolvedUrl = resolveAlertUrl(alert)
@@ -175,7 +182,6 @@ fun AlertFeedScreen(
                     alert = alert,
                     onOpenDetails = {
                         selectedAlert = alert
-                        onMarkAlertRead(alert.id)
                     },
                 )
             }
@@ -296,10 +302,12 @@ fun AlertCard(
 private fun AlertDetailScreen(
     alert: AlertItem,
     onBack: () -> Unit,
+    onMarkReviewed: (Long, (Boolean) -> Unit) -> Unit,
     onOpenUrl: (AlertItem) -> Unit,
 ) {
     val resolvedUrl = resolveAlertUrl(alert)
     val listingImageUrl = alert.listing_image_url?.takeIf { it.isNotBlank() }
+    var isMarkingReviewed by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -344,6 +352,26 @@ private fun AlertDetailScreen(
             }
 
             item {
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        if (isMarkingReviewed) {
+                            return@Button
+                        }
+                        isMarkingReviewed = true
+                        onMarkReviewed(alert.id) {
+                            isMarkingReviewed = false
+                        }
+                    },
+                    enabled = !isMarkingReviewed,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (isMarkingReviewed) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("검토 완료")
+                    }
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(
                     onClick = { onOpenUrl(alert) },

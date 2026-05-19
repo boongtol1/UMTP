@@ -276,21 +276,33 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
     }
 
-    fun markAlertAsRead(uid: String, alertEventId: Long, showFeedback: Boolean = false) {
+    fun markAlertAsRead(
+        uid: String,
+        alertEventId: Long,
+        showFeedback: Boolean = false,
+        onComplete: ((Boolean) -> Unit)? = null,
+    ) {
         if (alertEventId <= 0L) {
+            onComplete?.invoke(false)
             return
         }
         viewModelScope.launch {
             try {
                 val response = UmtpApiClient.apiService.markAlertEventRead(alertEventId, uid)
-                if (!response.ok && showFeedback) {
-                    _toastMessage.value =
-                        "읽음 처리 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                if (response.ok) {
+                    onComplete?.invoke(true)
+                } else {
+                    if (showFeedback) {
+                        _toastMessage.value =
+                            "읽음 처리 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                    }
+                    onComplete?.invoke(false)
                 }
             } catch (e: Exception) {
                 if (showFeedback) {
                     _toastMessage.value = buildNetworkErrorMessage("읽음 처리 실패", e)
                 }
+                onComplete?.invoke(false)
             }
         }
     }
