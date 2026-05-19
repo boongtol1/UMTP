@@ -73,7 +73,12 @@ class NotificationWorkerTest(unittest.TestCase):
         self.assertEqual(grouped["M1"]["13"][0]["id"], 13)
         self.assertEqual(grouped["M2"]["13"][0]["id"], 11)
         self.assertEqual(grouped["기타"]["기타"][0]["id"], 12)
-        mock_list_alerts.assert_called_once_with(user_id="boongtol", limit=500, is_read="1")
+        mock_list_alerts.assert_called_once_with(
+            user_id="boongtol",
+            limit=500,
+            is_read="1",
+            exclude_read_archive_cleared=True,
+        )
 
     def test_build_telegram_message_uses_alert_feed_wording(self):
         message = _build_telegram_message(

@@ -70,6 +70,17 @@ interface UmtpApiService {
         @Query("user_id") userId: String,
     ): GroupedReadAlertsResponse
 
+    @PATCH("alert-events/read/archive/clear-all")
+    suspend fun clearAllReadArchive(
+        @Query("user_id") userId: String,
+    ): ClearReadArchiveResponse
+
+    @PATCH("alert-events/read/archive/clear-selected")
+    suspend fun clearSelectedReadArchive(
+        @Query("user_id") userId: String,
+        @Body request: ClearSelectedReadArchiveRequest,
+    ): ClearReadArchiveResponse
+
     @GET("user-fair-prices/recommended-keywords")
     suspend fun getRecommendedKeywords(
         @Query("product_type") productType: String,

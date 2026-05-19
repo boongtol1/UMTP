@@ -345,10 +345,29 @@ private fun AlertDetailScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(8.dp))
+                if (listingImageUrl != null) {
+                    AsyncImage(
+                        model = listingImageUrl,
+                        contentDescription = "대표 이미지",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clip(MaterialTheme.shapes.medium)
+                            .clickable(enabled = !resolvedUrl.isNullOrBlank()) { onOpenUrl(alert) },
+                        contentScale = ContentScale.Crop,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
             }
 
             items(buildAlertDetailRows(alert, resolvedUrl, listingImageUrl)) { row ->
-                DetailRow(label = row.first, value = row.second)
+                val isLinkRow = (row.first == "URL" || row.first == "대표 이미지") && !resolvedUrl.isNullOrBlank()
+                DetailRow(
+                    label = row.first,
+                    value = row.second,
+                    isLink = isLinkRow,
+                    onClick = { onOpenUrl(alert) },
+                )
             }
 
             item {
@@ -386,7 +405,17 @@ private fun AlertDetailScreen(
 }
 
 @Composable
-private fun DetailRow(label: String, value: String) {
+private fun DetailRow(
+    label: String,
+    value: String,
+    isLink: Boolean = false,
+    onClick: (() -> Unit)? = null,
+) {
+    val valueModifier = if (isLink && onClick != null) {
+        Modifier.clickable { onClick() }
+    } else {
+        Modifier
+    }
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = label,
@@ -395,7 +424,9 @@ private fun DetailRow(label: String, value: String) {
         )
         Text(
             text = value,
+            modifier = valueModifier,
             style = MaterialTheme.typography.bodyMedium,
+            color = if (isLink) MaterialTheme.colorScheme.primary else Color.Unspecified,
         )
         Spacer(modifier = Modifier.height(8.dp))
     }

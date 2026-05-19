@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -21,24 +22,30 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.boongtol.umtp_android.network.AlertItem
 import com.boongtol.umtp_android.network.TradeTypeFlags
 
@@ -46,11 +53,25 @@ import com.boongtol.umtp_android.network.TradeTypeFlags
 fun ReadAlertArchiveScreen(
     groupedAlerts: Map<String, Map<String, List<AlertItem>>>,
     isRefreshing: Boolean = false,
+    isClearingAll: Boolean = false,
+    isClearingSelected: Boolean = false,
     refreshStatusMessage: String? = null,
     onRefresh: () -> Unit,
+    onClearAll: () -> Unit = {},
+    onClearSelected: (List<Long>) -> Unit = {},
 ) {
     val context = LocalContext.current
     var selectedAlert by remember { mutableStateOf<AlertItem?>(null) }
+    var isSelectionMode by remember { mutableStateOf(false) }
+    var selectedAlertIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    val visibleAlertIds = remember(groupedAlerts) { collectVisibleReadArchiveAlertIds(groupedAlerts) }
+
+    LaunchedEffect(visibleAlertIds) {
+        selectedAlertIds = selectedAlertIds.filterTo(mutableSetOf()) { it in visibleAlertIds }
+        if (selectedAlertIds.isEmpty()) {
+            isSelectionMode = false
+        }
+    }
 
     if (selectedAlert != null) {
         ReadAlertArchiveDetailScreen(
@@ -79,14 +100,53 @@ fun ReadAlertArchiveScreen(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
             )
-            IconButton(
-                onClick = onRefresh,
-                enabled = !isRefreshing,
-            ) {
-                if (isRefreshing) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.Refresh, contentDescription = "새로고침")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(
+                    onClick = {
+                        isSelectionMode = !isSelectionMode
+                        if (!isSelectionMode) {
+                            selectedAlertIds = emptySet()
+                        }
+                    },
+                    enabled = groupedAlerts.isNotEmpty(),
+                ) {
+                    Text(if (isSelectionMode) "선택 해제" else "선택")
+                }
+                TextButton(
+                    onClick = {
+                        onClearSelected(selectedAlertIds.toList())
+                    },
+                    enabled = isSelectionMode && selectedAlertIds.isNotEmpty() && !isClearingSelected,
+                ) {
+                    if (isClearingSelected) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("선택 비우기")
+                    }
+                }
+                TextButton(
+                    onClick = {
+                        onClearAll()
+                        selectedAlertIds = emptySet()
+                        isSelectionMode = false
+                    },
+                    enabled = groupedAlerts.isNotEmpty() && !isClearingAll,
+                ) {
+                    if (isClearingAll) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("전체 비우기")
+                    }
+                }
+                IconButton(
+                    onClick = onRefresh,
+                    enabled = !isRefreshing,
+                ) {
+                    if (isRefreshing) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Refresh, contentDescription = "새로고침")
+                    }
                 }
             }
         }
@@ -148,36 +208,65 @@ fun ReadAlertArchiveScreen(
                         items = screenGroups[screenKey].orEmpty(),
                         key = { alert -> "${chipKey}-${screenKey}-${alert.id}" },
                     ) { alert ->
+                        val isSelected = selectedAlertIds.contains(alert.id)
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { selectedAlert = alert },
+                                .clickable {
+                                    if (isSelectionMode) {
+                                        selectedAlertIds = if (isSelected) {
+                                            selectedAlertIds - alert.id
+                                        } else {
+                                            selectedAlertIds + alert.id
+                                        }
+                                    } else {
+                                        selectedAlert = alert
+                                    }
+                                },
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                             elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text(
-                                    text = alert.title?.ifBlank { "제목 없음" } ?: "제목 없음",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "가격: ${formatKrwDisplay(alert.listing_price_krw)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                Text(
-                                    text = "스펙: ${buildReadArchiveSpecSummary(alert)}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color.Gray,
-                                )
-                                Text(
-                                    text = "읽음 시각: ${alert.read_at ?: "정보 없음"}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color.Gray,
-                                )
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (isSelectionMode) {
+                                    Checkbox(
+                                        checked = isSelected,
+                                        onCheckedChange = { checked ->
+                                            selectedAlertIds = if (checked) {
+                                                selectedAlertIds + alert.id
+                                            } else {
+                                                selectedAlertIds - alert.id
+                                            }
+                                        },
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = alert.title?.ifBlank { "제목 없음" } ?: "제목 없음",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "가격: ${formatKrwDisplay(alert.listing_price_krw)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    Text(
+                                        text = "스펙: ${buildReadArchiveSpecSummary(alert)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.Gray,
+                                    )
+                                    Text(
+                                        text = "읽음 시각: ${alert.read_at ?: "정보 없음"}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.Gray,
+                                    )
+                                }
                             }
                         }
                     }
@@ -187,6 +276,20 @@ fun ReadAlertArchiveScreen(
     }
 }
 
+private fun collectVisibleReadArchiveAlertIds(groupedAlerts: Map<String, Map<String, List<AlertItem>>>): Set<Long> {
+    val ids = mutableSetOf<Long>()
+    groupedAlerts.values.forEach { screenGroups ->
+        screenGroups.values.forEach { alerts ->
+            alerts.forEach { alert ->
+                if (alert.id > 0L) {
+                    ids.add(alert.id)
+                }
+            }
+        }
+    }
+    return ids
+}
+
 @Composable
 private fun ReadAlertArchiveDetailScreen(
     alert: AlertItem,
@@ -194,6 +297,7 @@ private fun ReadAlertArchiveDetailScreen(
     onOpenUrl: (AlertItem) -> Unit,
 ) {
     val resolvedUrl = resolveReadArchiveUrl(alert)
+    val listingImageUrl = alert.listing_image_url?.takeIf { it.isNotBlank() }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -231,9 +335,23 @@ private fun ReadAlertArchiveDetailScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(8.dp))
+                if (listingImageUrl != null) {
+                    AsyncImage(
+                        model = listingImageUrl,
+                        contentDescription = "대표 이미지",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clip(MaterialTheme.shapes.medium)
+                            .clickable(enabled = !resolvedUrl.isNullOrBlank()) { onOpenUrl(alert) },
+                        contentScale = ContentScale.Crop,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
             }
 
             items(buildReadArchiveDetailRows(alert, resolvedUrl)) { row ->
+                val isLinkRow = (row.first == "URL" || row.first == "대표 이미지") && !resolvedUrl.isNullOrBlank()
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = row.first,
@@ -242,7 +360,13 @@ private fun ReadAlertArchiveDetailScreen(
                     )
                     Text(
                         text = row.second,
+                        modifier = if (isLinkRow) {
+                            Modifier.clickable { onOpenUrl(alert) }
+                        } else {
+                            Modifier
+                        },
                         style = MaterialTheme.typography.bodyMedium,
+                        color = if (isLinkRow) MaterialTheme.colorScheme.primary else Color.Unspecified,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }

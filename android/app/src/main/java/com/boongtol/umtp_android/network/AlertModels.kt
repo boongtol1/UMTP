@@ -32,6 +32,8 @@ data class AlertItem(
     val created_at: String? = null,
     val is_read: Boolean = false,
     val read_at: String? = null,
+    val is_read_archive_cleared: Boolean = false,
+    val read_archive_cleared_at: String? = null,
     val is_alert_target: Boolean = true,
 )
 
@@ -73,6 +75,21 @@ data class GroupedReadAlertsResponse(
     val ok: Boolean,
     val user_id: String? = null,
     val groups: Map<String, Map<String, List<AlertItem>>> = emptyMap(),
+    val message: String? = null,
+    val reason: String? = null,
+)
+
+data class ClearSelectedReadArchiveRequest(
+    val alert_event_ids: List<Long>,
+)
+
+data class ClearReadArchiveResponse(
+    val ok: Boolean,
+    val user_id: String? = null,
+    val requested_count: Int? = null,
+    val cleared_count: Int? = null,
+    val skipped_count: Int? = null,
+    val not_found_ids: List<Long> = emptyList(),
     val message: String? = null,
     val reason: String? = null,
 )

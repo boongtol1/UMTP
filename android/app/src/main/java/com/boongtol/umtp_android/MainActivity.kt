@@ -144,6 +144,8 @@ fun MainTabScreen(
     val isRefreshingAlerts by viewModel.isRefreshingAlerts.collectAsState()
     val isRefreshingReadArchive by viewModel.isRefreshingReadArchive.collectAsState()
     val isMarkingAllAlertsRead by viewModel.isMarkingAllAlertsRead.collectAsState()
+    val isClearingReadArchiveAll by viewModel.isClearingReadArchiveAll.collectAsState()
+    val isClearingReadArchiveSelected by viewModel.isClearingReadArchiveSelected.collectAsState()
     val alertsRefreshStatusMessage by viewModel.alertsRefreshStatusMessage.collectAsState()
     val readArchiveRefreshStatusMessage by viewModel.readArchiveRefreshStatusMessage.collectAsState()
     val lastAlertsRefreshLabel by viewModel.lastAlertsRefreshLabel.collectAsState()
@@ -215,8 +217,14 @@ fun MainTabScreen(
                 1 -> ReadAlertArchiveScreen(
                     groupedAlerts = readGroupedAlerts,
                     isRefreshing = isRefreshingReadArchive,
+                    isClearingAll = isClearingReadArchiveAll,
+                    isClearingSelected = isClearingReadArchiveSelected,
                     refreshStatusMessage = readArchiveRefreshStatusMessage,
                     onRefresh = { viewModel.fetchReadGroupedAlerts(userId, showFeedback = true) },
+                    onClearAll = { viewModel.clearAllReadArchive(userId) },
+                    onClearSelected = { alertIds ->
+                        viewModel.clearSelectedReadArchive(userId, alertIds)
+                    },
                 )
                 2 -> SettingsNavigator(
                     userId = userId,

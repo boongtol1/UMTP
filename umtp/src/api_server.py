@@ -12,6 +12,8 @@ from src.alert_price_direction import (
 )
 from src.analysis_service import analyze_url_for_user
 from src.notification_worker import (
+    clear_all_read_alert_events_for_user,
+    clear_selected_read_alert_events_for_user,
     list_alert_events_for_user,
     list_grouped_read_alert_events_for_user,
     mark_alert_event_read_for_user,
@@ -110,6 +112,10 @@ class UserFairPriceUpsertRequest(BaseModel):
 class PushTokenRequest(BaseModel):
     token: str = Field(..., min_length=20, max_length=1024)
     platform: str = Field(default="android", min_length=1, max_length=30)
+
+
+class ClearSelectedReadArchiveRequest(BaseModel):
+    alert_event_ids: list[int] = Field(default_factory=list)
 
 
 @app.get("/health")
@@ -429,6 +435,57 @@ def mark_all_alert_events_as_read(user_id: str):
         return {"ok": False, "reason": str(exc), "user_id": normalized_user_id}
     except Exception as exc:
         return {"ok": False, "reason": f"모두 읽음 처리 실패: {exc}", "user_id": normalized_user_id}
+
+
+@app.patch("/alert-events/read/archive/clear-all")
+def clear_all_read_alert_events(user_id: str):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/alert-events/read/archive/clear-all",
+        )
+        result = clear_all_read_alert_events_for_user(user_id=resolved_user_id)
+        if result.get("ok"):
+            result.setdefault("user_id", resolved_user_id)
+            result.setdefault("message", "읽음 보관함 전체 비우기 완료")
+        return result
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}", "user_id": normalized_user_id}
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc), "user_id": normalized_user_id}
+    except Exception as exc:
+        return {"ok": False, "reason": f"읽음 보관함 전체 비우기 실패: {exc}", "user_id": normalized_user_id}
+
+
+@app.patch("/alert-events/read/archive/clear-selected")
+def clear_selected_read_alert_events(user_id: str, request: ClearSelectedReadArchiveRequest):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/alert-events/read/archive/clear-selected",
+        )
+        result = clear_selected_read_alert_events_for_user(
+            user_id=resolved_user_id,
+            alert_event_ids=request.alert_event_ids,
+        )
+        if result.get("ok"):
+            result.setdefault("user_id", resolved_user_id)
+            result.setdefault("message", "읽음 보관함 선택 비우기 완료")
+        return result
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}", "user_id": normalized_user_id}
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc), "user_id": normalized_user_id}
+    except Exception as exc:
+        return {"ok": False, "reason": f"읽음 보관함 선택 비우기 실패: {exc}", "user_id": normalized_user_id}
 
 
 @app.get("/alert-events/read/grouped")

@@ -63,6 +63,12 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _isMarkingAllAlertsRead = MutableStateFlow(false)
     val isMarkingAllAlertsRead: StateFlow<Boolean> = _isMarkingAllAlertsRead.asStateFlow()
 
+    private val _isClearingReadArchiveAll = MutableStateFlow(false)
+    val isClearingReadArchiveAll: StateFlow<Boolean> = _isClearingReadArchiveAll.asStateFlow()
+
+    private val _isClearingReadArchiveSelected = MutableStateFlow(false)
+    val isClearingReadArchiveSelected: StateFlow<Boolean> = _isClearingReadArchiveSelected.asStateFlow()
+
     private val _alertsRefreshStatusMessage = MutableStateFlow<String?>(null)
     val alertsRefreshStatusMessage: StateFlow<String?> = _alertsRefreshStatusMessage.asStateFlow()
 
@@ -327,6 +333,70 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 _toastMessage.value = buildNetworkErrorMessage("모두 읽음 처리 실패", e)
             } finally {
                 _isMarkingAllAlertsRead.value = false
+            }
+        }
+    }
+
+    fun clearAllReadArchive(uid: String) {
+        if (_isClearingReadArchiveAll.value) {
+            return
+        }
+        viewModelScope.launch {
+            _isClearingReadArchiveAll.value = true
+            try {
+                val response = UmtpApiClient.apiService.clearAllReadArchive(uid)
+                if (response.ok) {
+                    val clearedCount = response.cleared_count ?: 0
+                    _toastMessage.value = response.message ?: "읽음 보관함 전체 비우기 완료 (${clearedCount}건)"
+                    fetchReadGroupedAlerts(uid, showFeedback = false)
+                } else {
+                    _toastMessage.value =
+                        "읽음 보관함 전체 비우기 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = buildNetworkErrorMessage("읽음 보관함 전체 비우기 실패", e)
+            } finally {
+                _isClearingReadArchiveAll.value = false
+            }
+        }
+    }
+
+    fun clearSelectedReadArchive(uid: String, alertEventIds: List<Long>) {
+        if (_isClearingReadArchiveSelected.value) {
+            return
+        }
+        val normalizedIds = alertEventIds
+            .filter { it > 0L }
+            .distinct()
+        if (normalizedIds.isEmpty()) {
+            _toastMessage.value = "선택된 읽음 알림이 없습니다."
+            return
+        }
+
+        viewModelScope.launch {
+            _isClearingReadArchiveSelected.value = true
+            try {
+                val response = UmtpApiClient.apiService.clearSelectedReadArchive(
+                    uid,
+                    ClearSelectedReadArchiveRequest(alert_event_ids = normalizedIds),
+                )
+                if (response.ok) {
+                    val clearedCount = response.cleared_count ?: 0
+                    val skippedCount = response.skipped_count ?: 0
+                    _toastMessage.value = if (skippedCount > 0) {
+                        "선택 비우기 완료 (${clearedCount}건 비움, ${skippedCount}건 건너뜀)"
+                    } else {
+                        "선택 비우기 완료 (${clearedCount}건)"
+                    }
+                    fetchReadGroupedAlerts(uid, showFeedback = false)
+                } else {
+                    _toastMessage.value =
+                        "읽음 보관함 선택 비우기 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = buildNetworkErrorMessage("읽음 보관함 선택 비우기 실패", e)
+            } finally {
+                _isClearingReadArchiveSelected.value = false
             }
         }
     }

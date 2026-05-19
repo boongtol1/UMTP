@@ -150,6 +150,36 @@ class ApiServerUserRegistrationTest(unittest.TestCase):
         mock_mark_all_read.assert_called_once_with(user_id="boongtol")
 
     @patch(
+        "src.api_server.clear_all_read_alert_events_for_user",
+        return_value={"ok": True, "cleared_count": 3},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_clear_all_read_archive(self, mock_register_user, mock_clear_all):
+        response = api_server.clear_all_read_alert_events("boongtol")
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("cleared_count"), 3)
+        self.assertEqual(response.get("user_id"), "boongtol")
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_clear_all.assert_called_once_with(user_id="boongtol")
+
+    @patch(
+        "src.api_server.clear_selected_read_alert_events_for_user",
+        return_value={"ok": True, "requested_count": 2, "cleared_count": 2, "skipped_count": 0, "not_found_ids": []},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_clear_selected_read_archive(self, mock_register_user, mock_clear_selected):
+        request = api_server.ClearSelectedReadArchiveRequest(alert_event_ids=[11, 12])
+        response = api_server.clear_selected_read_alert_events("boongtol", request)
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("requested_count"), 2)
+        self.assertEqual(response.get("cleared_count"), 2)
+        self.assertEqual(response.get("user_id"), "boongtol")
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_clear_selected.assert_called_once_with(user_id="boongtol", alert_event_ids=[11, 12])
+
+    @patch(
         "src.api_server.list_grouped_read_alert_events_for_user",
         return_value={"M1": {"13": [{"id": 7}]}},
     )

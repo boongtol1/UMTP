@@ -763,12 +763,25 @@ def _enrich_alert_for_display(alert):
             connection.close()
 
 
-def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit, normalized_is_read):
-    read_filter_clause = ""
+def _fetch_alert_rows(
+    cursor,
+    *,
+    normalized_user_id,
+    normalized_limit,
+    normalized_is_read,
+    exclude_read_archive_cleared=False,
+):
+    read_filter_tokens = []
     if normalized_is_read == "0":
-        read_filter_clause = " AND COALESCE(is_read, 0) = 0"
+        read_filter_tokens.append("COALESCE(is_read, 0) = 0")
     elif normalized_is_read == "1":
-        read_filter_clause = " AND COALESCE(is_read, 0) = 1"
+        read_filter_tokens.append("COALESCE(is_read, 0) = 1")
+        if exclude_read_archive_cleared:
+            read_filter_tokens.append("COALESCE(is_read_archive_cleared, 0) = 0")
+
+    read_filter_clause = ""
+    if read_filter_tokens:
+        read_filter_clause = " AND " + " AND ".join(read_filter_tokens)
 
     try:
         cursor.execute(
@@ -808,6 +821,8 @@ def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit, normalize
                 error_message,
                 is_read,
                 read_at,
+                is_read_archive_cleared,
+                read_archive_cleared_at,
                 created_at,
                 sent_at,
                 updated_at
@@ -862,6 +877,8 @@ def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit, normalize
                     error_message,
                     COALESCE(is_read, 0) AS is_read,
                     NULL AS read_at,
+                    COALESCE(is_read_archive_cleared, 0) AS is_read_archive_cleared,
+                    NULL AS read_archive_cleared_at,
                     created_at,
                     sent_at,
                     updated_at
@@ -899,6 +916,8 @@ def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit, normalize
                 error_message,
                 0 AS is_read,
                 NULL AS read_at,
+                0 AS is_read_archive_cleared,
+                NULL AS read_archive_cleared_at,
                 created_at,
                 sent_at,
                 updated_at
@@ -964,6 +983,23 @@ def _normalize_alert_id(alert_id):
     if normalized is None or normalized <= 0:
         raise ValueError("invalid_alert_id")
     return normalized
+
+
+def _normalize_alert_id_list(alert_event_ids):
+    if not isinstance(alert_event_ids, (list, tuple, set)):
+        raise ValueError("invalid_alert_event_ids")
+
+    normalized_ids = []
+    seen = set()
+    for raw_value in alert_event_ids:
+        parsed = _normalize_optional_int(raw_value, "alert_id")
+        if parsed is None or parsed <= 0:
+            raise ValueError("invalid_alert_event_id")
+        if parsed in seen:
+            continue
+        seen.add(parsed)
+        normalized_ids.append(parsed)
+    return normalized_ids
 
 
 def _telegram_configured():
@@ -1743,7 +1779,7 @@ def process_pending_alert_events(limit=20):
     return stats
 
 
-def list_alert_events_for_user(user_id, limit=200, is_read="0"):
+def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_archive_cleared=False):
     normalized_user_id = _normalize_required_text(user_id, "user_id")
     normalized_limit = _normalize_limit(limit)
     normalized_is_read = _normalize_is_read_filter(is_read)
@@ -1758,6 +1794,7 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0"):
             normalized_user_id=normalized_user_id,
             normalized_limit=normalized_limit,
             normalized_is_read=normalized_is_read,
+            exclude_read_archive_cleared=exclude_read_archive_cleared,
         )
         listing_image_url_map = _fetch_listing_image_urls(
             cursor,
@@ -1791,6 +1828,8 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0"):
             confidence_score = _safe_int(row.get("confidence_score"))
             is_read_value = bool(_safe_int(row.get("is_read")) or 0)
             read_at = row.get("read_at")
+            is_read_archive_cleared = bool(_safe_int(row.get("is_read_archive_cleared")) or 0)
+            read_archive_cleared_at = row.get("read_archive_cleared_at")
 
             if not has_detail_columns:
                 log_detail = _fetch_latest_log_details(
@@ -1880,6 +1919,8 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0"):
                     "error_message": row.get("error_message"),
                     "is_read": is_read_value,
                     "read_at": read_at,
+                    "is_read_archive_cleared": is_read_archive_cleared,
+                    "read_archive_cleared_at": read_archive_cleared_at,
                     "created_at": row.get("created_at"),
                     "sent_at": row.get("sent_at"),
                     "updated_at": row.get("updated_at"),
@@ -2022,6 +2063,142 @@ def mark_all_alert_events_read_for_user(*, user_id):
             connection.close()
 
 
+def clear_all_read_alert_events_for_user(*, user_id):
+    normalized_user_id = _normalize_required_text(user_id, "user_id")
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        try:
+            cursor.execute(
+                """
+                UPDATE alert_events
+                SET
+                    is_read_archive_cleared = 1,
+                    read_archive_cleared_at = COALESCE(read_archive_cleared_at, NOW())
+                WHERE user_id = %s
+                  AND COALESCE(is_read, 0) = 1
+                  AND COALESCE(is_read_archive_cleared, 0) = 0
+                """,
+                (normalized_user_id,),
+            )
+            cleared_rows = cursor.rowcount or 0
+        except Exception as exc:
+            lowered = str(exc).lower()
+            if "unknown column" in lowered:
+                return {
+                    "ok": False,
+                    "reason": "read_archive_clear_columns_missing",
+                    "cleared_count": 0,
+                }
+            raise
+
+        connection.commit()
+        return {
+            "ok": True,
+            "cleared_count": int(cleared_rows),
+        }
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def clear_selected_read_alert_events_for_user(*, user_id, alert_event_ids):
+    normalized_user_id = _normalize_required_text(user_id, "user_id")
+    normalized_ids = _normalize_alert_id_list(alert_event_ids)
+
+    if not normalized_ids:
+        return {
+            "ok": True,
+            "requested_count": 0,
+            "cleared_count": 0,
+            "skipped_count": 0,
+            "not_found_ids": [],
+        }
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        placeholders = ", ".join(["%s"] * len(normalized_ids))
+        try:
+            cursor.execute(
+                f"""
+                SELECT
+                    id,
+                    COALESCE(is_read_archive_cleared, 0) AS is_read_archive_cleared
+                FROM alert_events
+                WHERE user_id = %s
+                  AND COALESCE(is_read, 0) = 1
+                  AND id IN ({placeholders})
+                """,
+                tuple([normalized_user_id, *normalized_ids]),
+            )
+            rows = cursor.fetchall() or []
+        except Exception as exc:
+            lowered = str(exc).lower()
+            if "unknown column" in lowered:
+                return {
+                    "ok": False,
+                    "reason": "read_archive_clear_columns_missing",
+                    "requested_count": len(normalized_ids),
+                    "cleared_count": 0,
+                    "skipped_count": len(normalized_ids),
+                    "not_found_ids": normalized_ids,
+                }
+            raise
+
+        found_by_id = {int(row.get("id")): row for row in rows if row.get("id") is not None}
+        found_ids = set(found_by_id.keys())
+        not_found_ids = [alert_id for alert_id in normalized_ids if alert_id not in found_ids]
+        ids_to_clear = [
+            alert_id
+            for alert_id in normalized_ids
+            if alert_id in found_ids
+            and not bool(_safe_int(found_by_id[alert_id].get("is_read_archive_cleared")) or 0)
+        ]
+
+        cleared_count = 0
+        if ids_to_clear:
+            update_placeholders = ", ".join(["%s"] * len(ids_to_clear))
+            cursor.execute(
+                f"""
+                UPDATE alert_events
+                SET
+                    is_read_archive_cleared = 1,
+                    read_archive_cleared_at = COALESCE(read_archive_cleared_at, NOW())
+                WHERE user_id = %s
+                  AND COALESCE(is_read, 0) = 1
+                  AND COALESCE(is_read_archive_cleared, 0) = 0
+                  AND id IN ({update_placeholders})
+                """,
+                tuple([normalized_user_id, *ids_to_clear]),
+            )
+            cleared_count = int(cursor.rowcount or 0)
+
+        connection.commit()
+        requested_count = len(normalized_ids)
+        skipped_count = max(0, requested_count - cleared_count - len(not_found_ids))
+        return {
+            "ok": True,
+            "requested_count": requested_count,
+            "cleared_count": cleared_count,
+            "skipped_count": skipped_count,
+            "not_found_ids": not_found_ids,
+        }
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
 def _chip_group_sort_key(chip_key):
     normalized = (_normalize_optional_text(chip_key) or "").upper()
     preferred_order = {"M1": 1, "M2": 2, "M3": 3, "M4": 4, "M5": 5}
@@ -2071,7 +2248,12 @@ def _alert_group_item_sort_key(item):
 
 
 def list_grouped_read_alert_events_for_user(user_id, limit=500):
-    items = list_alert_events_for_user(user_id=user_id, limit=limit, is_read="1")
+    items = list_alert_events_for_user(
+        user_id=user_id,
+        limit=limit,
+        is_read="1",
+        exclude_read_archive_cleared=True,
+    )
     grouped = {}
 
     for item in items:
