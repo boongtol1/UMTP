@@ -12,6 +12,7 @@ from src.listing_analysis_pipeline import (  # noqa: E402
     analyze_product_for_watch_rule,
     process_analysis_job,
     process_pending_analysis_jobs,
+    should_fetch_detail,
 )
 
 
@@ -518,6 +519,82 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
         self.assertTrue(result.get("ok"))
         self.assertTrue(result.get("is_alert_target"))
         self.assertEqual(create_alert_call_count, 1)
+
+    def test_should_fetch_detail_for_new_listing(self):
+        should_fetch, reason = should_fetch_detail(
+            {"title": "맥북 팝니다", "price": 1000000},
+            "new",
+            {"parse_success": True, "chip": "M2", "ram_gb": 8, "ssd_gb": 256},
+            target_price_krw=900000,
+        )
+
+        self.assertTrue(should_fetch)
+        self.assertEqual(reason, "new")
+
+    def test_should_not_fetch_detail_for_unchanged_listing(self):
+        should_fetch, reason = should_fetch_detail(
+            {"title": "맥북 팝니다", "price": 1000000},
+            "unchanged",
+            {"parse_success": False, "parse_failure_reason": "missing_required_fields"},
+            target_price_krw=900000,
+        )
+
+        self.assertFalse(should_fetch)
+        self.assertEqual(reason, "unchanged")
+
+    def test_should_fetch_detail_when_title_parse_failed(self):
+        should_fetch, reason = should_fetch_detail(
+            {"title": "상태좋고 저렴합니다", "price": 1000000},
+            "price_changed",
+            {"parse_success": False, "parse_failure_reason": "missing_required_fields"},
+            target_price_krw=900000,
+        )
+
+        self.assertTrue(should_fetch)
+        self.assertEqual(reason, "title_parse_failed")
+
+    def test_should_fetch_detail_when_product_name_only_and_specs_missing(self):
+        should_fetch, reason = should_fetch_detail(
+            {"title": "맥북에어 급처", "price": 1000000},
+            "price_changed",
+            {
+                "parse_success": False,
+                "parse_failure_reason": "missing_required_fields",
+                "missing_fields": ["chip", "ram_gb", "ssd_gb"],
+            },
+            target_price_krw=900000,
+        )
+
+        self.assertTrue(should_fetch)
+        self.assertEqual(reason, "product_only_spec_missing")
+
+    def test_should_fetch_detail_when_price_is_cheap(self):
+        should_fetch, reason = should_fetch_detail(
+            {"title": "맥북에어 M2 8GB 256GB", "price": 700000},
+            "price_changed",
+            {"parse_success": True, "chip": "M2", "ram_gb": 8, "ssd_gb": 256},
+            target_price_krw=800000,
+        )
+
+        self.assertTrue(should_fetch)
+        self.assertEqual(reason, "price_cheap")
+
+    def test_unchanged_listing_skips_detail_fetch_function_call(self):
+        fake_cursor = _FakeCursor()
+        fake_connection = _FakeConnection(fake_cursor)
+        job = self._build_job()
+        job["trigger_reason"] = "unchanged"
+
+        with patch("src.listing_analysis_pipeline.get_connection", return_value=fake_connection):
+            with patch("src.listing_analysis_pipeline.fetch_html") as mock_fetch_html:
+                result = analyze_product_for_watch_rule(job)
+
+        self.assertTrue(result.get("ok"))
+        self.assertTrue(result.get("analysis_skipped"))
+        self.assertEqual(result.get("analysis_skip_reason"), "unchanged")
+        self.assertFalse(result.get("detail_fetch_performed"))
+        self.assertEqual(result.get("detail_skipped_reason"), "unchanged")
+        self.assertEqual(mock_fetch_html.call_count, 0)
 
     def test_process_analysis_job_skips_when_not_pending(self):
         job = {"id": 10, "product_id": "1001"}

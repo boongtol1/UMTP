@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 
 try:
@@ -56,6 +57,141 @@ except ModuleNotFoundError:
     )
 DUPLICATE_ENTRY_ERROR_CODE = 1062
 ALERT_BODY_EXCERPT_MAX_LEN = 500
+DETAIL_FETCH_LOW_PRICE_RATIO = 0.95
+
+_MAC_PRODUCT_NAME_PATTERN = re.compile(
+    r"(맥북에어|맥북|맥\s*미니|맥미니|맥\s*스튜디오|맥스튜디오|macbook(?:\s*air)?|mac\s*mini|mac\s*studio|macmini|macstudio)",
+    flags=re.IGNORECASE,
+)
+_TITLE_CHIP_SPEC_PATTERN = re.compile(
+    r"\bm\s*(?:1|2|3|4|5)\b|\bm\s*(?:2|4)\s*[-]?\s*pro\b",
+    flags=re.IGNORECASE,
+)
+_TITLE_RAM_SPEC_PATTERN = re.compile(
+    r"(?:\b(?:8|16|24|32|48|64)\s*(?:gb|g)\b|(?:8|16|24|32|48|64)\s*기가|램\s*(?:8|16|24|32|48|64)|(?:8|16|24|32|48|64)\s*램)",
+    flags=re.IGNORECASE,
+)
+_TITLE_SSD_SPEC_PATTERN = re.compile(
+    r"(?:\b(?:256|512|1024|2048|4096|8192)\s*(?:gb|g|ssd)\b|(?:256|512|1024|2048|4096|8192)\s*기가|\b(?:1|2|4|8)\s*(?:tb|t|테라)\b)",
+    flags=re.IGNORECASE,
+)
+
+
+def _build_parse_failure_result(reason):
+    return {
+        "parse_success": False,
+        "product_type": None,
+        "chip": None,
+        "screen_inch": None,
+        "ram_gb": None,
+        "ssd_gb": None,
+        "parse_failure_reason": reason,
+        "missing_fields": ["product_type", "chip", "ram_gb", "ssd_gb"],
+    }
+
+
+def _safe_parse_listing_from_title(title, self_check_fields=None):
+    normalized_title = _normalize_optional_text(title)
+    if normalized_title is None:
+        return _build_parse_failure_result("title_missing")
+
+    try:
+        parsed_spec = parse_listing_title(normalized_title, self_check_fields=self_check_fields or {})
+    except Exception:
+        return _build_parse_failure_result("title_parse_exception")
+
+    if isinstance(parsed_spec, dict):
+        return parsed_spec
+
+    return _build_parse_failure_result("title_parse_invalid_result")
+
+
+def _contains_mac_product_name(title):
+    normalized_title = _normalize_optional_text(title)
+    if normalized_title is None:
+        return False
+    return bool(_MAC_PRODUCT_NAME_PATTERN.search(normalized_title))
+
+
+def _title_has_explicit_core_specs(title):
+    normalized_title = _normalize_optional_text(title)
+    if normalized_title is None:
+        return False
+
+    return bool(
+        _TITLE_CHIP_SPEC_PATTERN.search(normalized_title)
+        and _TITLE_RAM_SPEC_PATTERN.search(normalized_title)
+        and _TITLE_SSD_SPEC_PATTERN.search(normalized_title)
+    )
+
+
+def _is_title_product_name_only_spec_missing(title, parsed_spec):
+    if not _contains_mac_product_name(title):
+        return False
+
+    if _title_has_explicit_core_specs(title):
+        return False
+
+    if not isinstance(parsed_spec, dict):
+        return True
+
+    missing_fields = parsed_spec.get("missing_fields")
+    if isinstance(missing_fields, list):
+        missing_set = {str(field) for field in missing_fields}
+        if "chip" in missing_set or "ram_gb" in missing_set or "ssd_gb" in missing_set:
+            return True
+
+    return (
+        _normalize_optional_text(parsed_spec.get("chip")) is None
+        or _normalize_optional_int(parsed_spec.get("ram_gb")) is None
+        or _normalize_optional_int(parsed_spec.get("ssd_gb")) is None
+    )
+
+
+def _is_listing_price_cheap(listing_price_krw, target_price_krw):
+    listing_price = _normalize_optional_int(listing_price_krw)
+    target_price = _normalize_optional_int(target_price_krw)
+
+    if listing_price is None or target_price is None:
+        return False
+    if listing_price <= 0 or target_price <= 0:
+        return False
+
+    low_threshold = int(target_price * DETAIL_FETCH_LOW_PRICE_RATIO)
+    return listing_price <= low_threshold
+
+
+def should_fetch_detail(listing, change_reason, title_parse_result, *, target_price_krw=None):
+    normalized_reason = _normalize_optional_text(change_reason)
+    normalized_title = _normalize_optional_text((listing or {}).get("title"))
+    listing_price_krw = _normalize_optional_int((listing or {}).get("price"))
+
+    if normalized_reason == "unchanged":
+        return False, "unchanged"
+
+    if normalized_reason == "new":
+        return True, "new"
+
+    if _is_listing_price_cheap(listing_price_krw, target_price_krw):
+        return True, "price_cheap"
+
+    if _is_title_product_name_only_spec_missing(normalized_title, title_parse_result):
+        return True, "product_only_spec_missing"
+
+    parse_success = bool(title_parse_result.get("parse_success")) if isinstance(title_parse_result, dict) else False
+    if not parse_success:
+        return True, "title_parse_failed"
+
+    if normalized_reason in {
+        "sort_date_changed",
+        "price_changed",
+        "title_changed",
+        "body_maybe_changed",
+        "refresh_key_changed",
+    }:
+        return True, "changed_listing"
+
+    return True, "conservative_default"
 
 
 def _normalize_optional_text(value):
@@ -891,19 +1027,20 @@ def analyze_product_for_watch_rule(job):
     if user_id is None:
         raise ValueError("analysis_job_user_id_missing")
 
-    html = fetch_html(url)
-    parsed_page = parse_joongna_listing_page(html)
+    listing_snapshot = _build_listing_snapshot_from_job(job)
+    title = _normalize_optional_text(listing_snapshot.get("title"))
+    listing_price_krw = _normalize_optional_int(listing_snapshot.get("price"))
+    description = None
+    self_check_fields = {}
 
-    title = parsed_page.get("title")
-    description = parsed_page.get("description")
-    listing_price_krw = _normalize_optional_int(parsed_page.get("listing_price_krw"))
-    self_check_fields = parsed_page.get("self_check_fields") or {}
-
-    parsing_source_text = f"{title or ''} {description or ''}".strip()
-    parsed_spec = parse_listing_title(parsing_source_text, self_check_fields=self_check_fields)
+    parsed_spec = _safe_parse_listing_from_title(title, self_check_fields=self_check_fields)
+    parsing_source_text = f"{title or ''}".strip()
     risk_result = analyze_risk(parsing_source_text, self_check_fields=self_check_fields)
 
-    matched_watch_rule = bool(parsed_spec.get("parse_success"))
+    detail_fetch_performed = False
+    detail_fetch_reason = None
+    detail_skipped_reason = None
+    detail_fetch_error = None
 
     connection = None
     cursor = None
@@ -911,27 +1048,136 @@ def analyze_product_for_watch_rule(job):
         connection = get_connection()
         cursor = connection.cursor()
 
-        saved_window_allowed, saved_window_reason = _evaluate_watch_rule_saved_window(
-            cursor,
-            user_id=user_id,
-            watch_rule_id=watch_rule_id,
-            sort_date=sort_date,
-        )
-
         (
-            fair_price_krw,
-            target_price_krw,
-            alert_drop_rate_percent,
-            alert_price_direction,
-            min_price_krw,
-            max_price_krw,
-            price_error_reason,
-            fair_price_source,
+            pre_fair_price_krw,
+            pre_target_price_krw,
+            pre_alert_drop_rate_percent,
+            pre_alert_price_direction,
+            pre_min_price_krw,
+            pre_max_price_krw,
+            pre_price_error_reason,
+            pre_fair_price_source,
         ) = _resolve_price_rules(
             cursor,
             user_id,
             parsed_spec,
             watch_rule_id=watch_rule_id,
+        )
+
+        detail_fetch_needed, detail_decision_reason = should_fetch_detail(
+            listing_snapshot,
+            trigger_reason,
+            parsed_spec,
+            target_price_krw=pre_target_price_krw,
+        )
+
+        if detail_fetch_needed:
+            detail_fetch_performed = True
+            detail_fetch_reason = detail_decision_reason
+            try:
+                html = fetch_html(url)
+                parsed_page = parse_joongna_listing_page(html)
+
+                parsed_title = _normalize_optional_text(parsed_page.get("title"))
+                if parsed_title is not None:
+                    title = parsed_title
+
+                description = _normalize_optional_text(parsed_page.get("description"))
+
+                parsed_listing_price_krw = _normalize_optional_int(parsed_page.get("listing_price_krw"))
+                if parsed_listing_price_krw is not None:
+                    listing_price_krw = parsed_listing_price_krw
+
+                self_check_fields = parsed_page.get("self_check_fields") or {}
+                parsing_source_text = f"{title or ''} {description or ''}".strip()
+                if parsing_source_text:
+                    try:
+                        parsed_spec = parse_listing_title(
+                            parsing_source_text,
+                            self_check_fields=self_check_fields,
+                        )
+                    except Exception:
+                        parsed_spec = _build_parse_failure_result("detail_parse_exception")
+                else:
+                    parsed_spec = _build_parse_failure_result("detail_parse_empty")
+
+                risk_result = analyze_risk(parsing_source_text, self_check_fields=self_check_fields)
+            except Exception as detail_exc:
+                detail_fetch_error = str(detail_exc)
+                print(
+                    "[analysis_pipeline] detail fetch 실패, 목록 정보로 fallback "
+                    f"(product_id={product_id}, reason={detail_exc})"
+                )
+        else:
+            detail_skipped_reason = detail_decision_reason
+
+        if trigger_reason == "unchanged":
+            return {
+                "ok": True,
+                "analysis_job_id": job_id,
+                "watch_rule_id": watch_rule_id,
+                "product_id": product_id,
+                "url": url,
+                "title": title,
+                "listing_price_krw": listing_price_krw,
+                "fair_price_krw": None,
+                "target_price_krw": None,
+                "drop_rate_percent": None,
+                "alert_drop_rate_percent": None,
+                "alert_price_direction": None,
+                "min_price_krw": None,
+                "max_price_krw": None,
+                "matched_watch_rule": bool(parsed_spec.get("parse_success")) if isinstance(parsed_spec, dict) else False,
+                "is_alert_target": False,
+                "alert_created": False,
+                "alert_event_id": None,
+                "alert_dispatch_status": None,
+                "alert_dispatch_reason": None,
+                "alert_skip_reason": "unchanged_skip_analysis",
+                "fair_price_source": pre_fair_price_source,
+                "sort_date": sort_date,
+                "saved_window_allowed": True,
+                "analysis_skipped": True,
+                "analysis_skip_reason": "unchanged",
+                "detail_fetch_performed": detail_fetch_performed,
+                "detail_fetch_reason": detail_fetch_reason,
+                "detail_skipped_reason": detail_skipped_reason or "unchanged",
+                "detail_fetch_error": detail_fetch_error,
+            }
+
+        if detail_fetch_performed and detail_fetch_error is None:
+            (
+                fair_price_krw,
+                target_price_krw,
+                alert_drop_rate_percent,
+                alert_price_direction,
+                min_price_krw,
+                max_price_krw,
+                price_error_reason,
+                fair_price_source,
+            ) = _resolve_price_rules(
+                cursor,
+                user_id,
+                parsed_spec,
+                watch_rule_id=watch_rule_id,
+            )
+        else:
+            fair_price_krw = pre_fair_price_krw
+            target_price_krw = pre_target_price_krw
+            alert_drop_rate_percent = pre_alert_drop_rate_percent
+            alert_price_direction = pre_alert_price_direction
+            min_price_krw = pre_min_price_krw
+            max_price_krw = pre_max_price_krw
+            price_error_reason = pre_price_error_reason
+            fair_price_source = pre_fair_price_source
+
+        matched_watch_rule = bool(parsed_spec.get("parse_success")) if isinstance(parsed_spec, dict) else False
+
+        saved_window_allowed, saved_window_reason = _evaluate_watch_rule_saved_window(
+            cursor,
+            user_id=user_id,
+            watch_rule_id=watch_rule_id,
+            sort_date=sort_date,
         )
 
         drop_rate_percent = None
@@ -1134,6 +1380,11 @@ def analyze_product_for_watch_rule(job):
             "fair_price_source": fair_price_source,
             "sort_date": sort_date,
             "saved_window_allowed": saved_window_allowed,
+            "detail_fetch_performed": detail_fetch_performed,
+            "detail_fetch_reason": detail_fetch_reason,
+            "detail_skipped_reason": detail_skipped_reason,
+            "detail_fetch_error": detail_fetch_error,
+            "analysis_skipped": False,
         }
     except Exception:
         if connection is not None:
@@ -1186,9 +1437,14 @@ def process_pending_analysis_jobs(limit=20):
     jobs = get_pending_analysis_jobs(limit=limit)
     stats = {
         "fetched": len(jobs),
+        "fetched_list_count": len(jobs),
         "done": 0,
         "skipped": 0,
         "failed": 0,
+        "detail_fetch_count": 0,
+        "detail_skipped_count": 0,
+        "detail_fetch_reason_counts": {},
+        "unchanged_detail_skipped_count": 0,
         "results": [],
     }
 
@@ -1200,6 +1456,21 @@ def process_pending_analysis_jobs(limit=20):
                 stats["skipped"] += 1
             elif result.get("ok"):
                 stats["done"] += 1
+
+                analysis_result = result.get("result")
+                if isinstance(analysis_result, dict):
+                    detail_fetch_performed = bool(analysis_result.get("detail_fetch_performed"))
+                    if detail_fetch_performed:
+                        stats["detail_fetch_count"] += 1
+                        fetch_reason = _normalize_optional_text(analysis_result.get("detail_fetch_reason")) or "unknown"
+                        reason_counts = stats.get("detail_fetch_reason_counts") or {}
+                        reason_counts[fetch_reason] = int(reason_counts.get(fetch_reason, 0)) + 1
+                        stats["detail_fetch_reason_counts"] = reason_counts
+                    else:
+                        stats["detail_skipped_count"] += 1
+                        skip_reason = _normalize_optional_text(analysis_result.get("detail_skipped_reason"))
+                        if skip_reason == "unchanged":
+                            stats["unchanged_detail_skipped_count"] += 1
             else:
                 stats["failed"] += 1
         except Exception as exc:

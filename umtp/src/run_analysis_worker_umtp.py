@@ -43,6 +43,13 @@ def _print_summary(stats):
         f"done={stats.get('done', 0)}, "
         f"failed={stats.get('failed', 0)}"
     )
+    print(
+        f"fetched_list_count={stats.get('fetched_list_count', 0)}, "
+        f"detail_fetch_count={stats.get('detail_fetch_count', 0)}, "
+        f"detail_skipped_count={stats.get('detail_skipped_count', 0)}, "
+        f"unchanged_detail_skipped_count={stats.get('unchanged_detail_skipped_count', 0)}"
+    )
+    print(f"detail_fetch_reason_counts={stats.get('detail_fetch_reason_counts', {})}")
 
 
 def main():

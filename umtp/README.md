@@ -125,6 +125,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.8 진행 현황: polling은 감지된 매물을 `analysis_jobs`에 enqueue하고, analysis worker가 pending job을 처리해 `listing_analysis_results` 및 `alert_events`를 생성합니다.
 - 1.8 polling 구조: 같은 `source + search_keyword`는 같은 polling cycle에서 외부 Search API를 1회만 호출하고, 결과를 저장한 뒤 여러 설정(`user_fair_prices`)은 저장 결과를 내부 매칭으로 공유합니다.
 - 1.8 변경 감지 스킵 구조: `joongna_seen_products`의 이전 관측값과 현재 관측값을 비교해 `new/sort_date_changed/price_changed/title_changed/refresh_key_changed/body_maybe_changed`만 분석 큐로 보내고, `unchanged`는 분석을 스킵합니다.
+- 1.8 lazy detail fetch 구조: analysis worker는 모든 매물의 상세본문을 조회하지 않고, `new/저가 후보/제목 파싱 실패/제품명만 있고 스펙 부족` 후보에만 상세조회(fetch_html)를 수행합니다.
 - 1.8 변경 로그: polling 요약에 `fetched_count/new_count/changed_count/unchanged_skipped_count/analyzed_count/alert_created_count`를 함께 기록합니다.
 - 1.8 알림 구조: notification worker가 `alert_events` pending을 읽어 Telegram 전송(`sent`) 또는 앱 피드 전용 상태(`app_only`)로 처리합니다.
 - 1.8 운영 구조: polling은 enqueue 전용이며, analysis는 `run_analysis_worker_umtp.py`, Telegram 전송은 `run_notification_worker_umtp.py` 전용 worker로 처리합니다.
@@ -866,6 +867,7 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - `joongna_seen_products`는 단순 중복 차단이 아니라 마지막 관측 상태 저장용으로 사용합니다.
 - 같은 `product_id/seq`라도 가격/제목/`refresh_key`가 바뀌면 재분석합니다.
 - 완전히 동일한 상태(`unchanged`)면 `last_seen_at`, `seen_count`만 갱신하고 중복 분석/중복 알림을 막습니다.
+- analysis worker는 상세조회가 필요한 후보 매물에서만 상세페이지/본문을 조회하고, `unchanged`는 상세조회와 분석을 모두 스킵합니다.
 - Search API 응답의 `url` 필드는 이미지 URL로 저장하며, 실제 매물 URL은 `https://web.joongna.com/product/{seq}`로 생성합니다.
 - 같은 검색어를 쓰는 여러 설정/user는 검색 결과를 공유합니다.
 - 재분석 이유는 `joongna_seen_products.last_change_reason`에서 확인합니다.
