@@ -195,6 +195,7 @@ fun AlertCard(
     onOpenDetails: () -> Unit,
 ) {
     val listingImageUrl = alert.listing_image_url?.takeIf { it.isNotBlank() }
+    val isReferenceNotice = isConditionChangeCandidateNotice(alert)
 
     Card(
         modifier = Modifier
@@ -245,8 +246,21 @@ fun AlertCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                BadgeChip(label = resolveRiskLabel(alert), color = resolveRiskColor(alert))
-                BadgeChip(label = resolveAlertConditionLabel(alert), color = Color(0xFF1565C0))
+                if (isReferenceNotice) {
+                    BadgeChip(label = "참고 알림", color = Color(0xFF8D6E63))
+                    BadgeChip(label = "조건 변경 사이 후보", color = Color(0xFF6D4C41))
+                } else {
+                    BadgeChip(label = resolveRiskLabel(alert), color = resolveRiskColor(alert))
+                    BadgeChip(label = resolveAlertConditionLabel(alert), color = Color(0xFF1565C0))
+                }
+            }
+            if (isReferenceNotice) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "저장 시점 사이에 새 기준으로 맞았던 참고 후보입니다.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray,
+                )
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -453,6 +467,9 @@ private fun resolveAlertUrl(alert: AlertItem): String? {
 }
 
 private fun resolveAlertConditionLabel(alert: AlertItem): String {
+    if (isConditionChangeCandidateNotice(alert)) {
+        return "조건 변경 사이 후보"
+    }
     alert.alert_condition_label?.let {
         if (it.isNotBlank()) {
             return it
@@ -590,6 +607,7 @@ private fun buildAlertDetailRows(
     listingImageUrl: String?,
 ): List<Pair<String, String>> {
     return listOf(
+        "알림 유형" to if (isConditionChangeCandidateNotice(alert)) "참고 알림 (조건 변경 사이 후보)" else "정식 알림",
         "출처" to (alert.source?.takeIf { it.isNotBlank() } ?: "정보 없음"),
         "URL" to (resolvedUrl ?: "URL 정보 없음"),
         "대표 이미지" to (listingImageUrl ?: "이미지 없음"),
@@ -626,4 +644,14 @@ private fun buildSpecSummary(alert: AlertItem): String {
         return "분류 정보 없음"
     }
     return tokens.joinToString(" · ")
+}
+
+private fun isConditionChangeCandidateNotice(alert: AlertItem): Boolean {
+    if (alert.is_condition_change_candidate_notice) {
+        return true
+    }
+    if (!alert.is_alert_target) {
+        return true
+    }
+    return (alert.trigger_reason ?: "").trim().lowercase() == "condition_change_candidate_notice"
 }

@@ -105,6 +105,7 @@ class UserFairPriceUpsertRequest(BaseModel):
     min_price_krw: Optional[int] = Field(default=None, ge=0)
     max_price_krw: Optional[int] = Field(default=None, ge=0)
     enabled: bool
+    condition_change_candidate_notice_enabled: bool = False
     search_keyword: Optional[str] = Field(default=None, max_length=255)
     poll_interval_seconds: int = Field(default=60, ge=1)
 
@@ -274,6 +275,7 @@ def user_fair_prices_upsert(request: UserFairPriceUpsertRequest):
             max_price_krw=request.max_price_krw,
             search_keyword=request.search_keyword,
             poll_interval_seconds=request.poll_interval_seconds,
+            condition_change_candidate_notice_enabled=request.condition_change_candidate_notice_enabled,
         )
     except ValueError:
         return {"ok": False, "reason": "invalid_user_id"}

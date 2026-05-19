@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from decimal import Decimal
+import uuid
 
 from src.alert_price_direction import (
     DEFAULT_ALERT_PRICE_DIRECTION,
@@ -30,6 +31,9 @@ CHIP_SORT_ORDER = {
 }
 DEFAULT_SYSTEM_ALERT_DROP_RATE_PERCENT = 20.0
 DEFAULT_POLL_INTERVAL_SECONDS = 60
+DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED = False
+CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON = "condition_change_candidate_notice"
+CONDITION_CHANGE_CANDIDATE_NOTICE_SOURCE = "umtp_notice"
 logger = logging.getLogger("umtp.user_settings")
 
 
@@ -182,6 +186,201 @@ def _format_saved_at_notice_message(missed_candidate_count):
     return f"조건 변경 사이에 새 기준에 맞는 매물이 {normalized_count}개 있었어요."
 
 
+def _build_condition_change_candidate_notice_title(*, chip, screen_inch, ram_gb, ssd_gb):
+    normalized_chip = _safe_text(chip) or "기타"
+    normalized_screen_inch = _safe_int(screen_inch)
+    normalized_ram_gb = _safe_int(ram_gb)
+    normalized_ssd_gb = _safe_int(ssd_gb)
+
+    segments = [normalized_chip]
+    if normalized_screen_inch is not None and normalized_screen_inch > 0:
+        segments.append(f"{normalized_screen_inch}인치")
+    if normalized_ram_gb is not None and normalized_ram_gb > 0:
+        segments.append(f"{normalized_ram_gb}GB")
+    if normalized_ssd_gb is not None and normalized_ssd_gb > 0:
+        segments.append(f"{normalized_ssd_gb}GB SSD")
+    return "조건 변경 사이 후보 · " + " / ".join(segments)
+
+
+def _insert_condition_change_candidate_notice_alert_event(
+    cursor,
+    *,
+    user_id,
+    watch_rule_id,
+    product_type,
+    chip,
+    screen_inch,
+    ram_gb,
+    ssd_gb,
+    fair_price_krw,
+    target_price_krw,
+    alert_drop_rate_percent,
+    alert_price_direction,
+    missed_candidate_count,
+    sort_date,
+):
+    normalized_user_id = _safe_text(user_id)
+    normalized_rule_id = _safe_int(watch_rule_id)
+    normalized_sort_date = _coerce_datetime(sort_date) or datetime.now()
+    normalized_message = _format_saved_at_notice_message(missed_candidate_count)
+
+    if normalized_user_id is None or normalized_rule_id is None or normalized_rule_id <= 0:
+        return {"created": False, "reason": "invalid_reference_notice_context"}
+
+    product_id = f"cccn-{normalized_rule_id}-{uuid.uuid4().hex[:16]}"
+    title = _build_condition_change_candidate_notice_title(
+        chip=chip,
+        screen_inch=screen_inch,
+        ram_gb=ram_gb,
+        ssd_gb=ssd_gb,
+    )
+    body_text = (
+        f"{normalized_message}\n"
+        "정식 알림 기준은 저장 이후 매물이며, 이 항목은 참고용 후보입니다."
+    )
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO alert_events (
+                user_id,
+                watch_rule_id,
+                analysis_job_id,
+                product_id,
+                sort_date,
+                source,
+                url,
+                title,
+                product_type,
+                chip,
+                screen_inch,
+                ram_gb,
+                ssd_gb,
+                fair_price_krw,
+                target_price_krw,
+                drop_rate_percent,
+                alert_drop_rate_percent,
+                alert_price_direction,
+                body_excerpt,
+                body_text,
+                analyzed_at,
+                trigger_reason,
+                message,
+                status,
+                send_attempts,
+                is_read,
+                read_at
+            )
+            VALUES (
+                %s, %s, NULL, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, NULL, %s, %s, %s, %s,
+                %s, %s, %s, 'app_only', 0, 0, NULL
+            )
+            """,
+            (
+                normalized_user_id,
+                normalized_rule_id,
+                product_id,
+                normalized_sort_date,
+                CONDITION_CHANGE_CANDIDATE_NOTICE_SOURCE,
+                "",
+                title,
+                _safe_text(product_type),
+                _safe_text(chip),
+                _safe_int(screen_inch),
+                _safe_int(ram_gb),
+                _safe_int(ssd_gb),
+                _safe_int(fair_price_krw),
+                _safe_int(target_price_krw),
+                _safe_float(alert_drop_rate_percent),
+                _safe_text(alert_price_direction),
+                normalized_message,
+                body_text,
+                normalized_sort_date,
+                CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON,
+                normalized_message,
+            ),
+        )
+        return {"created": True, "reason": "created", "product_id": product_id}
+    except Exception as exc:
+        lowered_exc = str(exc).lower()
+        if "unknown column" not in lowered_exc:
+            raise
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO alert_events (
+                user_id,
+                watch_rule_id,
+                product_id,
+                sort_date,
+                source,
+                url,
+                title,
+                fair_price_krw,
+                target_price_krw,
+                alert_drop_rate_percent,
+                alert_price_direction,
+                trigger_reason,
+                message,
+                status,
+                send_attempts
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'app_only', 0)
+            """,
+            (
+                normalized_user_id,
+                normalized_rule_id,
+                product_id,
+                normalized_sort_date,
+                CONDITION_CHANGE_CANDIDATE_NOTICE_SOURCE,
+                "",
+                title,
+                _safe_int(fair_price_krw),
+                _safe_int(target_price_krw),
+                _safe_float(alert_drop_rate_percent),
+                _safe_text(alert_price_direction),
+                CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON,
+                normalized_message,
+            ),
+        )
+        return {"created": True, "reason": "created_fallback", "product_id": product_id}
+    except Exception as exc:
+        lowered_exc = str(exc).lower()
+        if "unknown column" not in lowered_exc:
+            raise
+
+    cursor.execute(
+        """
+        INSERT INTO alert_events (
+            user_id,
+            product_id,
+            url,
+            title,
+            fair_price_krw,
+            target_price_krw,
+            trigger_reason,
+            message,
+            status,
+            send_attempts
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'app_only', 0)
+        """,
+        (
+            normalized_user_id,
+            product_id,
+            "",
+            title,
+            _safe_int(fair_price_krw),
+            _safe_int(target_price_krw),
+            CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON,
+            normalized_message,
+        ),
+    )
+    return {"created": True, "reason": "created_minimal", "product_id": product_id}
+
+
 def _build_rule_snapshot(
     *,
     fair_price_krw,
@@ -283,6 +482,7 @@ def _fetch_existing_user_fair_price_rule_state(
                 alert_price_direction,
                 min_price_krw,
                 max_price_krw,
+                condition_change_candidate_notice_enabled,
                 enabled
             FROM user_fair_prices
             WHERE user_id = %s
@@ -303,6 +503,7 @@ def _fetch_existing_user_fair_price_rule_state(
                 "alert_price_direction",
                 "min_price_krw",
                 "max_price_krw",
+                "condition_change_candidate_notice_enabled",
                 "enabled",
             ),
         ),
@@ -413,6 +614,10 @@ def _fetch_existing_user_fair_price_rule_state(
                     min_price_krw=row_data.get("min_price_krw"),
                     max_price_krw=row_data.get("max_price_krw"),
                     enabled=row_data.get("enabled"),
+                ),
+                "condition_change_candidate_notice_enabled": _safe_bool(
+                    row_data.get("condition_change_candidate_notice_enabled"),
+                    default=DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED,
                 ),
             }
         except Exception as exc:
@@ -663,7 +868,7 @@ def _fetch_user_overrides_map(cursor, user_id):
                 SELECT id, product_type, chip, screen_inch, ram_gb, ssd_gb,
                    fair_price_krw, alert_drop_rate_percent, target_buy_price_krw, alert_price_direction,
                    min_price_krw, max_price_krw,
-                   enabled,
+                   enabled, condition_change_candidate_notice_enabled,
                    search_keyword, force_poll, poll_interval_seconds,
                    last_polled_at, last_poll_requested_at, saved_at
                 FROM user_fair_prices
@@ -694,6 +899,10 @@ def _fetch_user_overrides_map(cursor, user_id):
                 row["min_price_krw"] = None
                 row["max_price_krw"] = None
                 row["saved_at"] = row.get("saved_at") or row.get("last_poll_requested_at")
+                row.setdefault(
+                    "condition_change_candidate_notice_enabled",
+                    DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED,
+                )
         except Exception as first_fallback_exc:
             if "unknown column" not in str(first_fallback_exc).lower():
                 raise
@@ -725,6 +934,10 @@ def _fetch_user_overrides_map(cursor, user_id):
                 rows = cursor.fetchall() or []
             for row in rows:
                 row.setdefault("enabled", True)
+                row.setdefault(
+                    "condition_change_candidate_notice_enabled",
+                    DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED,
+                )
                 row["alert_price_direction"] = DEFAULT_ALERT_PRICE_DIRECTION
                 row["search_keyword"] = None
                 row["force_poll"] = False
@@ -754,6 +967,10 @@ def _fetch_user_overrides_map(cursor, user_id):
             "min_price_krw": _safe_int(row.get("min_price_krw")),
             "max_price_krw": _safe_int(row.get("max_price_krw")),
             "enabled": _safe_bool(row.get("enabled"), default=True),
+            "condition_change_candidate_notice_enabled": _safe_bool(
+                row.get("condition_change_candidate_notice_enabled"),
+                default=DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED,
+            ),
             "search_keyword": _normalize_optional_search_keyword(row.get("search_keyword")),
             "force_poll": _safe_bool(row.get("force_poll"), default=False),
             "poll_interval_seconds": _safe_int(row.get("poll_interval_seconds")) or DEFAULT_POLL_INTERVAL_SECONDS,
@@ -821,6 +1038,14 @@ def get_user_fair_price_settings(user_id):
         user_min_price_krw = user_item.get("min_price_krw") if has_user_override else None
         user_max_price_krw = user_item.get("max_price_krw") if has_user_override else None
         enabled = user_item.get("enabled", True) if has_user_override else False
+        condition_change_candidate_notice_enabled = (
+            user_item.get(
+                "condition_change_candidate_notice_enabled",
+                DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED,
+            )
+            if has_user_override
+            else DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED
+        )
         custom_search_keyword = user_item.get("search_keyword") if has_user_override else None
         recommended_search_keyword = _build_recommended_search_keyword(
             unit["product_type"],
@@ -881,6 +1106,7 @@ def get_user_fair_price_settings(user_id):
                 "user_min_price_krw": user_min_price_krw,
                 "user_max_price_krw": user_max_price_krw,
                 "enabled": bool(enabled),
+                "condition_change_candidate_notice_enabled": bool(condition_change_candidate_notice_enabled),
                 "effective_fair_price_krw": effective_fair_price_krw,
                 "effective_alert_drop_rate_percent": effective_alert_drop_rate_percent,
                 "effective_alert_price_direction": effective_alert_price_direction,
@@ -1096,6 +1322,7 @@ def upsert_user_fair_price_setting(
     max_price_krw=None,
     search_keyword=None,
     poll_interval_seconds=DEFAULT_POLL_INTERVAL_SECONDS,
+    condition_change_candidate_notice_enabled=DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED,
 ):
     if not isinstance(user_id, str) or not user_id.strip():
         return {"ok": False, "reason": "invalid_user_id"}
@@ -1140,6 +1367,8 @@ def upsert_user_fair_price_setting(
 
     if not isinstance(enabled, bool):
         return {"ok": False, "reason": "invalid_enabled"}
+    if not isinstance(condition_change_candidate_notice_enabled, bool):
+        return {"ok": False, "reason": "invalid_condition_change_candidate_notice_enabled"}
 
     if not is_valid_macbook_air_unit(
         normalized_chip, normalized_screen_inch, normalized_ram_gb, normalized_ssd_gb
@@ -1226,6 +1455,7 @@ def upsert_user_fair_price_setting(
                     min_price_krw,
                     max_price_krw,
                     enabled,
+                    condition_change_candidate_notice_enabled,
                     search_keyword,
                     poll_interval_seconds,
                     force_poll,
@@ -1234,6 +1464,7 @@ def upsert_user_fair_price_setting(
                 )
                 VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s,
                     %s,
                     %s,
                     %s,
@@ -1248,6 +1479,7 @@ def upsert_user_fair_price_setting(
                     min_price_krw = VALUES(min_price_krw),
                     max_price_krw = VALUES(max_price_krw),
                     enabled = VALUES(enabled),
+                    condition_change_candidate_notice_enabled = VALUES(condition_change_candidate_notice_enabled),
                     search_keyword = VALUES(search_keyword),
                     poll_interval_seconds = VALUES(poll_interval_seconds),
                     force_poll = CASE
@@ -1277,6 +1509,7 @@ def upsert_user_fair_price_setting(
                     normalized_min_price_krw,
                     normalized_max_price_krw,
                     enabled,
+                    condition_change_candidate_notice_enabled,
                     resolved_search_keyword,
                     normalized_poll_interval_seconds,
                     enabled,
@@ -1288,7 +1521,81 @@ def upsert_user_fair_price_setting(
             if "unknown column" not in lowered_exc:
                 raise
             handled_unknown_column = False
-            if "min_price_krw" in lowered_exc or "max_price_krw" in lowered_exc:
+            if "condition_change_candidate_notice_enabled" in lowered_exc:
+                cursor.execute(
+                    """
+                    INSERT INTO user_fair_prices (
+                        user_id,
+                        product_type,
+                        chip,
+                        screen_inch,
+                        ram_gb,
+                        ssd_gb,
+                        fair_price_krw,
+                        alert_drop_rate_percent,
+                        alert_price_direction,
+                        min_price_krw,
+                        max_price_krw,
+                        enabled,
+                        search_keyword,
+                        poll_interval_seconds,
+                        force_poll,
+                        last_poll_requested_at,
+                        last_polled_at
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s,
+                        %s,
+                        %s,
+                        IF(%s = TRUE, TRUE, FALSE),
+                        IF(%s = TRUE, CURRENT_TIMESTAMP, NULL),
+                        NULL
+                    )
+                    ON DUPLICATE KEY UPDATE
+                        fair_price_krw = VALUES(fair_price_krw),
+                        alert_drop_rate_percent = VALUES(alert_drop_rate_percent),
+                        alert_price_direction = VALUES(alert_price_direction),
+                        min_price_krw = VALUES(min_price_krw),
+                        max_price_krw = VALUES(max_price_krw),
+                        enabled = VALUES(enabled),
+                        search_keyword = VALUES(search_keyword),
+                        poll_interval_seconds = VALUES(poll_interval_seconds),
+                        force_poll = CASE
+                            WHEN VALUES(enabled) = TRUE THEN TRUE
+                            ELSE FALSE
+                        END,
+                        last_poll_requested_at = CASE
+                            WHEN VALUES(enabled) = TRUE THEN CURRENT_TIMESTAMP
+                            ELSE last_poll_requested_at
+                        END,
+                        last_polled_at = CASE
+                            WHEN VALUES(enabled) = TRUE THEN NULL
+                            ELSE last_polled_at
+                        END,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        normalized_user_id,
+                        normalized_product_type,
+                        normalized_chip,
+                        normalized_screen_inch,
+                        normalized_ram_gb,
+                        normalized_ssd_gb,
+                        normalized_fair_price_krw,
+                        normalized_alert_drop_rate_percent,
+                        normalized_alert_price_direction,
+                        normalized_min_price_krw,
+                        normalized_max_price_krw,
+                        enabled,
+                        resolved_search_keyword,
+                        normalized_poll_interval_seconds,
+                        enabled,
+                        enabled,
+                    ),
+                )
+                handled_unknown_column = True
+            elif "min_price_krw" in lowered_exc or "max_price_krw" in lowered_exc:
                 try:
                     cursor.execute(
                         """
@@ -1543,9 +1850,42 @@ def upsert_user_fair_price_setting(
                 new_rule_snapshot=new_rule_snapshot,
             )
 
+        if (
+            missed_candidate_count > 0
+            and condition_change_candidate_notice_enabled
+            and rule_id is not None
+        ):
+            try:
+                _insert_condition_change_candidate_notice_alert_event(
+                    cursor,
+                    user_id=normalized_user_id,
+                    watch_rule_id=rule_id,
+                    product_type=normalized_product_type,
+                    chip=normalized_chip,
+                    screen_inch=normalized_screen_inch,
+                    ram_gb=normalized_ram_gb,
+                    ssd_gb=normalized_ssd_gb,
+                    fair_price_krw=normalized_fair_price_krw,
+                    target_price_krw=compute_target_buy_price_krw(
+                        normalized_fair_price_krw,
+                        normalized_alert_drop_rate_percent,
+                    ),
+                    alert_drop_rate_percent=normalized_alert_drop_rate_percent,
+                    alert_price_direction=normalized_alert_price_direction,
+                    missed_candidate_count=missed_candidate_count,
+                    sort_date=current_saved_at,
+                )
+            except Exception as notice_exc:
+                logger.warning(
+                    "condition-change candidate notice insert skipped user_id=%s rule_id=%s reason=%s",
+                    normalized_user_id,
+                    rule_id,
+                    notice_exc,
+                )
+
         connection.commit()
         response_message = "사용자 공정가 설정 저장 완료"
-        if missed_candidate_count > 0:
+        if missed_candidate_count > 0 and condition_change_candidate_notice_enabled:
             response_message = _format_saved_at_notice_message(missed_candidate_count)
 
         return {
@@ -1573,6 +1913,7 @@ def upsert_user_fair_price_setting(
                 "min_price_krw": normalized_min_price_krw,
                 "max_price_krw": normalized_max_price_krw,
                 "enabled": enabled,
+                "condition_change_candidate_notice_enabled": condition_change_candidate_notice_enabled,
                 "custom_search_keyword": resolved_search_keyword,
                 "recommended_search_keyword": _build_recommended_search_keyword(
                     normalized_product_type,

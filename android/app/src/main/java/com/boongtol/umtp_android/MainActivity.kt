@@ -238,13 +238,14 @@ fun MainTabScreen(
                     refreshingRuleIds = refreshingRuleIds,
                     ruleRefreshStatusMessages = ruleRefreshStatusMessages,
                     ruleLastRefreshLabels = ruleLastRefreshLabels,
-                    onUpsert = { unit, fairPrice, desiredPrice, alertPriceDirection, enabled, searchKeyword, boundPrice ->
+                    onUpsert = { unit, fairPrice, desiredPrice, alertPriceDirection, enabled, conditionChangeCandidateNoticeEnabled, searchKeyword, boundPrice ->
                         viewModel.upsertItem(
                             unit,
                             fairPrice,
                             desiredPrice,
                             alertPriceDirection,
                             enabled,
+                            conditionChangeCandidateNoticeEnabled,
                             searchKeyword,
                             boundPrice,
                         )
@@ -271,7 +272,7 @@ fun SettingsNavigator(
     refreshingRuleIds: Set<Long>,
     ruleRefreshStatusMessages: Map<Long, String>,
     ruleLastRefreshLabels: Map<Long, String>,
-    onUpsert: (com.boongtol.umtp_android.network.MacBookAirUnit, Int, Int, String, Boolean, String?, Int?) -> Unit,
+    onUpsert: (com.boongtol.umtp_android.network.MacBookAirUnit, Int, Int, String, Boolean, Boolean, String?, Int?) -> Unit,
     onRefreshRule: (Long) -> Unit,
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.ChipList) }

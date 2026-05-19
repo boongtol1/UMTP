@@ -461,6 +461,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         desiredPrice: Int,
         alertPriceDirection: String,
         enabled: Boolean,
+        conditionChangeCandidateNoticeEnabled: Boolean,
         searchKeyword: String?,
         boundPrice: Int?
     ) {
@@ -503,6 +504,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     min_price_krw = boundsRequest.min_price_krw,
                     max_price_krw = boundsRequest.max_price_krw,
                     enabled = enabled,
+                    condition_change_candidate_notice_enabled = conditionChangeCandidateNoticeEnabled,
                     search_keyword = searchKeyword?.trim()?.ifEmpty { null },
                     poll_interval_seconds = 60
                 )

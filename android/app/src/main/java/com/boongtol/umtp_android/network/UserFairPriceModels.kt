@@ -50,6 +50,7 @@ data class UserFairPriceItem(
     val user_min_price_krw: Int? = null,
     val user_max_price_krw: Int? = null,
     val enabled: Boolean = false,
+    val condition_change_candidate_notice_enabled: Boolean = false,
 
     val effective_fair_price_krw: Int? = null,
     val effective_alert_drop_rate_percent: Double? = null,
@@ -89,6 +90,7 @@ data class UserFairPriceUpsertRequest(
     val min_price_krw: Int? = null,
     val max_price_krw: Int? = null,
     val enabled: Boolean,
+    val condition_change_candidate_notice_enabled: Boolean = false,
     val search_keyword: String? = null,
     val poll_interval_seconds: Int = 60
 )

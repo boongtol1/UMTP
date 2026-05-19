@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS user_fair_prices (
   min_price_krw INT NULL,
   max_price_krw INT NULL,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  condition_change_candidate_notice_enabled BOOLEAN NOT NULL DEFAULT FALSE,
   search_keyword VARCHAR(255) NULL,
   poll_interval_seconds INT NOT NULL DEFAULT 60,
   force_poll BOOLEAN NOT NULL DEFAULT FALSE,
@@ -58,6 +59,20 @@ PREPARE stmt_saved_at FROM @sql_saved_at;
 EXECUTE stmt_saved_at;
 DEALLOCATE PREPARE stmt_saved_at;
 
+SELECT COUNT(*) INTO @has_condition_change_candidate_notice_enabled
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'user_fair_prices'
+  AND column_name = 'condition_change_candidate_notice_enabled';
+SET @sql_condition_change_candidate_notice_enabled = IF(
+  @has_condition_change_candidate_notice_enabled = 0,
+  'ALTER TABLE user_fair_prices ADD COLUMN condition_change_candidate_notice_enabled BOOLEAN NOT NULL DEFAULT FALSE AFTER enabled',
+  'SELECT "condition_change_candidate_notice_enabled exists"'
+);
+PREPARE stmt_condition_change_candidate_notice_enabled FROM @sql_condition_change_candidate_notice_enabled;
+EXECUTE stmt_condition_change_candidate_notice_enabled;
+DEALLOCATE PREPARE stmt_condition_change_candidate_notice_enabled;
+
 INSERT INTO user_fair_prices (
   user_id,
   product_type,
@@ -71,6 +86,7 @@ INSERT INTO user_fair_prices (
   min_price_krw,
   max_price_krw,
   enabled,
+  condition_change_candidate_notice_enabled,
   search_keyword,
   poll_interval_seconds,
   force_poll,
@@ -91,6 +107,7 @@ VALUES (
   NULL,
   NULL,
   TRUE,
+  FALSE,
   'm1맥북에어',
   60,
   TRUE,
@@ -105,6 +122,7 @@ ON DUPLICATE KEY UPDATE
   min_price_krw = VALUES(min_price_krw),
   max_price_krw = VALUES(max_price_krw),
   enabled = VALUES(enabled),
+  condition_change_candidate_notice_enabled = VALUES(condition_change_candidate_notice_enabled),
   search_keyword = VALUES(search_keyword),
   poll_interval_seconds = VALUES(poll_interval_seconds),
   force_poll = VALUES(force_poll),

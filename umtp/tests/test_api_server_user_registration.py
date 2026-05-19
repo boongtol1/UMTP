@@ -45,6 +45,9 @@ class ApiServerUserRegistrationTest(unittest.TestCase):
         mock_register_user.assert_called_once_with(user_id="boongtol")
         mock_upsert_setting.assert_called_once()
         self.assertEqual(mock_upsert_setting.call_args.kwargs.get("user_id"), "boongtol")
+        self.assertFalse(
+            mock_upsert_setting.call_args.kwargs.get("condition_change_candidate_notice_enabled")
+        )
 
     @patch("src.api_server.upsert_user_fair_price_setting", return_value={"ok": True})
     @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
@@ -75,6 +78,40 @@ class ApiServerUserRegistrationTest(unittest.TestCase):
         self.assertEqual(mock_upsert_setting.call_args.kwargs.get("alert_price_direction"), "ABOVE_OR_EQUAL")
         self.assertIsNone(mock_upsert_setting.call_args.kwargs.get("min_price_krw"))
         self.assertEqual(mock_upsert_setting.call_args.kwargs.get("max_price_krw"), 1100000)
+        self.assertFalse(
+            mock_upsert_setting.call_args.kwargs.get("condition_change_candidate_notice_enabled")
+        )
+
+    @patch("src.api_server.upsert_user_fair_price_setting", return_value={"ok": True})
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_user_fair_price_upsert_passes_condition_change_candidate_notice_flag(
+        self,
+        mock_register_user,
+        mock_upsert_setting,
+    ):
+        request = api_server.UserFairPriceUpsertRequest(
+            user_id="boongtol",
+            product_type="MacBook Air",
+            chip="M3",  # type: ignore[arg-type]
+            screen_inch=13,
+            ram_gb=16,
+            ssd_gb=512,
+            fair_price_krw=1500000,
+            alert_drop_rate_percent=12.0,
+            enabled=True,
+            condition_change_candidate_notice_enabled=True,
+            search_keyword="m3맥북에어",
+            poll_interval_seconds=60,
+        )
+
+        response = api_server.user_fair_prices_upsert(request)
+
+        self.assertTrue(response.get("ok"))
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_upsert_setting.assert_called_once()
+        self.assertTrue(
+            mock_upsert_setting.call_args.kwargs.get("condition_change_candidate_notice_enabled")
+        )
 
     @patch("src.api_server.register_user", return_value={"ok": False, "reason": "duplicate_device_conflict"})
     def test_user_fair_prices_returns_registration_failure(self, mock_register_user):

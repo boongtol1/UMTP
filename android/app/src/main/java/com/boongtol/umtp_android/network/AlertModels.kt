@@ -28,6 +28,7 @@ data class AlertItem(
     val trade_type_flags: TradeTypeFlags? = null,
     val body_excerpt: String? = null,
     val body_text: String? = null,
+    val trigger_reason: String? = null,
     val analyzed_at: String? = null,
     val created_at: String? = null,
     val is_read: Boolean = false,
@@ -35,6 +36,7 @@ data class AlertItem(
     val is_read_archive_cleared: Boolean = false,
     val read_archive_cleared_at: String? = null,
     val is_alert_target: Boolean = true,
+    val is_condition_change_candidate_notice: Boolean = false,
 )
 
 data class TradeTypeFlags(

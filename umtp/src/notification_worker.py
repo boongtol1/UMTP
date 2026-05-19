@@ -37,6 +37,7 @@ except Exception:  # pragma: no cover
 
 _FIREBASE_INIT_ATTEMPTED = False
 _FIREBASE_INIT_ERROR = None
+CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON = "condition_change_candidate_notice"
 
 
 def _normalize_optional_text(value):
@@ -1830,6 +1831,10 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
             read_at = row.get("read_at")
             is_read_archive_cleared = bool(_safe_int(row.get("is_read_archive_cleared")) or 0)
             read_archive_cleared_at = row.get("read_archive_cleared_at")
+            trigger_reason = _normalize_optional_text(row.get("trigger_reason"))
+            is_condition_change_candidate_notice = (
+                trigger_reason == CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON
+            )
 
             if not has_detail_columns:
                 log_detail = _fetch_latest_log_details(
@@ -1901,7 +1906,7 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
                     "alert_drop_rate_percent": alert_drop_rate_percent,
                     "alert_price_direction": alert_price_direction,
                     "alert_condition_label": _build_alert_condition_label(alert_price_direction),
-                    "trigger_reason": row.get("trigger_reason"),
+                    "trigger_reason": trigger_reason,
                     "message": row.get("message"),
                     "risk_level": risk_level,
                     "formatted_risk_label": _build_formatted_risk_label(risk_level),
@@ -1924,7 +1929,8 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
                     "created_at": row.get("created_at"),
                     "sent_at": row.get("sent_at"),
                     "updated_at": row.get("updated_at"),
-                    "is_alert_target": True,
+                    "is_alert_target": not is_condition_change_candidate_notice,
+                    "is_condition_change_candidate_notice": is_condition_change_candidate_notice,
                 }
             )
 

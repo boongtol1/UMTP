@@ -100,6 +100,8 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
         self.assertEqual(item.get("body_excerpt"), "상태 좋고 배터리 정상")
         self.assertEqual(item.get("body_text"), "상태 좋고 배터리 정상. 사용감 적음.")
         self.assertEqual(item.get("listing_image_url"), "https://img.joongna.com/p/1.jpg")
+        self.assertTrue(item.get("is_alert_target"))
+        self.assertFalse(item.get("is_condition_change_candidate_notice"))
         self.assertFalse(item.get("is_read"))
         self.assertIsNone(item.get("read_at"))
 
@@ -170,8 +172,55 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
         self.assertTrue(item.get("trade_type_flags", {}).get("is_suspicious"))
         self.assertEqual(item.get("body_text"), "교환 원합니다. 본문 테스트")
         self.assertEqual(item.get("body_excerpt"), "교환 원합니다. 본문 테스트")
+        self.assertTrue(item.get("is_alert_target"))
+        self.assertFalse(item.get("is_condition_change_candidate_notice"))
         self.assertFalse(item.get("is_read"))
         self.assertIsNone(item.get("read_at"))
+
+    @patch("src.notification_worker.get_connection", return_value=_FakeConnection())
+    @patch(
+        "src.notification_worker._fetch_alert_rows",
+        return_value=(
+            [
+                {
+                    "id": 13,
+                    "user_id": "boongtol",
+                    "watch_rule_id": 9,
+                    "analysis_job_id": None,
+                    "product_id": "cccn-9-abcdef",
+                    "url": "",
+                    "title": "조건 변경 사이 후보 · M2 / 13인치 / 8GB / 256GB SSD",
+                    "price_krw": None,
+                    "fair_price_krw": 1000000,
+                    "target_price_krw": 950000,
+                    "drop_rate_percent": None,
+                    "alert_drop_rate_percent": 5.0,
+                    "alert_price_direction": "BELOW_OR_EQUAL",
+                    "trigger_reason": "condition_change_candidate_notice",
+                    "message": "조건 변경 사이에 새 기준에 맞는 매물이 1개 있었어요.",
+                    "status": "app_only",
+                    "send_attempts": 0,
+                    "error_message": None,
+                    "created_at": "2026-05-19T13:30:00",
+                    "sent_at": None,
+                    "updated_at": "2026-05-19T13:30:00",
+                }
+            ],
+            True,
+        ),
+    )
+    def test_condition_change_candidate_notice_is_not_alert_target(
+        self,
+        _mock_rows,
+        _mock_conn,
+    ):
+        items = list_alert_events_for_user("boongtol", limit=20)
+
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item.get("trigger_reason"), "condition_change_candidate_notice")
+        self.assertFalse(item.get("is_alert_target"))
+        self.assertTrue(item.get("is_condition_change_candidate_notice"))
 
 
 if __name__ == "__main__":

@@ -33,6 +33,7 @@ fun MacBookAirSettingCard(
         desiredPrice: Int,
         alertPriceDirection: String,
         enabled: Boolean,
+        conditionChangeCandidateNoticeEnabled: Boolean,
         searchKeyword: String?,
         boundPrice: Int?
     ) -> Unit
@@ -41,6 +42,9 @@ fun MacBookAirSettingCard(
         mutableStateOf(userSetting?.user_fair_price_krw?.toString() ?: userSetting?.system_fair_price_krw?.toString() ?: "") 
     }
     var enabled by remember(userSetting) { mutableStateOf(userSetting?.enabled ?: false) }
+    var conditionChangeCandidateNoticeEnabled by remember(userSetting) {
+        mutableStateOf(userSetting?.condition_change_candidate_notice_enabled ?: false)
+    }
     var searchKeywordText by remember(userSetting) {
         mutableStateOf(userSetting?.custom_search_keyword ?: userSetting?.effective_search_keyword ?: "")
     }
@@ -324,6 +328,26 @@ fun MacBookAirSettingCard(
                 color = Color.Gray,
             )
 
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = conditionChangeCandidateNoticeEnabled,
+                    onCheckedChange = { conditionChangeCandidateNoticeEnabled = it },
+                )
+                Text(
+                    text = "조건 변경 후보 알림 받기",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            Text(
+                text = "새 기준에는 맞는 최근 매물도 알려줍니다.",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.Gray,
+            )
+
             Spacer(modifier = Modifier.height(16.dp))
 
             Button(
@@ -336,6 +360,7 @@ fun MacBookAirSettingCard(
                             desiredPrice,
                             alertPriceDirection,
                             enabled,
+                            conditionChangeCandidateNoticeEnabled,
                             searchKeywordText.trim().ifEmpty { null },
                             boundPriceInput,
                         )
