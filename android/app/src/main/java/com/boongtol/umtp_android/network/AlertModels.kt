@@ -30,6 +30,8 @@ data class AlertItem(
     val body_text: String? = null,
     val analyzed_at: String? = null,
     val created_at: String? = null,
+    val is_read: Boolean = false,
+    val read_at: String? = null,
     val is_alert_target: Boolean = true,
 )
 
@@ -41,7 +43,36 @@ data class TradeTypeFlags(
 
 data class AlertsResponse(
     val ok: Boolean,
+    val user_id: String? = null,
+    val is_read_filter: String? = null,
     val items: List<AlertItem> = emptyList(),
+    val message: String? = null,
+    val reason: String? = null,
+)
+
+data class MarkAlertReadResponse(
+    val ok: Boolean,
+    val user_id: String? = null,
+    val alert_event_id: Long? = null,
+    val is_read: Boolean? = null,
+    val read_at: String? = null,
+    val already_read: Boolean? = null,
+    val message: String? = null,
+    val reason: String? = null,
+)
+
+data class MarkAllAlertsReadResponse(
+    val ok: Boolean,
+    val user_id: String? = null,
+    val updated_count: Int? = null,
+    val message: String? = null,
+    val reason: String? = null,
+)
+
+data class GroupedReadAlertsResponse(
+    val ok: Boolean,
+    val user_id: String? = null,
+    val groups: Map<String, Map<String, List<AlertItem>>> = emptyMap(),
     val message: String? = null,
     val reason: String? = null,
 )

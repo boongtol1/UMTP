@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -51,30 +52,48 @@ import com.boongtol.umtp_android.network.TradeTypeFlags
 fun AlertFeedScreen(
     alerts: List<AlertItem>,
     isRefreshing: Boolean = false,
+    isMarkingAllRead: Boolean = false,
     refreshStatusMessage: String? = null,
     lastRefreshAtText: String? = null,
     onRefresh: () -> Unit,
+    onMarkAlertRead: (Long) -> Unit = {},
+    onMarkAllAsRead: () -> Unit = {},
     initialTargetAlertId: String? = null,
     onTargetAlertFound: () -> Unit = {},
 ) {
-    var readIds by remember { mutableStateOf(setOf<Long>()) }
-    var expandedIds by remember { mutableStateOf(setOf<Long>()) }
+    var selectedAlert by remember { mutableStateOf<AlertItem?>(null) }
     val context = LocalContext.current
-    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     LaunchedEffect(initialTargetAlertId, alerts) {
         if (initialTargetAlertId != null && alerts.isNotEmpty()) {
             val targetId = initialTargetAlertId.toLongOrNull()
             if (targetId != null) {
-                val index = alerts.indexOfFirst { it.id == targetId }
-                if (index != -1) {
-                    expandedIds = expandedIds + targetId
-                    readIds = readIds + targetId
-                    listState.animateScrollToItem(index)
+                val targetAlert = alerts.firstOrNull { it.id == targetId }
+                if (targetAlert != null) {
+                    selectedAlert = targetAlert
+                    onMarkAlertRead(targetAlert.id)
                     onTargetAlertFound()
                 }
             }
         }
+    }
+
+    if (selectedAlert != null) {
+        AlertDetailScreen(
+            alert = selectedAlert!!,
+            onBack = {
+                selectedAlert = null
+                onRefresh()
+            },
+            onOpenUrl = { alert ->
+                val resolvedUrl = resolveAlertUrl(alert)
+                if (!resolvedUrl.isNullOrBlank()) {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(resolvedUrl))
+                    context.startActivity(intent)
+                }
+            },
+        )
+        return
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -90,14 +109,26 @@ fun AlertFeedScreen(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
             )
-            IconButton(
-                onClick = onRefresh,
-                enabled = !isRefreshing,
-            ) {
-                if (isRefreshing) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.Refresh, contentDescription = "새로고침")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = onMarkAllAsRead,
+                    enabled = !isMarkingAllRead && alerts.isNotEmpty(),
+                ) {
+                    if (isMarkingAllRead) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.DoneAll, contentDescription = "모두 읽음")
+                    }
+                }
+                IconButton(
+                    onClick = onRefresh,
+                    enabled = !isRefreshing,
+                ) {
+                    if (isRefreshing) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Refresh, contentDescription = "새로고침")
+                    }
                 }
             }
         }
@@ -136,31 +167,15 @@ fun AlertFeedScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            state = listState,
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(alerts) { alert ->
-                val isRead = readIds.contains(alert.id)
-                val isExpanded = expandedIds.contains(alert.id)
                 AlertCard(
                     alert = alert,
-                    isRead = isRead,
-                    isExpanded = isExpanded,
-                    onToggleExpand = {
-                        expandedIds = if (isExpanded) {
-                            expandedIds - alert.id
-                        } else {
-                            expandedIds + alert.id
-                        }
-                    },
-                    onOpenUrl = {
-                        val resolvedUrl = resolveAlertUrl(alert)
-                        if (!resolvedUrl.isNullOrBlank()) {
-                            readIds = readIds + alert.id
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(resolvedUrl))
-                            context.startActivity(intent)
-                        }
+                    onOpenDetails = {
+                        selectedAlert = alert
+                        onMarkAlertRead(alert.id)
                     },
                 )
             }
@@ -171,26 +186,16 @@ fun AlertFeedScreen(
 @Composable
 fun AlertCard(
     alert: AlertItem,
-    isRead: Boolean,
-    isExpanded: Boolean,
-    onToggleExpand: () -> Unit,
-    onOpenUrl: () -> Unit,
+    onOpenDetails: () -> Unit,
 ) {
-    val resolvedUrl = resolveAlertUrl(alert)
     val listingImageUrl = alert.listing_image_url?.takeIf { it.isNotBlank() }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onToggleExpand() },
-        colors = CardDefaults.cardColors(
-            containerColor = if (isRead) {
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-            } else {
-                MaterialTheme.colorScheme.surface
-            },
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (isRead) 0.dp else 2.dp),
+            .clickable { onOpenDetails() },
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             if (listingImageUrl != null) {
@@ -219,15 +224,13 @@ fun AlertCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                if (!isRead) {
-                    Surface(
-                        modifier = Modifier
-                            .padding(start = 8.dp)
-                            .size(8.dp),
-                        shape = MaterialTheme.shapes.small,
-                        color = Color.Red,
-                    ) {}
-                }
+                Surface(
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .size(8.dp),
+                    shape = MaterialTheme.shapes.small,
+                    color = Color.Red,
+                ) {}
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -279,26 +282,71 @@ fun AlertCard(
                     color = Color.Gray,
                 )
                 Text(
-                    text = if (isExpanded) "상세 접기" else "상세 보기",
+                    text = "상세 보기",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                 )
             }
+        }
+    }
+}
 
-            if (isExpanded) {
-                Spacer(modifier = Modifier.height(12.dp))
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(12.dp))
+@Composable
+private fun AlertDetailScreen(
+    alert: AlertItem,
+    onBack: () -> Unit,
+    onOpenUrl: (AlertItem) -> Unit,
+) {
+    val resolvedUrl = resolveAlertUrl(alert)
+    val listingImageUrl = alert.listing_image_url?.takeIf { it.isNotBlank() }
 
-                buildAlertDetailRows(alert, resolvedUrl, listingImageUrl).forEach { (label, value) ->
-                    DetailRow(label = label, value = value)
-                }
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "거래 알림 상세",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "목록으로",
+                modifier = Modifier.clickable { onBack() },
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold,
+            )
+        }
 
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item {
+                Text(
+                    text = alert.title?.ifBlank { "제목 없음" } ?: "제목 없음",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
                 Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(8.dp))
+            }
 
+            items(buildAlertDetailRows(alert, resolvedUrl, listingImageUrl)) { row ->
+                DetailRow(label = row.first, value = row.second)
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
                 Button(
-                    onClick = onOpenUrl,
+                    onClick = { onOpenUrl(alert) },
                     enabled = !resolvedUrl.isNullOrBlank(),
                     modifier = Modifier.fillMaxWidth(),
                 ) {

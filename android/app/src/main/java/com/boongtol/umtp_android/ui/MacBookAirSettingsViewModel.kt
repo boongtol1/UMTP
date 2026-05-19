@@ -39,6 +39,9 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _alerts = MutableStateFlow<List<AlertItem>>(emptyList())
     val alerts: StateFlow<List<AlertItem>> = _alerts.asStateFlow()
 
+    private val _readGroupedAlerts = MutableStateFlow<Map<String, Map<String, List<AlertItem>>>>(emptyMap())
+    val readGroupedAlerts: StateFlow<Map<String, Map<String, List<AlertItem>>>> = _readGroupedAlerts.asStateFlow()
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -54,8 +57,17 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _isRefreshingAlerts = MutableStateFlow(false)
     val isRefreshingAlerts: StateFlow<Boolean> = _isRefreshingAlerts.asStateFlow()
 
+    private val _isRefreshingReadArchive = MutableStateFlow(false)
+    val isRefreshingReadArchive: StateFlow<Boolean> = _isRefreshingReadArchive.asStateFlow()
+
+    private val _isMarkingAllAlertsRead = MutableStateFlow(false)
+    val isMarkingAllAlertsRead: StateFlow<Boolean> = _isMarkingAllAlertsRead.asStateFlow()
+
     private val _alertsRefreshStatusMessage = MutableStateFlow<String?>(null)
     val alertsRefreshStatusMessage: StateFlow<String?> = _alertsRefreshStatusMessage.asStateFlow()
+
+    private val _readArchiveRefreshStatusMessage = MutableStateFlow<String?>(null)
+    val readArchiveRefreshStatusMessage: StateFlow<String?> = _readArchiveRefreshStatusMessage.asStateFlow()
 
     private val _lastAlertsRefreshLabel = MutableStateFlow<String?>(null)
     val lastAlertsRefreshLabel: StateFlow<String?> = _lastAlertsRefreshLabel.asStateFlow()
@@ -100,6 +112,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     _errorMessage.value = "데이터 로딩 에러: ${reasons.joinToString(" / ")}"
                 }
                 fetchAlerts(uid, showFeedback = false)
+                fetchReadGroupedAlerts(uid, showFeedback = false)
             } catch (e: Exception) {
                 _errorMessage.value = "데이터 로딩 에러: ${e.localizedMessage}"
             } finally {
@@ -129,6 +142,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 val unitsRefreshError = refreshUnitsInternal()
                 val settingsRefreshError = refreshUserSettingsInternal(uid)
                 fetchAlerts(uid, showFeedback = false)
+                fetchReadGroupedAlerts(uid, showFeedback = false)
 
                 if (showFeedback) {
                     if (refreshSavedAtError == null && unitsRefreshError == null && settingsRefreshError == null) {
@@ -206,7 +220,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 _alertsRefreshStatusMessage.value = "새로고침 중..."
             }
             try {
-                val response = UmtpApiClient.apiService.getAlerts(uid)
+                val response = UmtpApiClient.apiService.getAlerts(uid, isRead = "0")
                 if (response.ok) {
                     _alerts.value = response.items.sortedByDescending { it.created_at }
                     if (showFeedback) {
@@ -228,6 +242,79 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     _isRefreshingAlerts.value = false
                 }
                 isAlertRefreshInFlight = false
+            }
+        }
+    }
+
+    fun fetchReadGroupedAlerts(uid: String, showFeedback: Boolean = false) {
+        viewModelScope.launch {
+            if (showFeedback) {
+                _isRefreshingReadArchive.value = true
+                _readArchiveRefreshStatusMessage.value = "새로고침 중..."
+            }
+            try {
+                val response = UmtpApiClient.apiService.getGroupedReadAlerts(uid)
+                if (response.ok) {
+                    _readGroupedAlerts.value = response.groups
+                    if (showFeedback) {
+                        _readArchiveRefreshStatusMessage.value = "방금 새로고침됨"
+                    }
+                } else if (showFeedback) {
+                    _readArchiveRefreshStatusMessage.value = "새로고침 실패"
+                    _toastMessage.value = "읽음 보관함 새로고침 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                }
+            } catch (e: Exception) {
+                if (showFeedback) {
+                    _readArchiveRefreshStatusMessage.value = "새로고침 실패"
+                    _toastMessage.value = buildNetworkErrorMessage("읽음 보관함 새로고침 실패", e)
+                }
+            } finally {
+                if (showFeedback) {
+                    _isRefreshingReadArchive.value = false
+                }
+            }
+        }
+    }
+
+    fun markAlertAsRead(uid: String, alertEventId: Long, showFeedback: Boolean = false) {
+        if (alertEventId <= 0L) {
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val response = UmtpApiClient.apiService.markAlertEventRead(alertEventId, uid)
+                if (!response.ok && showFeedback) {
+                    _toastMessage.value =
+                        "읽음 처리 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                }
+            } catch (e: Exception) {
+                if (showFeedback) {
+                    _toastMessage.value = buildNetworkErrorMessage("읽음 처리 실패", e)
+                }
+            }
+        }
+    }
+
+    fun markAllAlertsAsRead(uid: String) {
+        if (_isMarkingAllAlertsRead.value) {
+            return
+        }
+        viewModelScope.launch {
+            _isMarkingAllAlertsRead.value = true
+            try {
+                val response = UmtpApiClient.apiService.markAllAlertEventsRead(uid)
+                if (response.ok) {
+                    _toastMessage.value = response.message ?: "모두 읽음 처리 완료"
+                    fetchAlerts(uid, showFeedback = false)
+                    fetchReadGroupedAlerts(uid, showFeedback = false)
+                } else {
+                    _toastMessage.value =
+                        "모두 읽음 처리 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = buildNetworkErrorMessage("모두 읽음 처리 실패", e)
+            } finally {
+                _isMarkingAllAlertsRead.value = false
             }
         }
     }

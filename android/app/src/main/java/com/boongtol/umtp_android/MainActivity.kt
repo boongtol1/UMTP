@@ -16,6 +16,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -136,11 +137,15 @@ fun MainTabScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     
     val alerts by viewModel.alerts.collectAsState()
+    val readGroupedAlerts by viewModel.readGroupedAlerts.collectAsState()
     val units by viewModel.units.collectAsState()
     val userSettings by viewModel.userSettings.collectAsState()
     val savingItemKey by viewModel.savingItemKey.collectAsState()
     val isRefreshingAlerts by viewModel.isRefreshingAlerts.collectAsState()
+    val isRefreshingReadArchive by viewModel.isRefreshingReadArchive.collectAsState()
+    val isMarkingAllAlertsRead by viewModel.isMarkingAllAlertsRead.collectAsState()
     val alertsRefreshStatusMessage by viewModel.alertsRefreshStatusMessage.collectAsState()
+    val readArchiveRefreshStatusMessage by viewModel.readArchiveRefreshStatusMessage.collectAsState()
     val lastAlertsRefreshLabel by viewModel.lastAlertsRefreshLabel.collectAsState()
     val isRefreshingSettings by viewModel.isRefreshingSettings.collectAsState()
     val settingsRefreshStatusMessage by viewModel.settingsRefreshStatusMessage.collectAsState()
@@ -170,7 +175,16 @@ fun MainTabScreen(
                 )
                 NavigationBarItem(
                     selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
+                    onClick = {
+                        selectedTab = 1
+                        viewModel.fetchReadGroupedAlerts(userId, showFeedback = false)
+                    },
+                    icon = { Icon(Icons.Default.Archive, contentDescription = "Read Archive") },
+                    label = { Text("읽음 보관함") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
                     label = { Text("설정") }
                 )
@@ -182,13 +196,22 @@ fun MainTabScreen(
                 0 -> AlertFeedScreen(
                     alerts = alerts,
                     isRefreshing = isRefreshingAlerts,
+                    isMarkingAllRead = isMarkingAllAlertsRead,
                     refreshStatusMessage = alertsRefreshStatusMessage,
                     lastRefreshAtText = lastAlertsRefreshLabel,
                     onRefresh = { viewModel.fetchAlerts(userId, showFeedback = true) },
+                    onMarkAlertRead = { alertId -> viewModel.markAlertAsRead(userId, alertId) },
+                    onMarkAllAsRead = { viewModel.markAllAlertsAsRead(userId) },
                     initialTargetAlertId = targetAlertId,
                     onTargetAlertFound = { targetAlertId = null }
                 )
-                1 -> SettingsNavigator(
+                1 -> ReadAlertArchiveScreen(
+                    groupedAlerts = readGroupedAlerts,
+                    isRefreshing = isRefreshingReadArchive,
+                    refreshStatusMessage = readArchiveRefreshStatusMessage,
+                    onRefresh = { viewModel.fetchReadGroupedAlerts(userId, showFeedback = true) },
+                )
+                2 -> SettingsNavigator(
                     userId = userId,
                     units = units,
                     userSettings = userSettings,

@@ -2,6 +2,7 @@ package com.boongtol.umtp_android.network
 
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.Path
 import retrofit2.http.POST
 import retrofit2.http.Query
@@ -49,8 +50,25 @@ interface UmtpApiService {
 
     @GET("alerts")
     suspend fun getAlerts(
-        @Query("user_id") userId: String
+        @Query("user_id") userId: String,
+        @Query("is_read") isRead: String = "0",
     ): AlertsResponse
+
+    @PATCH("alert-events/{alert_event_id}/read")
+    suspend fun markAlertEventRead(
+        @Path("alert_event_id") alertEventId: Long,
+        @Query("user_id") userId: String,
+    ): MarkAlertReadResponse
+
+    @PATCH("alert-events/read-all")
+    suspend fun markAllAlertEventsRead(
+        @Query("user_id") userId: String,
+    ): MarkAllAlertsReadResponse
+
+    @GET("alert-events/read/grouped")
+    suspend fun getGroupedReadAlerts(
+        @Query("user_id") userId: String,
+    ): GroupedReadAlertsResponse
 
     @GET("user-fair-prices/recommended-keywords")
     suspend fun getRecommendedKeywords(
