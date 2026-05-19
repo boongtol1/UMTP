@@ -25,7 +25,7 @@ FIELD_LABELS = {
 }
 REQUIRED_SPEC_FIELDS = ("product_type", "chip", "ram_gb", "ssd_gb")
 SOURCE_NAME = "joongna"
-INVALID_UNIT_REASON = "invalid_macbook_air_unit"
+INVALID_UNIT_REASON = "invalid_silicon_mac_unit"
 
 
 def _default_risk_result():
@@ -186,7 +186,10 @@ def _build_parse_failure_reason(parsed_spec):
     missing_fields = _find_missing_spec_fields(parsed_spec)
 
     if unit_validation_reason == INVALID_UNIT_REASON:
-        return "유효하지 않은 MacBook Air 조합"
+        product_type = parsed_spec.get("product_type")
+        if isinstance(product_type, str) and product_type.strip():
+            return f"유효하지 않은 {product_type} 조합"
+        return "유효하지 않은 실리콘 Mac 조합"
 
     if missing_fields:
         return f"스펙 추출 실패: {', '.join(missing_fields)}"

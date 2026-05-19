@@ -38,6 +38,35 @@ class SiliconUnitsTest(unittest.TestCase):
                 512,
             )
         )
+
+    def test_mac_mini_pro_chip_combinations(self):
+        self.assertTrue(
+            is_valid_silicon_unit(
+                MAC_MINI_PRODUCT_TYPE,
+                "M2 Pro",
+                0,
+                16,
+                8192,
+            )
+        )
+        self.assertTrue(
+            is_valid_silicon_unit(
+                MAC_MINI_PRODUCT_TYPE,
+                "M4 Pro",
+                0,
+                64,
+                4096,
+            )
+        )
+        self.assertFalse(
+            is_valid_silicon_unit(
+                MAC_MINI_PRODUCT_TYPE,
+                "M4 Pro",
+                0,
+                16,
+                512,
+            )
+        )
         self.assertFalse(
             is_valid_silicon_unit(
                 MAC_MINI_PRODUCT_TYPE,

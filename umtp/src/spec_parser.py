@@ -2,34 +2,50 @@ import re
 from typing import Optional
 
 try:
-    from src.macbook_air_units import get_macbook_air_base_spec, is_valid_macbook_air_unit
+    from src.macbook_air_units import (
+        MACBOOK_AIR_PRODUCT_TYPE,
+        MAC_MINI_PRODUCT_TYPE,
+        get_macbook_air_base_spec,
+        is_valid_silicon_unit,
+    )
     from src.numeric_candidate_extractor import extract_numeric_candidates
 except ImportError:
-    from macbook_air_units import get_macbook_air_base_spec, is_valid_macbook_air_unit
+    from macbook_air_units import (
+        MACBOOK_AIR_PRODUCT_TYPE,
+        MAC_MINI_PRODUCT_TYPE,
+        get_macbook_air_base_spec,
+        is_valid_silicon_unit,
+    )
     from numeric_candidate_extractor import extract_numeric_candidates
 
 
-PRODUCT_TYPE = "MacBook Air"
+PRODUCT_TYPE = MACBOOK_AIR_PRODUCT_TYPE
 DEFAULT_SCREEN_INCH = 13
+DEFAULT_MAC_MINI_SCREEN_INCH = 0
 SUPPORTED_CHIPS = ("M1", "M2", "M3", "M4", "M5")
-SUPPORTED_RAM_GB = (8, 16, 24, 32)
-SUPPORTED_SSD_GB = (256, 512, 1024, 2048, 4096)
+SUPPORTED_MAC_MINI_CHIPS = ("M1", "M2", "M2 Pro", "M4", "M4 Pro")
+SUPPORTED_RAM_GB = (8, 16, 24, 32, 48, 64)
+SUPPORTED_SSD_GB = (256, 512, 1024, 2048, 4096, 8192)
 REQUIRED_FIELDS = ("product_type", "chip", "ram_gb", "ssd_gb")
 MISSING_REQUIRED_REASON = "missing_required_fields"
-INVALID_UNIT_REASON = "invalid_macbook_air_unit"
+INVALID_UNIT_REASON = "invalid_silicon_mac_unit"
 MULTIPLE_CHIPS_REASON = "multiple_chips_found"
 AMBIGUOUS_NUMERIC_REASON = "ambiguous_numeric_candidates"
+MULTIPLE_PRODUCT_TYPES_REASON = "multiple_product_types_found"
 
 TB_TO_GB_MAP = {
     "1tb": 1024,
     "2tb": 2048,
     "4tb": 4096,
+    "8tb": 8192,
     "1t": 1024,
     "2t": 2048,
     "4t": 4096,
+    "8t": 8192,
     "1테라": 1024,
     "2테라": 2048,
     "4테라": 4096,
+    "8테라": 8192,
 }
 
 BASE_MODEL_KEYWORD_PATTERN = re.compile(r"(기본형|깡통)")
@@ -72,6 +88,12 @@ SPEC_CONTEXT_KEYWORDS = [
     "저장공간",
     "용량",
     "storage",
+    "mini",
+    "pro",
+    "맥미니",
+    "맥 미니",
+    "mac mini",
+    "macmini",
     "gb",
     "기가",
     "tb",
@@ -121,20 +143,21 @@ _STRONG_NOISE_PATTERNS = (
 )
 
 _SPEC_SPAN_PATTERNS = (
+    re.compile(r"m\s*(?:2|4)\s*[-]?\s*pro", flags=re.IGNORECASE),
     re.compile(r"m[1-5]", flags=re.IGNORECASE),
     re.compile(r"(?<!\d)(13(?:\.\d+)?|15(?:\.\d+)?)\s*(?:인치|inch|형|\"|”|''|′′)(?!\d)", flags=re.IGNORECASE),
     re.compile(r"(?<!\d)(13(?:\.\d+)?|15(?:\.\d+)?)-inch(?!\d)", flags=re.IGNORECASE),
-    re.compile(r"(?<!\d)(8|16|24|32)\s*gb(?!\d)", flags=re.IGNORECASE),
-    re.compile(r"(?<!\d)(8|16|24|32)\s*기가(?!\d)", flags=re.IGNORECASE),
-    re.compile(r"(?<!\d)(8|16|24|32)\s*g(?![a-z0-9가-힣])", flags=re.IGNORECASE),
-    re.compile(r"램\s*(8|16|24|32)(?!\d)", flags=re.IGNORECASE),
-    re.compile(r"(?<!\d)(8|16|24|32)\s*램(?!\d)", flags=re.IGNORECASE),
-    re.compile(r"(?<!\d)(256|512|1024|2048|4096)\s*gb(?!\d)", flags=re.IGNORECASE),
-    re.compile(r"(?<!\d)(256|512|1024|2048|4096)\s*기가(?!\d)", flags=re.IGNORECASE),
-    re.compile(r"(?<!\d)(256|512|1024|2048|4096)\s*ssd(?!\d)", flags=re.IGNORECASE),
-    re.compile(r"(?<!\d)(1|2|4)\s*(?:tb|t|테라)(?![a-z0-9가-힣])", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(8|16|24|32|48|64)\s*gb(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(8|16|24|32|48|64)\s*기가(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(8|16|24|32|48|64)\s*g(?![a-z0-9가-힣])", flags=re.IGNORECASE),
+    re.compile(r"램\s*(8|16|24|32|48|64)(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(8|16|24|32|48|64)\s*램(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(256|512|1024|2048|4096|8192)\s*gb(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(256|512|1024|2048|4096|8192)\s*기가(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(256|512|1024|2048|4096|8192)\s*ssd(?!\d)", flags=re.IGNORECASE),
+    re.compile(r"(?<!\d)(1|2|4|8)\s*(?:tb|t|테라)(?![a-z0-9가-힣])", flags=re.IGNORECASE),
     re.compile(
-        r"(?<!\d)(8|16|24|32)\s*/\s*(256|512|1024|2048|4096|1\s*tb|2\s*tb|4\s*tb|1\s*t|2\s*t|4\s*t|1\s*테라|2\s*테라|4\s*테라)(?!\d)",
+        r"(?<!\d)(8|16|24|32|48|64)\s*/\s*(256|512|1024|2048|4096|8192|1\s*tb|2\s*tb|4\s*tb|8\s*tb|1\s*t|2\s*t|4\s*t|8\s*t|1\s*테라|2\s*테라|4\s*테라|8\s*테라)(?!\d)",
         flags=re.IGNORECASE,
     ),
 )
@@ -215,12 +238,12 @@ def _extract_ram_gb_candidates_from_text(text):
 
     candidates = []
     patterns = (
-        r"(?<!\d)(8|16|24|32)\s*gb(?!\d)",
-        r"(?<!\d)(8|16|24|32)\s*기가(?!\d)",
-        r"램\s*(8|16|24|32)(?!\d)",
-        r"(?<!\d)(8|16|24|32)\s*램(?!\d)",
-        r"(?<!\d)(8|16|24|32)\s*g(?![a-z0-9가-힣])",
-        r"^(8|16|24|32)$",
+        r"(?<!\d)(8|16|24|32|48|64)\s*gb(?!\d)",
+        r"(?<!\d)(8|16|24|32|48|64)\s*기가(?!\d)",
+        r"램\s*(8|16|24|32|48|64)(?!\d)",
+        r"(?<!\d)(8|16|24|32|48|64)\s*램(?!\d)",
+        r"(?<!\d)(8|16|24|32|48|64)\s*g(?![a-z0-9가-힣])",
+        r"^(8|16|24|32|48|64)$",
     )
     for pattern in patterns:
         for match in re.finditer(pattern, text, flags=re.IGNORECASE):
@@ -238,11 +261,11 @@ def _extract_ssd_gb_candidates_from_text(text):
     lowered = text.lower()
 
     for pattern in (
-        r"(?<!\d)(1|2|4)\s*(?:tb|t|테라)(?![a-z0-9가-힣])",
-        r"(?<!\d)(256|512|1024|2048|4096)\s*gb(?!\d)",
-        r"(?<!\d)(256|512|1024|2048|4096)\s*기가(?!\d)",
-        r"(?<!\d)(256|512|1024|2048|4096)\s*ssd(?!\d)",
-        r"^(256|512|1024|2048|4096)$",
+        r"(?<!\d)(1|2|4|8)\s*(?:tb|t|테라)(?![a-z0-9가-힣])",
+        r"(?<!\d)(256|512|1024|2048|4096|8192)\s*gb(?!\d)",
+        r"(?<!\d)(256|512|1024|2048|4096|8192)\s*기가(?!\d)",
+        r"(?<!\d)(256|512|1024|2048|4096|8192)\s*ssd(?!\d)",
+        r"^(256|512|1024|2048|4096|8192)$",
     ):
         for match in re.finditer(pattern, lowered, flags=re.IGNORECASE):
             token = match.group(0)
@@ -342,15 +365,55 @@ def _normalize_self_check_fields(self_check_fields):
 
 
 def _contains_product_type(text):
+    return bool(_detect_product_types(text))
+
+
+def _detect_product_types(text):
     if not isinstance(text, str):
-        return False
+        return []
     lowered = text.lower()
     normalized = re.sub(r"\s+", "", lowered)
-    return (
+    detected = []
+    if (
         "macbook air" in lowered
         or "macbookair" in normalized
         or "맥북에어" in normalized
-    )
+    ):
+        detected.append(MACBOOK_AIR_PRODUCT_TYPE)
+    if (
+        "mac mini" in lowered
+        or "macmini" in normalized
+        or "맥미니" in normalized
+    ):
+        detected.append(MAC_MINI_PRODUCT_TYPE)
+    return detected
+
+
+def _extract_unique_mac_mini_chip_candidates(text):
+    if not isinstance(text, str):
+        return []
+
+    normalized_text = text.lower()
+    candidates = []
+
+    # IMPORTANT: Pro variants must be checked first to avoid parsing as M2/M4.
+    if re.search(r"m\s*2\s*[-]?\s*pro", normalized_text, flags=re.IGNORECASE):
+        candidates.append("M2 Pro")
+    if re.search(r"m\s*4\s*[-]?\s*pro", normalized_text, flags=re.IGNORECASE):
+        candidates.append("M4 Pro")
+
+    for match in re.finditer(r"m\s*(1|2|4)\b(?!\s*[-]?\s*pro)", normalized_text, flags=re.IGNORECASE):
+        value = match.group(1)
+        if value == "1":
+            candidates.append("M1")
+        elif value == "2":
+            candidates.append("M2")
+        elif value == "4":
+            candidates.append("M4")
+
+    deduped = list(dict.fromkeys(candidates))
+    chip_sort_order = {chip: idx for idx, chip in enumerate(SUPPORTED_MAC_MINI_CHIPS, start=1)}
+    return sorted(deduped, key=lambda chip: chip_sort_order.get(chip, 999))
 
 
 def _extract_chip(text):
@@ -367,6 +430,12 @@ def _extract_unique_chip_candidates(text):
     chip_candidates = re.findall(r"m[1-5]", text.lower())
     unique_chips = sorted(set(chip_candidates))
     return [chip.upper() for chip in unique_chips]
+
+
+def _extract_chip_candidates_for_product(text, product_type):
+    if product_type == MAC_MINI_PRODUCT_TYPE:
+        return _extract_unique_mac_mini_chip_candidates(text)
+    return _extract_unique_chip_candidates(text)
 
 
 def _extract_screen_inch_from_text(text):
@@ -443,20 +512,43 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
     ambiguous_reasons = []
 
     product_type = None
+    product_type_ambiguous = False
     chip = None
     chip_ambiguous = False
     screen_inch = None
     ram_gb = None
     ssd_gb = None
     screen_inch_defaulted = False
+    mini_screen_conflict = False
     screen_ambiguous = False
     ram_ambiguous = False
     ssd_ambiguous = False
 
-    has_product_type_in_model = bool(model_name_raw and _contains_product_type(model_name_raw))
-    has_product_type_in_text = _contains_product_type(parsing_text) or _contains_product_type(combined_text)
+    model_product_types = _detect_product_types(model_name_raw)
+    text_product_types = _detect_product_types(parsing_text)
+    if not text_product_types:
+        text_product_types = _detect_product_types(combined_text)
 
-    if not has_product_type_in_model and not has_product_type_in_text:
+    model_product_type = model_product_types[0] if len(model_product_types) == 1 else None
+    text_product_type = text_product_types[0] if len(text_product_types) == 1 else None
+
+    if len(model_product_types) >= 2 or len(text_product_types) >= 2:
+        product_type_ambiguous = True
+    if (
+        model_product_type is not None
+        and text_product_type is not None
+        and model_product_type != text_product_type
+    ):
+        product_type_ambiguous = True
+
+    if model_product_type is not None:
+        product_type = model_product_type
+        _record_pattern(detected_patterns, "product_type", product_type, "self_check", model_name_raw)
+    elif text_product_type is not None:
+        product_type = text_product_type
+        _record_pattern(detected_patterns, "product_type", product_type, "text", title)
+
+    if product_type is None:
         parse_failure_reason = MISSING_REQUIRED_REASON
         return {
             "parse_success": False,
@@ -483,14 +575,7 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
             "ambiguous_reason": None,
         }
 
-    if has_product_type_in_model:
-        product_type = PRODUCT_TYPE
-        _record_pattern(detected_patterns, "product_type", PRODUCT_TYPE, "self_check", model_name_raw)
-    elif has_product_type_in_text:
-        product_type = PRODUCT_TYPE
-        _record_pattern(detected_patterns, "product_type", PRODUCT_TYPE, "text", title)
-
-    model_chip_candidates = _extract_unique_chip_candidates(model_name_raw)
+    model_chip_candidates = _extract_chip_candidates_for_product(model_name_raw, product_type)
     if len(model_chip_candidates) == 1:
         chip = model_chip_candidates[0]
         _record_pattern(detected_patterns, "chip", chip, "self_check", model_name_raw)
@@ -498,7 +583,7 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         chip_ambiguous = True
         _record_conflict(detected_conflicts, "chip", "unresolved", None, "self_check", model_chip_candidates)
 
-    cpu_chip_candidates = _extract_unique_chip_candidates(cpu_raw)
+    cpu_chip_candidates = _extract_chip_candidates_for_product(cpu_raw, product_type)
     if len(cpu_chip_candidates) == 1:
         chip_cpu = cpu_chip_candidates[0]
         if chip is not None and chip != chip_cpu:
@@ -537,7 +622,7 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         screen_ambiguous = True
         _record_conflict(detected_conflicts, "screen_inch", "unresolved", None, "self_check", model_screen_candidates)
 
-    text_chip_candidates = _extract_unique_chip_candidates(parsing_text)
+    text_chip_candidates = _extract_chip_candidates_for_product(parsing_text, product_type)
     if len(text_chip_candidates) == 1:
         chip_from_text = text_chip_candidates[0]
         if chip is None:
@@ -647,14 +732,27 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         ssd_ambiguous = True
         _record_conflict(detected_conflicts, "ssd_gb", "unresolved", None, "text", numeric_candidates["ssd_candidates"])
 
-    if product_type == PRODUCT_TYPE and screen_inch is None:
+    if product_type == MACBOOK_AIR_PRODUCT_TYPE and screen_inch is None:
         screen_inch = DEFAULT_SCREEN_INCH
         screen_inch_defaulted = True
         _record_pattern(detected_patterns, "screen_inch", DEFAULT_SCREEN_INCH, "default", None)
+    elif product_type == MAC_MINI_PRODUCT_TYPE:
+        if screen_inch is not None and screen_inch != DEFAULT_MAC_MINI_SCREEN_INCH:
+            mini_screen_conflict = True
+            _record_conflict(
+                detected_conflicts,
+                "screen_inch",
+                "default",
+                DEFAULT_MAC_MINI_SCREEN_INCH,
+                "text",
+                screen_inch,
+            )
+        screen_inch = DEFAULT_MAC_MINI_SCREEN_INCH
+        screen_inch_defaulted = False
 
     has_base_model_keyword = contains_base_model_keyword(parsing_text) or contains_base_model_keyword(model_name_raw)
     should_apply_base_fallback = (
-        product_type == PRODUCT_TYPE
+        product_type == MACBOOK_AIR_PRODUCT_TYPE
         and chip is not None
         and has_base_model_keyword
         and (ram_gb is None or ssd_gb is None)
@@ -691,15 +789,24 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
     unit_validation_reason = None
     parse_success = len(missing_fields) == 0
 
-    if chip_ambiguous:
+    if product_type_ambiguous:
+        parse_success = False
+        product_type = None
+        unit_validation_reason = MULTIPLE_PRODUCT_TYPES_REASON
+        ambiguous_reasons.append(MULTIPLE_PRODUCT_TYPES_REASON)
+    elif chip_ambiguous:
         parse_success = False
         chip = None
         unit_validation_reason = MULTIPLE_CHIPS_REASON
         ambiguous_reasons.append(MULTIPLE_CHIPS_REASON)
     elif not parse_success:
         unit_validation_reason = MISSING_REQUIRED_REASON
-    elif product_type == PRODUCT_TYPE:
-        unit_valid = is_valid_macbook_air_unit(chip, screen_inch, ram_gb, ssd_gb)
+    elif product_type == MAC_MINI_PRODUCT_TYPE and mini_screen_conflict:
+        unit_valid = False
+        parse_success = False
+        unit_validation_reason = INVALID_UNIT_REASON
+    elif product_type in (MACBOOK_AIR_PRODUCT_TYPE, MAC_MINI_PRODUCT_TYPE):
+        unit_valid = is_valid_silicon_unit(product_type, chip, screen_inch, ram_gb, ssd_gb)
         if not unit_valid:
             parse_success = False
             unit_validation_reason = INVALID_UNIT_REASON

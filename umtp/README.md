@@ -90,6 +90,10 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.1: `numeric_candidate_extractor.py`에서 화면(13/15), RAM(8/16/24/32), SSD(256/512/1024/2048/4096) 후보를 분리하고 `TB->GB`, `16/512` 축약표현을 파싱합니다.
 - 1.1: `1/2/4` 단독 숫자는 SSD 후보로 보지 않고, `1TB/2TB/4TB`(또는 `t/테라`) 형태일 때만 SSD 후보로 변환합니다.
 - 1.1: `spec_parser.py`는 `confidence_score`, `detected_patterns`, `detected_conflicts`를 반환하고 화면 크기 미검출 시 13인치 기본값을 사용합니다.
+- spec parser 확장: 기존 `MacBook Air` 파싱은 유지하면서 `Mac mini`/`맥미니`/`맥 미니`/`macmini`를 제품 타입으로 인식합니다.
+- `Mac mini` 파싱 시 `screen_inch`는 항상 `0`으로 설정되며, 화면 크기(13/15인치)가 명시된 경우 유효하지 않은 조합으로 실패 처리합니다.
+- `Mac mini` 칩 파싱은 `M2 Pro`, `M4 Pro`를 `M2`, `M4`보다 먼저 검사해 오파싱을 방지합니다.
+- `Mac mini` 유효 조합: `M1`, `M2`, `M2 Pro`, `M4`, `M4 Pro` + RAM/SSD 허용 조합 검증(`is_valid_silicon_unit`)을 적용합니다.
 - 1.1: `/analyze-url` 응답/로그에 `confidence_score`, `screen_inch_defaulted`, `unit_valid`, `unit_validation_reason`를 포함합니다.
 - 1.1: `sql/add_parser_confidence_columns.sql`로 `url_analysis_logs` 파서 신뢰도 컬럼을 안전하게 추가합니다.
 - MySQL 환경에서 `ADD COLUMN IF NOT EXISTS` 사용이 제한되면 Workbench에서 컬럼 존재를 확인 후 수동 실행합니다.
