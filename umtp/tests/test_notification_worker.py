@@ -84,6 +84,7 @@ class NotificationWorkerTest(unittest.TestCase):
         message = _build_telegram_message(
             {
                 "source": "joongna",
+                "title": "M2 맥북에어 16/512",
                 "url": "https://web.joongna.com/product/1001",
                 "listing_image_url": "https://img.joongna.com/1001.jpg",
                 "product_type": "MacBook Air",
@@ -111,6 +112,7 @@ class NotificationWorkerTest(unittest.TestCase):
 
         self.assertIn("거래 알림 피드", message)
         self.assertIn("출처\njoongna", message)
+        self.assertIn("게시글 제목\nM2 맥북에어 16/512", message)
         self.assertIn("URL\nhttps://web.joongna.com/product/1001", message)
         self.assertIn("대표 이미지\nhttps://img.joongna.com/1001.jpg", message)
         self.assertIn("제품 분류\nMacBook Air", message)
@@ -136,6 +138,7 @@ class NotificationWorkerTest(unittest.TestCase):
         expected_order_tokens = [
             "거래 알림 피드",
             "출처\n",
+            "게시글 제목\n",
             "URL\n",
             "대표 이미지\n",
             "제품 분류\n",
@@ -337,6 +340,34 @@ class NotificationWorkerTest(unittest.TestCase):
             mock_send_telegram.call_args.kwargs.get("image_url"),
             "https://img.joongna.com/p/2002-seen.jpg",
         )
+
+    def test_send_alert_event_uses_seen_product_title_when_alert_title_missing(self):
+        with patch(
+            "src.notification_worker.resolve_user_alert_delivery_policy",
+            return_value={
+                "enabled": True,
+                "telegram_chat_id": "123456",
+                "allow_global_fallback": False,
+            },
+        ):
+            with patch("src.notification_worker._send_fcm_to_user", return_value={"sent": 0, "failed": 0, "attempted": 0, "reason": "no_active_push_tokens"}):
+                with patch("src.notification_worker._telegram_configured", return_value=True):
+                    with patch("src.notification_worker._fetch_listing_image_url_by_product_id", return_value=None):
+                        with patch("src.notification_worker._fetch_listing_title_by_product_id", return_value="DB 저장 제목") as mock_fetch_title:
+                            with patch("src.notification_worker.send_telegram_alert", return_value=True) as mock_send_telegram:
+                                with patch("src.notification_worker.mark_alert_event_sent"):
+                                    result = send_alert_event(
+                                        {
+                                            "id": 303,
+                                            "user_id": "boongtol",
+                                            "product_id": "303",
+                                        }
+                                    )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("status"), "sent")
+        mock_fetch_title.assert_called_once_with("303")
+        self.assertIn("게시글 제목\nDB 저장 제목", mock_send_telegram.call_args.args[0])
 
     def test_send_alert_event_sent_when_push_success_without_telegram(self):
         with patch(

@@ -305,6 +305,50 @@ def _fetch_listing_image_url_by_product_id(product_id):
             connection.close()
 
 
+def _fetch_listing_title_by_product_id(product_id):
+    normalized_seq = _coerce_product_seq(product_id)
+    if normalized_seq is None:
+        return None
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        try:
+            cursor.execute(
+                """
+                SELECT title, last_title
+                FROM joongna_seen_products
+                WHERE seq = %s
+                LIMIT 1
+                """,
+                (normalized_seq,),
+            )
+            row = cursor.fetchone()
+        except Exception as exc:
+            lowered = str(exc).lower()
+            if "unknown column" in lowered or "doesn't exist" in lowered:
+                return None
+            raise
+
+        if not row:
+            return None
+
+        if isinstance(row, dict):
+            return _normalize_optional_text(row.get("last_title")) or _normalize_optional_text(row.get("title"))
+        if isinstance(row, (tuple, list)):
+            last_title = _normalize_optional_text(row[1]) if len(row) > 1 else None
+            title = _normalize_optional_text(row[0]) if len(row) > 0 else None
+            return last_title or title
+        return None
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
 def _format_krw_display(value):
     normalized = _safe_int(value)
     if normalized is None:
@@ -381,6 +425,13 @@ def _resolve_url_for_display(alert):
     if url is not None:
         return url
     return "URL 정보 없음"
+
+
+def _resolve_title_text_for_display(alert):
+    title = _normalize_optional_text(alert.get("title"))
+    if title is not None:
+        return title
+    return "제목 없음"
 
 
 def _resolve_product_type_text_for_display(alert):
@@ -1152,6 +1203,7 @@ def _send_fcm_to_user(user_id, alert):
 
 def _build_telegram_message(alert):
     source = _normalize_optional_text(alert.get("source")) or "joongna"
+    title = _resolve_title_text_for_display(alert)
     url = _resolve_url_for_display(alert)
     listing_image_url = _normalize_optional_text(alert.get("listing_image_url")) or "이미지 없음"
     listing_price_krw = _safe_int(alert.get("price_krw"))
@@ -1184,6 +1236,7 @@ def _build_telegram_message(alert):
 
     sections = [
         _build_telegram_detail_row("출처", source),
+        _build_telegram_detail_row("게시글 제목", title),
         _build_telegram_detail_row("URL", url),
         _build_telegram_detail_row("대표 이미지", listing_image_url),
         _build_telegram_detail_row("제품 분류", _resolve_product_type_text_for_display(alert)),
@@ -1482,6 +1535,10 @@ def send_alert_event(alert):
         telegram_attempted = True
         product_id_for_image_lookup = _resolve_alert_product_id_for_image_lookup(alert)
         listing_image_url = _fetch_listing_image_url_by_product_id(product_id_for_image_lookup)
+        if _normalize_optional_text(alert.get("title")) is None:
+            listing_title = _fetch_listing_title_by_product_id(product_id_for_image_lookup)
+            if listing_title is not None:
+                alert["title"] = listing_title
         if listing_image_url is None:
             listing_image_url = (
                 _normalize_optional_text(alert.get("listing_image_url"))

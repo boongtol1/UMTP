@@ -99,6 +99,13 @@ fun AlertFeedScreen(
                     context.startActivity(intent)
                 }
             },
+            onOpenImageUrl = { alert ->
+                val imageUrl = resolveAlertImageUrl(alert)
+                if (!imageUrl.isNullOrBlank()) {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(imageUrl))
+                    context.startActivity(intent)
+                }
+            },
         )
         return
     }
@@ -318,6 +325,7 @@ private fun AlertDetailScreen(
     onBack: () -> Unit,
     onMarkReviewed: (Long, (Boolean) -> Unit) -> Unit,
     onOpenUrl: (AlertItem) -> Unit,
+    onOpenImageUrl: (AlertItem) -> Unit,
 ) {
     val resolvedUrl = resolveAlertUrl(alert)
     val listingImageUrl = alert.listing_image_url?.takeIf { it.isNotBlank() }
@@ -367,7 +375,7 @@ private fun AlertDetailScreen(
                             .fillMaxWidth()
                             .height(180.dp)
                             .clip(MaterialTheme.shapes.medium)
-                            .clickable(enabled = !resolvedUrl.isNullOrBlank()) { onOpenUrl(alert) },
+                            .clickable { onOpenImageUrl(alert) },
                         contentScale = ContentScale.Crop,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -375,12 +383,19 @@ private fun AlertDetailScreen(
             }
 
             items(buildAlertDetailRows(alert, resolvedUrl, listingImageUrl)) { row ->
-                val isLinkRow = (row.first == "URL" || row.first == "대표 이미지") && !resolvedUrl.isNullOrBlank()
+                val isUrlRow = row.first == "URL" && !resolvedUrl.isNullOrBlank()
+                val isImageRow = row.first == "대표 이미지" && !listingImageUrl.isNullOrBlank()
+                val isLinkRow = isUrlRow || isImageRow
+                val rowClickHandler = when {
+                    isUrlRow -> ({ onOpenUrl(alert) })
+                    isImageRow -> ({ onOpenImageUrl(alert) })
+                    else -> null
+                }
                 DetailRow(
                     label = row.first,
                     value = row.second,
                     isLink = isLinkRow,
-                    onClick = { onOpenUrl(alert) },
+                    onClick = rowClickHandler,
                 )
             }
 
@@ -464,6 +479,10 @@ private fun BadgeChip(label: String, color: Color) {
 
 private fun resolveAlertUrl(alert: AlertItem): String? {
     return alert.product_url?.takeIf { it.isNotBlank() } ?: alert.url?.takeIf { it.isNotBlank() }
+}
+
+private fun resolveAlertImageUrl(alert: AlertItem): String? {
+    return alert.listing_image_url?.takeIf { it.isNotBlank() }
 }
 
 private fun resolveAlertConditionLabel(alert: AlertItem): String {
