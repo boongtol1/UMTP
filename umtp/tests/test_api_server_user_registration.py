@@ -108,7 +108,59 @@ class ApiServerUserRegistrationTest(unittest.TestCase):
         self.assertEqual(response.get("user_id"), "boongtol")
         self.assertEqual(len(response.get("items", [])), 1)
         mock_register_user.assert_called_once_with(user_id="boongtol")
-        mock_list_alerts.assert_called_once_with("boongtol", limit=10)
+        mock_list_alerts.assert_called_once_with("boongtol", limit=10, is_read="0")
+
+    @patch(
+        "src.api_server.list_alert_events_for_user",
+        return_value=[],
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_alert_events_accepts_read_filter(self, mock_register_user, mock_list_alerts):
+        response = api_server.alert_events("boongtol", limit=50, is_read="all")
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("is_read_filter"), "all")
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_list_alerts.assert_called_once_with("boongtol", limit=50, is_read="all")
+
+    @patch(
+        "src.api_server.mark_alert_event_read_for_user",
+        return_value={"ok": True, "alert_event_id": 11, "is_read": True, "already_read": False},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_mark_single_alert_read(self, mock_register_user, mock_mark_read):
+        response = api_server.mark_alert_event_as_read(11, "boongtol")
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("user_id"), "boongtol")
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_mark_read.assert_called_once_with(user_id="boongtol", alert_event_id=11)
+
+    @patch(
+        "src.api_server.mark_all_alert_events_read_for_user",
+        return_value={"ok": True, "updated_count": 4},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_mark_all_alerts_read(self, mock_register_user, mock_mark_all_read):
+        response = api_server.mark_all_alert_events_as_read("boongtol")
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("updated_count"), 4)
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_mark_all_read.assert_called_once_with(user_id="boongtol")
+
+    @patch(
+        "src.api_server.list_grouped_read_alert_events_for_user",
+        return_value={"M1": {"13": [{"id": 7}]}},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_grouped_read_alert_events(self, mock_register_user, mock_grouped):
+        response = api_server.grouped_read_alert_events("boongtol")
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("groups"), {"M1": {"13": [{"id": 7}]}})
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_grouped.assert_called_once_with(user_id="boongtol", limit=500)
 
     @patch(
         "src.api_server.refresh_user_fair_price_saved_at_for_active_rules",

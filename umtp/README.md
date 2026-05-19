@@ -66,6 +66,9 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - `/alerts` 및 `/analyze-url` 응답에 `body_text`를 포함하며, Android 알림 상세는 본문이 없으면 `본문 내용 없음`을 표시합니다.
 - 알림 피드/텔레그램 문구를 동일 정책(사용자 친화 용어: `내가 생각한 시장가`, `시장가와의 차이`, `알림 기준 가격`)으로 맞췄고, 대표 이미지 URL이 있으면 Android 피드 카드와 Telegram 알림에 함께 표시합니다.
 - 위험도 표시는 `낮음/주의/위험`으로 요약하며, 위험 키워드/교환 여부/본문 요약을 함께 제공합니다.
+- `alert_events`에 읽음 상태 컬럼(`is_read`, `read_at`)을 추가했고, 기본 메인 피드는 안 읽은 알림(`is_read=0`)만 조회합니다.
+- 알림 상세를 열면 자동 읽음 처리되며, 읽음 처리된 알림은 삭제되지 않고 읽음 보관함에서 `chip -> screen_inch -> alert list` 구조로 조회할 수 있습니다.
+- `PATCH /alert-events/{id}/read`, `PATCH /alert-events/read-all`, `GET /alert-events/read/grouped` API를 추가했습니다.
 - 0.8 서비스 계층: `analysis_service.py`에서 URL 분석과 `ok/ reason` 실패 응답을 처리합니다.
 - 0.8 알림은 `notifier.py`의 `print()` 기반 가짜 알림으로 처리합니다.
 - 0.8은 Android Notification Listener 앱 자체를 구현하지 않고 `curl` 요청으로 URL 전달 상황을 흉내냅니다.

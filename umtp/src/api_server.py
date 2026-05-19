@@ -11,7 +11,12 @@ from src.alert_price_direction import (
     MIN_ALERT_DROP_RATE_PERCENT,
 )
 from src.analysis_service import analyze_url_for_user
-from src.notification_worker import list_alert_events_for_user
+from src.notification_worker import (
+    list_alert_events_for_user,
+    list_grouped_read_alert_events_for_user,
+    mark_alert_event_read_for_user,
+    mark_all_alert_events_read_for_user,
+)
 from src.push_token_service import upsert_user_push_token
 from src.user_settings_service import (
     get_all_macbook_air_units_sorted,
@@ -54,6 +59,19 @@ def _ensure_user_registered(raw_user_id: Optional[str], *, source: str) -> str:
             resolved_user_id,
         )
     return resolved_user_id
+
+
+def _normalize_is_read_query(value: Optional[str]) -> str:
+    normalized = _normalize_user_id(value).lower()
+    if not normalized:
+        return "0"
+    if normalized in {"0", "false", "unread"}:
+        return "0"
+    if normalized in {"1", "true", "read"}:
+        return "1"
+    if normalized == "all":
+        return "all"
+    raise ValueError("invalid_is_read")
 
 
 class AnalyzeUrlRequest(BaseModel):
@@ -308,8 +326,7 @@ def refresh_single_user_rule_saved_at(user_id: str, rule_id: int):
         }
 
 
-@app.get("/alerts")
-def alerts(user_id: str, limit: int = 200):
+def _list_alerts_response(*, user_id: str, limit: int = 200, is_read: Optional[str] = "0", source: str):
     normalized_user_id = _normalize_user_id(user_id)
     if not normalized_user_id:
         return {"ok": False, "reason": "invalid_user_id", "items": []}
@@ -318,11 +335,17 @@ def alerts(user_id: str, limit: int = 200):
         return {"ok": False, "reason": "invalid_limit", "items": []}
 
     try:
-        resolved_user_id = _ensure_user_registered(normalized_user_id, source="api/alerts")
-        items = list_alert_events_for_user(resolved_user_id, limit=min(limit, 200))
+        normalized_is_read = _normalize_is_read_query(is_read)
+        resolved_user_id = _ensure_user_registered(normalized_user_id, source=source)
+        items = list_alert_events_for_user(
+            resolved_user_id,
+            limit=min(limit, 200),
+            is_read=normalized_is_read,
+        )
         return {
             "ok": True,
             "user_id": resolved_user_id,
+            "is_read_filter": normalized_is_read,
             "items": items,
         }
     except RuntimeError as exc:
@@ -340,6 +363,108 @@ def alerts(user_id: str, limit: int = 200):
             "reason": f"알림 조회 실패: {exc}",
             "user_id": normalized_user_id,
             "items": [],
+        }
+
+
+@app.get("/alerts")
+def alerts(user_id: str, limit: int = 200, is_read: Optional[str] = "0"):
+    return _list_alerts_response(
+        user_id=user_id,
+        limit=limit,
+        is_read=is_read,
+        source="api/alerts",
+    )
+
+
+@app.get("/alert-events")
+def alert_events(user_id: str, limit: int = 200, is_read: Optional[str] = "0"):
+    return _list_alerts_response(
+        user_id=user_id,
+        limit=limit,
+        is_read=is_read,
+        source="api/alert-events",
+    )
+
+
+@app.patch("/alert-events/{alert_event_id}/read")
+def mark_alert_event_as_read(alert_event_id: int, user_id: str):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(normalized_user_id, source="api/alert-events/{id}/read")
+        result = mark_alert_event_read_for_user(
+            user_id=resolved_user_id,
+            alert_event_id=alert_event_id,
+        )
+        if result.get("ok"):
+            result.setdefault("user_id", resolved_user_id)
+            result.setdefault("message", "읽음 처리 완료")
+        return result
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}", "user_id": normalized_user_id}
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc), "user_id": normalized_user_id}
+    except Exception as exc:
+        return {"ok": False, "reason": f"읽음 처리 실패: {exc}", "user_id": normalized_user_id}
+
+
+@app.patch("/alert-events/read-all")
+def mark_all_alert_events_as_read(user_id: str):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(normalized_user_id, source="api/alert-events/read-all")
+        result = mark_all_alert_events_read_for_user(user_id=resolved_user_id)
+        if result.get("ok"):
+            result.setdefault("user_id", resolved_user_id)
+            result.setdefault("message", "모두 읽음 처리 완료")
+        return result
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}", "user_id": normalized_user_id}
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc), "user_id": normalized_user_id}
+    except Exception as exc:
+        return {"ok": False, "reason": f"모두 읽음 처리 실패: {exc}", "user_id": normalized_user_id}
+
+
+@app.get("/alert-events/read/grouped")
+def grouped_read_alert_events(user_id: str, limit: int = 500):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id", "groups": {}}
+    if not isinstance(limit, int) or limit <= 0:
+        return {"ok": False, "reason": "invalid_limit", "groups": {}}
+
+    try:
+        resolved_user_id = _ensure_user_registered(normalized_user_id, source="api/alert-events/read/grouped")
+        groups = list_grouped_read_alert_events_for_user(
+            user_id=resolved_user_id,
+            limit=min(limit, 1000),
+        )
+        return {
+            "ok": True,
+            "user_id": resolved_user_id,
+            "groups": groups,
+        }
+    except RuntimeError as exc:
+        return {
+            "ok": False,
+            "reason": f"사용자 등록 실패: {exc}",
+            "user_id": normalized_user_id,
+            "groups": {},
+        }
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc), "groups": {}}
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": f"읽음 알림 그룹 조회 실패: {exc}",
+            "user_id": normalized_user_id,
+            "groups": {},
         }
 
 

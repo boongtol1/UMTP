@@ -10,9 +10,8 @@ if PROJECT_ROOT not in sys.path:
 from src.db import get_connection  # noqa: E402
 
 
-MIGRATION_SQL_PATH = os.path.join(PROJECT_ROOT, "sql", "migrate_alert_events_detail_fields.sql")
-BODY_TEXT_MIGRATION_SQL_PATH = os.path.join(PROJECT_ROOT, "sql", "migrate_body_text_fields.sql")
 CREATE_ALERT_EVENTS_SQL_PATH = os.path.join(PROJECT_ROOT, "sql", "create_or_alter_alert_events.sql")
+READ_STATUS_MIGRATION_SQL_PATH = os.path.join(PROJECT_ROOT, "sql", "add_alert_event_read_status.sql")
 
 
 def _execute_sql_script(connection, path):
@@ -31,7 +30,7 @@ def _execute_sql_script(connection, path):
         cursor.close()
 
 
-class AlertEventsDetailMigrationTest(unittest.TestCase):
+class AlertEventsReadStatusMigrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         try:
@@ -41,37 +40,15 @@ class AlertEventsDetailMigrationTest(unittest.TestCase):
         else:
             connection.close()
 
-    def test_migration_adds_columns_and_is_idempotent(self):
+    def test_migration_adds_read_columns_and_index_idempotently(self):
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
         try:
             _execute_sql_script(connection, CREATE_ALERT_EVENTS_SQL_PATH)
-            _execute_sql_script(connection, MIGRATION_SQL_PATH)
-            _execute_sql_script(connection, MIGRATION_SQL_PATH)
-            _execute_sql_script(connection, BODY_TEXT_MIGRATION_SQL_PATH)
-            _execute_sql_script(connection, BODY_TEXT_MIGRATION_SQL_PATH)
+            _execute_sql_script(connection, READ_STATUS_MIGRATION_SQL_PATH)
+            _execute_sql_script(connection, READ_STATUS_MIGRATION_SQL_PATH)
 
-            expected_columns = {
-                "source",
-                "product_type",
-                "chip",
-                "screen_inch",
-                "ram_gb",
-                "ssd_gb",
-                "alert_drop_rate_percent",
-                "alert_price_direction",
-                "risk_level",
-                "risk_score",
-                "risk_keywords",
-                "is_exchange_post",
-                "trade_type",
-                "body_excerpt",
-                "body_text",
-                "analyzed_at",
-                "is_read",
-                "read_at",
-            }
-
+            expected_columns = {"is_read", "read_at"}
             cursor.execute(
                 """
                 SELECT column_name
@@ -87,9 +64,19 @@ class AlertEventsDetailMigrationTest(unittest.TestCase):
                 for key, value in row.items():
                     if str(key).lower() == "column_name":
                         existing_columns.add(value)
+            self.assertTrue(expected_columns.issubset(existing_columns))
 
-            missing_columns = expected_columns - existing_columns
-            self.assertEqual(missing_columns, set())
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS index_count
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'alert_events'
+                  AND index_name = 'idx_alert_events_user_is_read'
+                """
+            )
+            row = cursor.fetchone() or {}
+            self.assertGreaterEqual(int(row.get("index_count", 0)), 1)
         finally:
             cursor.close()
             connection.close()

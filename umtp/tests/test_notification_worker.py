@@ -11,12 +11,57 @@ if PROJECT_ROOT not in sys.path:
 from src.notification_worker import (  # noqa: E402
     _build_telegram_message,
     dispatch_alert_event_immediately,
+    list_alert_events_for_user,
+    list_grouped_read_alert_events_for_user,
     process_pending_alert_events,
     send_alert_event,
 )
 
 
 class NotificationWorkerTest(unittest.TestCase):
+    def test_list_alert_events_rejects_invalid_is_read_filter(self):
+        with self.assertRaises(ValueError):
+            list_alert_events_for_user("boongtol", is_read="invalid-filter")
+
+    @patch(
+        "src.notification_worker.list_alert_events_for_user",
+        return_value=[
+            {
+                "id": 11,
+                "chip": "M2",
+                "screen_inch": 13,
+                "read_at": "2026-05-19T10:50:00",
+                "analyzed_at": "2026-05-19T10:45:00",
+                "created_at": "2026-05-19T10:40:00",
+            },
+            {
+                "id": 12,
+                "chip": "",
+                "screen_inch": 0,
+                "read_at": "2026-05-19T10:52:00",
+                "analyzed_at": "2026-05-19T10:46:00",
+                "created_at": "2026-05-19T10:41:00",
+            },
+            {
+                "id": 13,
+                "chip": "M1",
+                "screen_inch": 13,
+                "read_at": "2026-05-19T10:53:00",
+                "analyzed_at": "2026-05-19T10:47:00",
+                "created_at": "2026-05-19T10:42:00",
+            },
+        ],
+    )
+    def test_grouped_read_alerts_are_grouped_by_chip_then_screen(self, mock_list_alerts):
+        grouped = list_grouped_read_alert_events_for_user("boongtol")
+
+        self.assertEqual(list(grouped.keys()), ["M1", "M2", "기타"])
+        self.assertIn("13", grouped["M1"])
+        self.assertEqual(grouped["M1"]["13"][0]["id"], 13)
+        self.assertEqual(grouped["M2"]["13"][0]["id"], 11)
+        self.assertEqual(grouped["기타"]["기타"][0]["id"], 12)
+        mock_list_alerts.assert_called_once_with(user_id="boongtol", limit=500, is_read="1")
+
     def test_build_telegram_message_uses_alert_feed_wording(self):
         message = _build_telegram_message(
             {

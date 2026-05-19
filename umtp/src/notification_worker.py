@@ -1,5 +1,6 @@
 import os
 import json
+from datetime import datetime
 
 from dotenv import load_dotenv
 
@@ -525,10 +526,16 @@ def _fetch_latest_log_details(cursor, *, user_id, url):
     return row
 
 
-def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit):
+def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit, normalized_is_read):
+    read_filter_clause = ""
+    if normalized_is_read == "0":
+        read_filter_clause = " AND COALESCE(is_read, 0) = 0"
+    elif normalized_is_read == "1":
+        read_filter_clause = " AND COALESCE(is_read, 0) = 1"
+
     try:
         cursor.execute(
-            """
+            f"""
             SELECT
                 id,
                 user_id,
@@ -562,11 +569,14 @@ def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit):
                 status,
                 send_attempts,
                 error_message,
+                is_read,
+                read_at,
                 created_at,
                 sent_at,
                 updated_at
             FROM alert_events
             WHERE user_id = %s
+            {read_filter_clause}
             ORDER BY created_at DESC
             LIMIT %s
             """,
@@ -579,7 +589,7 @@ def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit):
             raise
         try:
             cursor.execute(
-                """
+                f"""
                 SELECT
                     id,
                     user_id,
@@ -613,11 +623,14 @@ def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit):
                     status,
                     send_attempts,
                     error_message,
+                    COALESCE(is_read, 0) AS is_read,
+                    NULL AS read_at,
                     created_at,
                     sent_at,
                     updated_at
                 FROM alert_events
                 WHERE user_id = %s
+                {read_filter_clause}
                 ORDER BY created_at DESC
                 LIMIT %s
                 """,
@@ -647,6 +660,8 @@ def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit):
                 status,
                 send_attempts,
                 error_message,
+                0 AS is_read,
+                NULL AS read_at,
                 created_at,
                 sent_at,
                 updated_at
@@ -657,7 +672,10 @@ def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit):
             """,
             (normalized_user_id, normalized_limit),
         )
-        return cursor.fetchall() or [], False
+        rows = cursor.fetchall() or []
+        if normalized_is_read == "1":
+            return [], False
+        return rows, False
 
 
 def _normalize_limit(limit):
@@ -667,6 +685,41 @@ def _normalize_limit(limit):
     if normalized <= 0:
         raise ValueError("invalid_limit")
     return min(normalized, 200)
+
+
+def _normalize_is_read_filter(value):
+    normalized = (_normalize_optional_text(value) or "0").lower()
+    if normalized in {"0", "false", "unread"}:
+        return "0"
+    if normalized in {"1", "true", "read"}:
+        return "1"
+    if normalized == "all":
+        return "all"
+    raise ValueError("invalid_is_read")
+
+
+def _coerce_datetime_for_sort(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+
+    normalized = _normalize_optional_text(value)
+    if normalized is None:
+        return None
+
+    text = normalized.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        pass
+
+    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(normalized, pattern)
+        except ValueError:
+            continue
+    return None
 
 
 def _normalize_alert_id(alert_id):
@@ -1437,9 +1490,10 @@ def process_pending_alert_events(limit=20):
     return stats
 
 
-def list_alert_events_for_user(user_id, limit=200):
+def list_alert_events_for_user(user_id, limit=200, is_read="0"):
     normalized_user_id = _normalize_required_text(user_id, "user_id")
     normalized_limit = _normalize_limit(limit)
+    normalized_is_read = _normalize_is_read_filter(is_read)
 
     connection = None
     cursor = None
@@ -1450,6 +1504,7 @@ def list_alert_events_for_user(user_id, limit=200):
             cursor,
             normalized_user_id=normalized_user_id,
             normalized_limit=normalized_limit,
+            normalized_is_read=normalized_is_read,
         )
         listing_image_url_map = _fetch_listing_image_urls(
             cursor,
@@ -1481,6 +1536,8 @@ def list_alert_events_for_user(user_id, limit=200):
             body_excerpt = _build_body_excerpt(body_excerpt_source)
             analyzed_at = row.get("analyzed_at") or row.get("created_at")
             confidence_score = _safe_int(row.get("confidence_score"))
+            is_read_value = bool(_safe_int(row.get("is_read")) or 0)
+            read_at = row.get("read_at")
 
             if not has_detail_columns:
                 log_detail = _fetch_latest_log_details(
@@ -1568,6 +1625,8 @@ def list_alert_events_for_user(user_id, limit=200):
                     "status": row.get("status"),
                     "send_attempts": row.get("send_attempts"),
                     "error_message": row.get("error_message"),
+                    "is_read": is_read_value,
+                    "read_at": read_at,
                     "created_at": row.get("created_at"),
                     "sent_at": row.get("sent_at"),
                     "updated_at": row.get("updated_at"),
@@ -1581,3 +1640,201 @@ def list_alert_events_for_user(user_id, limit=200):
             cursor.close()
         if connection is not None and connection.is_connected():
             connection.close()
+
+
+def mark_alert_event_read_for_user(*, user_id, alert_event_id):
+    normalized_user_id = _normalize_required_text(user_id, "user_id")
+    normalized_alert_id = _normalize_alert_id(alert_event_id)
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        try:
+            cursor.execute(
+                """
+                UPDATE alert_events
+                SET is_read = 1,
+                    read_at = COALESCE(read_at, NOW())
+                WHERE id = %s
+                  AND user_id = %s
+                """,
+                (normalized_alert_id, normalized_user_id),
+            )
+            updated_rows = cursor.rowcount or 0
+        except Exception as exc:
+            lowered = str(exc).lower()
+            if "unknown column" in lowered:
+                return {
+                    "ok": False,
+                    "reason": "alert_read_columns_missing",
+                    "alert_event_id": normalized_alert_id,
+                }
+            raise
+
+        connection.commit()
+
+        if updated_rows == 0:
+            cursor.execute(
+                """
+                SELECT id, COALESCE(is_read, 0) AS is_read, read_at
+                FROM alert_events
+                WHERE id = %s
+                  AND user_id = %s
+                LIMIT 1
+                """,
+                (normalized_alert_id, normalized_user_id),
+            )
+            existing = cursor.fetchone()
+            if not existing:
+                return {
+                    "ok": False,
+                    "reason": "alert_event_not_found",
+                    "alert_event_id": normalized_alert_id,
+                }
+
+            return {
+                "ok": True,
+                "alert_event_id": normalized_alert_id,
+                "is_read": bool(_safe_int(existing.get("is_read")) or 0),
+                "read_at": existing.get("read_at"),
+                "already_read": True,
+            }
+
+        cursor.execute(
+            """
+            SELECT id, COALESCE(is_read, 0) AS is_read, read_at
+            FROM alert_events
+            WHERE id = %s
+              AND user_id = %s
+            LIMIT 1
+            """,
+            (normalized_alert_id, normalized_user_id),
+        )
+        row = cursor.fetchone() or {}
+        return {
+            "ok": True,
+            "alert_event_id": normalized_alert_id,
+            "is_read": bool(_safe_int(row.get("is_read")) or 0),
+            "read_at": row.get("read_at"),
+            "already_read": False,
+        }
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def mark_all_alert_events_read_for_user(*, user_id):
+    normalized_user_id = _normalize_required_text(user_id, "user_id")
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        try:
+            cursor.execute(
+                """
+                UPDATE alert_events
+                SET is_read = 1,
+                    read_at = COALESCE(read_at, NOW())
+                WHERE user_id = %s
+                  AND COALESCE(is_read, 0) = 0
+                """,
+                (normalized_user_id,),
+            )
+            updated_rows = cursor.rowcount or 0
+        except Exception as exc:
+            lowered = str(exc).lower()
+            if "unknown column" in lowered:
+                return {
+                    "ok": False,
+                    "reason": "alert_read_columns_missing",
+                    "updated_count": 0,
+                }
+            raise
+
+        connection.commit()
+        return {
+            "ok": True,
+            "updated_count": int(updated_rows),
+        }
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def _chip_group_sort_key(chip_key):
+    normalized = (_normalize_optional_text(chip_key) or "").upper()
+    preferred_order = {"M1": 1, "M2": 2, "M3": 3, "M4": 4, "M5": 5}
+    if normalized in preferred_order:
+        return (0, preferred_order[normalized], normalized)
+    if normalized == "기타":
+        return (2, 999, normalized)
+    return (1, 500, normalized)
+
+
+def _screen_group_sort_key(screen_key):
+    normalized = _normalize_optional_text(screen_key)
+    if normalized is None:
+        return (2, 999)
+    if normalized == "기타":
+        return (2, 999)
+    try:
+        return (0, int(normalized))
+    except ValueError:
+        return (1, 500)
+
+
+def _group_chip_key(chip):
+    normalized_chip = _normalize_optional_text(chip)
+    if normalized_chip is None:
+        return "기타"
+    return normalized_chip.upper()
+
+
+def _group_screen_key(screen_inch):
+    normalized_screen = _safe_int(screen_inch)
+    if normalized_screen is None or normalized_screen <= 0:
+        return "기타"
+    return str(normalized_screen)
+
+
+def _alert_group_item_sort_key(item):
+    read_at = _coerce_datetime_for_sort(item.get("read_at"))
+    analyzed_at = _coerce_datetime_for_sort(item.get("analyzed_at"))
+    created_at = _coerce_datetime_for_sort(item.get("created_at"))
+    return (
+        read_at or datetime.min,
+        analyzed_at or datetime.min,
+        created_at or datetime.min,
+        _safe_int(item.get("id")) or 0,
+    )
+
+
+def list_grouped_read_alert_events_for_user(user_id, limit=500):
+    items = list_alert_events_for_user(user_id=user_id, limit=limit, is_read="1")
+    grouped = {}
+
+    for item in items:
+        chip_key = _group_chip_key(item.get("chip"))
+        screen_key = _group_screen_key(item.get("screen_inch"))
+        grouped.setdefault(chip_key, {}).setdefault(screen_key, []).append(item)
+
+    ordered_grouped = {}
+    chip_keys = sorted(grouped.keys(), key=_chip_group_sort_key)
+    for chip_key in chip_keys:
+        screen_groups = grouped.get(chip_key) or {}
+        ordered_screen_groups = {}
+        for screen_key in sorted(screen_groups.keys(), key=_screen_group_sort_key):
+            alerts = screen_groups.get(screen_key) or []
+            alerts.sort(key=_alert_group_item_sort_key, reverse=True)
+            ordered_screen_groups[screen_key] = alerts
+        ordered_grouped[chip_key] = ordered_screen_groups
+
+    return ordered_grouped

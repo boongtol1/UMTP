@@ -34,10 +34,13 @@ CREATE TABLE IF NOT EXISTS alert_events (
   status VARCHAR(30) NOT NULL DEFAULT 'pending',
   send_attempts INT NOT NULL DEFAULT 0,
   error_message TEXT NULL,
+  is_read TINYINT(1) NOT NULL DEFAULT 0,
+  read_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   sent_at TIMESTAMP NULL,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   KEY idx_alert_events_user (user_id),
+  KEY idx_alert_events_user_is_read (user_id, is_read, read_at),
   KEY idx_alert_events_status (status),
   KEY idx_alert_events_created_at (created_at),
   KEY idx_alert_events_product (product_id),
@@ -257,6 +260,34 @@ PREPARE stmt_error_message FROM @sql_error_message;
 EXECUTE stmt_error_message;
 DEALLOCATE PREPARE stmt_error_message;
 
+SELECT COUNT(*) INTO @has_is_read
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND COLUMN_NAME = 'is_read';
+SET @sql_is_read = IF(
+  @has_is_read = 0,
+  'ALTER TABLE alert_events ADD COLUMN is_read TINYINT(1) NOT NULL DEFAULT 0 AFTER error_message',
+  'SELECT "is_read exists"'
+);
+PREPARE stmt_is_read FROM @sql_is_read;
+EXECUTE stmt_is_read;
+DEALLOCATE PREPARE stmt_is_read;
+
+SELECT COUNT(*) INTO @has_read_at
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND COLUMN_NAME = 'read_at';
+SET @sql_read_at = IF(
+  @has_read_at = 0,
+  'ALTER TABLE alert_events ADD COLUMN read_at DATETIME NULL AFTER is_read',
+  'SELECT "read_at exists"'
+);
+PREPARE stmt_read_at FROM @sql_read_at;
+EXECUTE stmt_read_at;
+DEALLOCATE PREPARE stmt_read_at;
+
 SELECT COUNT(*) INTO @has_sent_at
 FROM INFORMATION_SCHEMA.COLUMNS
 WHERE TABLE_SCHEMA = @target_db
@@ -298,6 +329,20 @@ SET @sql_idx_user = IF(
 PREPARE stmt_idx_user FROM @sql_idx_user;
 EXECUTE stmt_idx_user;
 DEALLOCATE PREPARE stmt_idx_user;
+
+SELECT COUNT(*) INTO @has_idx_user_is_read
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND INDEX_NAME = 'idx_alert_events_user_is_read';
+SET @sql_idx_user_is_read = IF(
+  @has_idx_user_is_read = 0,
+  'ALTER TABLE alert_events ADD INDEX idx_alert_events_user_is_read (user_id, is_read, read_at)',
+  'SELECT "idx_alert_events_user_is_read exists"'
+);
+PREPARE stmt_idx_user_is_read FROM @sql_idx_user_is_read;
+EXECUTE stmt_idx_user_is_read;
+DEALLOCATE PREPARE stmt_idx_user_is_read;
 
 SELECT COUNT(*) INTO @has_idx_status
 FROM INFORMATION_SCHEMA.STATISTICS

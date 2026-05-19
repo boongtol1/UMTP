@@ -100,6 +100,8 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
         self.assertEqual(item.get("body_excerpt"), "상태 좋고 배터리 정상")
         self.assertEqual(item.get("body_text"), "상태 좋고 배터리 정상. 사용감 적음.")
         self.assertEqual(item.get("listing_image_url"), "https://img.joongna.com/p/1.jpg")
+        self.assertFalse(item.get("is_read"))
+        self.assertIsNone(item.get("read_at"))
 
     @patch("src.notification_worker.get_connection", return_value=_FakeConnection())
     @patch(
@@ -168,6 +170,8 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
         self.assertTrue(item.get("trade_type_flags", {}).get("is_suspicious"))
         self.assertEqual(item.get("body_text"), "교환 원합니다. 본문 테스트")
         self.assertEqual(item.get("body_excerpt"), "교환 원합니다. 본문 테스트")
+        self.assertFalse(item.get("is_read"))
+        self.assertIsNone(item.get("read_at"))
 
 
 if __name__ == "__main__":
