@@ -92,6 +92,20 @@ def _normalize_optional_search_keyword(search_keyword):
     return validate_search_keyword(normalized)
 
 
+def _normalize_chip_for_setting(chip):
+    normalized = _safe_text(chip)
+    if normalized is None:
+        return ""
+
+    compact_lower = normalized.lower().replace(" ", "")
+    if compact_lower == "m2pro":
+        return "M2 Pro"
+    if compact_lower == "m4pro":
+        return "M4 Pro"
+
+    return normalized.upper()
+
+
 def _normalize_poll_interval_seconds(value):
     if value is None:
         return DEFAULT_POLL_INTERVAL_SECONDS
@@ -1342,7 +1356,7 @@ def upsert_user_fair_price_setting(
 
     normalized_user_id = user_id.strip()
     normalized_product_type = product_type.strip() if isinstance(product_type, str) else ""
-    normalized_chip = chip.strip().upper() if isinstance(chip, str) else ""
+    normalized_chip = _normalize_chip_for_setting(chip)
 
     if not is_supported_product_type(normalized_product_type):
         return {"ok": False, "reason": "invalid_product_type"}

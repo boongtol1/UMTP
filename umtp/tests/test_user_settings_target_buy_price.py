@@ -204,6 +204,34 @@ class UserSettingsTargetBuyPriceTest(unittest.TestCase):
         self.assertFalse(result.get("ok"))
         self.assertEqual(result.get("reason"), "invalid_alert_price_direction")
 
+    def test_upsert_normalizes_mac_mini_pro_chip(self):
+        fake_cursor = _FakeCursor()
+        fake_connection = _FakeConnection(fake_cursor)
+
+        with patch("src.user_settings_service.get_connection", return_value=fake_connection):
+            with patch("src.user_settings_service.is_valid_silicon_unit", return_value=True) as mock_valid_unit:
+                with patch(
+                    "src.user_settings_service._resolve_setting_search_keyword",
+                    return_value="m2pro 맥미니",
+                ) as mock_resolve_keyword:
+                    result = upsert_user_fair_price_setting(
+                        user_id="boongtol",
+                        product_type="Mac mini",
+                        chip="m2pro",
+                        screen_inch=0,
+                        ram_gb=16,
+                        ssd_gb=512,
+                        fair_price_krw=1250000,
+                        alert_drop_rate_percent=10.0,
+                        enabled=True,
+                        search_keyword="m2pro 맥미니",
+                        poll_interval_seconds=60,
+                    )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(mock_valid_unit.call_args.args[1], "M2 Pro")
+        self.assertEqual(mock_resolve_keyword.call_args.kwargs.get("chip"), "M2 Pro")
+
 
 if __name__ == "__main__":
     unittest.main()

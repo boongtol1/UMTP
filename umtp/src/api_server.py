@@ -89,7 +89,7 @@ class UserRegisterRequest(BaseModel):
 class UserFairPriceUpsertRequest(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=100)
     product_type: str = Field(..., min_length=1, max_length=100)
-    chip: Literal["M1", "M2", "M3", "M4", "M5"]
+    chip: str = Field(..., min_length=1, max_length=20)
     screen_inch: int
     ram_gb: int
     ssd_gb: int
