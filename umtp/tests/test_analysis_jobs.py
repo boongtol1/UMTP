@@ -62,17 +62,18 @@ class AnalysisJobsTest(unittest.TestCase):
         fake_connection = _FakeConnection(fake_cursor)
 
         with patch("src.analysis_jobs.get_connection", return_value=fake_connection):
-            row = find_analysis_job_by_identity("boongtol", 11, "1001")
+            row = find_analysis_job_by_identity("boongtol", 11, "1001", "2026-05-19 10:30:00")
 
         self.assertEqual(row.get("id"), 7)
         self.assertIn("WHERE user_id = %s", fake_cursor.executed[0][0])
         self.assertIn("watch_rule_id", fake_cursor.executed[0][0])
+        self.assertIn("sort_date", fake_cursor.executed[0][0])
 
     def test_create_analysis_job_dedup(self):
         with patch(
             "src.analysis_jobs.find_analysis_job_by_identity",
             return_value={"id": 7, "status": "pending"},
-        ):
+        ) as mock_find_identity:
             result = create_analysis_job(
                 product_id="1001",
                 url="https://web.joongna.com/product/1001",
@@ -85,6 +86,7 @@ class AnalysisJobsTest(unittest.TestCase):
         self.assertFalse(result.get("created"))
         self.assertEqual(result.get("job_id"), 7)
         self.assertEqual(result.get("reason"), "duplicate_identity_job")
+        mock_find_identity.assert_called_once_with("boongtol", 1, "1001", None)
 
     def test_create_analysis_job_insert(self):
         fake_cursor = _FakeCursor(lastrowid=11)

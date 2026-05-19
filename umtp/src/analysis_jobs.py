@@ -116,10 +116,18 @@ def _is_duplicate_entry_error(exc):
     return "duplicate" in message and "entry" in message
 
 
-def find_analysis_job_by_identity(user_id, watch_rule_id, product_id):
+def find_analysis_job_by_identity(
+    user_id,
+    watch_rule_id,
+    product_id,
+    sort_date=None,
+    *,
+    include_sort_date=True,
+):
     normalized_user_id = _normalize_optional_text(user_id)
     normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
     normalized_product_id = _normalize_product_id(product_id)
+    normalized_sort_date = _normalize_sort_date_for_db(sort_date)
 
     if normalized_user_id is None or normalized_product_id is None:
         return None
@@ -130,29 +138,60 @@ def find_analysis_job_by_identity(user_id, watch_rule_id, product_id):
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
         try:
-            cursor.execute(
-                """
-                SELECT
-                    id,
-                    status,
-                    created_at
-                FROM analysis_jobs
-                WHERE user_id = %s
-                  AND (
-                        (watch_rule_id IS NULL AND %s IS NULL)
-                     OR watch_rule_id = %s
-                  )
-                  AND product_id = %s
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (
-                    normalized_user_id,
-                    normalized_watch_rule_id,
-                    normalized_watch_rule_id,
-                    normalized_product_id,
-                ),
-            )
+            if include_sort_date:
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        status,
+                        created_at
+                    FROM analysis_jobs
+                    WHERE user_id = %s
+                      AND (
+                            (watch_rule_id IS NULL AND %s IS NULL)
+                         OR watch_rule_id = %s
+                      )
+                      AND product_id = %s
+                      AND (
+                            (sort_date IS NULL AND %s IS NULL)
+                         OR sort_date = %s
+                      )
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        normalized_user_id,
+                        normalized_watch_rule_id,
+                        normalized_watch_rule_id,
+                        normalized_product_id,
+                        normalized_sort_date,
+                        normalized_sort_date,
+                    ),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        status,
+                        created_at
+                    FROM analysis_jobs
+                    WHERE user_id = %s
+                      AND (
+                            (watch_rule_id IS NULL AND %s IS NULL)
+                         OR watch_rule_id = %s
+                      )
+                      AND product_id = %s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        normalized_user_id,
+                        normalized_watch_rule_id,
+                        normalized_watch_rule_id,
+                        normalized_product_id,
+                    ),
+                )
         except Exception as exc:
             if "unknown column" not in str(exc).lower():
                 raise
@@ -255,6 +294,7 @@ def create_analysis_job(
         normalized_user_id,
         normalized_watch_rule_id,
         normalized_product_id,
+        normalized_sort_date,
     )
     if identity_job is not None:
         return {
@@ -387,7 +427,15 @@ def create_analysis_job(
                     normalized_user_id,
                     normalized_watch_rule_id,
                     normalized_product_id,
+                    normalized_sort_date,
                 )
+                if duplicate_job is None:
+                    duplicate_job = find_analysis_job_by_identity(
+                        normalized_user_id,
+                        normalized_watch_rule_id,
+                        normalized_product_id,
+                        include_sort_date=False,
+                    )
                 if duplicate_job is not None:
                     return {
                         "ok": True,

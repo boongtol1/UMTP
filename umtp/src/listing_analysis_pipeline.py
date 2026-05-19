@@ -326,35 +326,66 @@ def _find_alert_event_by_identity(
     user_id,
     watch_rule_id,
     product_id,
+    sort_date=None,
+    include_sort_date=True,
 ):
     normalized_user_id = _normalize_optional_text(user_id)
     normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
     normalized_product_id = _normalize_optional_text(product_id)
+    normalized_sort_date = _coerce_datetime(sort_date)
 
     if normalized_user_id is None or normalized_product_id is None:
         return None
 
     try:
-        cursor.execute(
-            """
-            SELECT id
-            FROM alert_events
-            WHERE user_id = %s
-              AND (
-                    (watch_rule_id IS NULL AND %s IS NULL)
-                 OR watch_rule_id = %s
-              )
-              AND product_id = %s
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (
-                normalized_user_id,
-                normalized_watch_rule_id,
-                normalized_watch_rule_id,
-                normalized_product_id,
-            ),
-        )
+        if include_sort_date:
+            cursor.execute(
+                """
+                SELECT id
+                FROM alert_events
+                WHERE user_id = %s
+                  AND (
+                        (watch_rule_id IS NULL AND %s IS NULL)
+                     OR watch_rule_id = %s
+                  )
+                  AND product_id = %s
+                  AND (
+                        (sort_date IS NULL AND %s IS NULL)
+                     OR sort_date = %s
+                  )
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (
+                    normalized_user_id,
+                    normalized_watch_rule_id,
+                    normalized_watch_rule_id,
+                    normalized_product_id,
+                    normalized_sort_date,
+                    normalized_sort_date,
+                ),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT id
+                FROM alert_events
+                WHERE user_id = %s
+                  AND (
+                        (watch_rule_id IS NULL AND %s IS NULL)
+                     OR watch_rule_id = %s
+                  )
+                  AND product_id = %s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (
+                    normalized_user_id,
+                    normalized_watch_rule_id,
+                    normalized_watch_rule_id,
+                    normalized_product_id,
+                ),
+            )
     except Exception as exc:
         if "unknown column" not in str(exc).lower():
             raise
@@ -412,6 +443,7 @@ def maybe_create_alert_event(
         user_id=normalized_user_id,
         watch_rule_id=normalized_watch_rule_id,
         product_id=normalized_product_id,
+        sort_date=normalized_sort_date,
     )
     if duplicate is not None:
         return {
@@ -621,7 +653,16 @@ def maybe_create_alert_event(
                 user_id=normalized_user_id,
                 watch_rule_id=normalized_watch_rule_id,
                 product_id=normalized_product_id,
+                sort_date=normalized_sort_date,
             )
+            if duplicate is None:
+                duplicate = _find_alert_event_by_identity(
+                    cursor,
+                    user_id=normalized_user_id,
+                    watch_rule_id=normalized_watch_rule_id,
+                    product_id=normalized_product_id,
+                    include_sort_date=False,
+                )
             if duplicate is not None:
                 return {
                     "created": False,

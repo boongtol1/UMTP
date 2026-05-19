@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS alert_events (
   KEY idx_alert_events_created_at (created_at),
   KEY idx_alert_events_product (product_id),
   KEY idx_alert_events_sort_date (sort_date),
-  UNIQUE KEY uq_alert_events_user_rule_product (user_id, watch_rule_id, product_id)
+  UNIQUE KEY uq_alert_events_user_rule_product (user_id, watch_rule_id, product_id, sort_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET @target_db = DATABASE();
@@ -419,9 +419,32 @@ FROM INFORMATION_SCHEMA.STATISTICS
 WHERE TABLE_SCHEMA = @target_db
   AND TABLE_NAME = 'alert_events'
   AND INDEX_NAME = 'uq_alert_events_user_rule_product';
+
+SELECT GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',')
+INTO @uq_alert_events_user_rule_product_cols
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND INDEX_NAME = 'uq_alert_events_user_rule_product';
+
+SET @sql_drop_uq_user_rule_product_mismatch = IF(
+  @has_uq_user_rule_product = 1
+  AND IFNULL(@uq_alert_events_user_rule_product_cols, '') <> 'user_id,watch_rule_id,product_id,sort_date',
+  'ALTER TABLE alert_events DROP INDEX uq_alert_events_user_rule_product',
+  'SELECT "uq_alert_events_user_rule_product definition ok"'
+);
+PREPARE stmt_drop_uq_user_rule_product_mismatch FROM @sql_drop_uq_user_rule_product_mismatch;
+EXECUTE stmt_drop_uq_user_rule_product_mismatch;
+DEALLOCATE PREPARE stmt_drop_uq_user_rule_product_mismatch;
+
+SELECT COUNT(*) INTO @has_uq_user_rule_product_after_drop
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND INDEX_NAME = 'uq_alert_events_user_rule_product';
 SET @sql_uq_user_rule_product = IF(
-  @has_uq_user_rule_product = 0,
-  'ALTER TABLE alert_events ADD UNIQUE KEY uq_alert_events_user_rule_product (user_id, watch_rule_id, product_id)',
+  @has_uq_user_rule_product_after_drop = 0,
+  'ALTER TABLE alert_events ADD UNIQUE KEY uq_alert_events_user_rule_product (user_id, watch_rule_id, product_id, sort_date)',
   'SELECT "uq_alert_events_user_rule_product exists"'
 );
 PREPARE stmt_uq_user_rule_product FROM @sql_uq_user_rule_product;

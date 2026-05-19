@@ -69,10 +69,12 @@ class AlertIdentityTest(unittest.TestCase):
             drop_rate_percent=50.0,
             trigger_reason="new_product",
             message="msg",
+            sort_date="2026-05-19 10:30:00",
         )
 
         self.assertTrue(result.get("created"))
         self.assertEqual(result.get("alert_id"), 9)
+        self.assertIn("sort_date", fake_cursor.executed[0][0].lower())
 
     def test_duplicate_insert_error_returns_existing_alert(self):
         class _DynamicCursor(_FakeCursor):
