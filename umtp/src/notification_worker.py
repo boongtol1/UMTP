@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -172,6 +173,39 @@ def _coerce_product_seq(value):
     if parsed <= 0:
         return None
     return parsed
+
+
+def _extract_product_seq_from_url(value):
+    normalized_url = _normalize_optional_text(value)
+    if normalized_url is None:
+        return None
+
+    match = re.search(r"/product/(\d+)", normalized_url)
+    if not match:
+        return None
+
+    try:
+        parsed = int(match.group(1))
+    except (TypeError, ValueError):
+        return None
+
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def _resolve_alert_product_id_for_image_lookup(alert):
+    if not isinstance(alert, dict):
+        return None
+
+    normalized_product_id = _normalize_optional_text(alert.get("product_id"))
+    if normalized_product_id is not None:
+        return normalized_product_id
+
+    seq_from_url = _extract_product_seq_from_url(alert.get("url"))
+    if seq_from_url is None:
+        return None
+    return str(seq_from_url)
 
 
 def _fetch_listing_image_urls(cursor, product_ids):
@@ -1409,7 +1443,8 @@ def send_alert_event(alert):
             )
 
         telegram_attempted = True
-        listing_image_url = _fetch_listing_image_url_by_product_id(alert.get("product_id"))
+        product_id_for_image_lookup = _resolve_alert_product_id_for_image_lookup(alert)
+        listing_image_url = _fetch_listing_image_url_by_product_id(product_id_for_image_lookup)
         if listing_image_url is None:
             listing_image_url = (
                 _normalize_optional_text(alert.get("listing_image_url"))
@@ -1620,13 +1655,19 @@ def dispatch_alert_event_immediately(alert_id, *, fallback_alert=None):
             "reason": "not_pending",
         }
 
-    alert_payload = None
+    fallback_payload = None
     if isinstance(fallback_alert, dict):
-        alert_payload = dict(fallback_alert)
-        alert_payload["id"] = normalized_alert_id
+        fallback_payload = dict(fallback_alert)
+        fallback_payload["id"] = normalized_alert_id
 
-    if not isinstance(alert_payload, dict):
-        alert_payload = get_alert_event_by_id(normalized_alert_id)
+    alert_payload = get_alert_event_by_id(normalized_alert_id)
+    if isinstance(alert_payload, dict) and isinstance(fallback_payload, dict):
+        for key, value in fallback_payload.items():
+            if key not in alert_payload or alert_payload.get(key) is None:
+                alert_payload[key] = value
+
+    if not isinstance(alert_payload, dict) and isinstance(fallback_payload, dict):
+        alert_payload = fallback_payload
 
     if not isinstance(alert_payload, dict):
         mark_alert_event_failed(normalized_alert_id, "alert_event_not_found_after_claim")

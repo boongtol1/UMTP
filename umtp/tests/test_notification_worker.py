@@ -271,6 +271,37 @@ class NotificationWorkerTest(unittest.TestCase):
             "https://img.joongna.com/p/1001.jpg",
         )
 
+    def test_send_alert_event_resolves_product_id_from_url_for_image_lookup(self):
+        with patch(
+            "src.notification_worker.resolve_user_alert_delivery_policy",
+            return_value={
+                "enabled": True,
+                "telegram_chat_id": "123456",
+                "allow_global_fallback": False,
+            },
+        ):
+            with patch("src.notification_worker._send_fcm_to_user", return_value={"sent": 0, "failed": 0, "attempted": 0, "reason": "no_active_push_tokens"}):
+                with patch("src.notification_worker._telegram_configured", return_value=True):
+                    with patch("src.notification_worker._fetch_listing_image_url_by_product_id", return_value="https://img.joongna.com/p/228752931.jpg") as mock_fetch_image:
+                        with patch("src.notification_worker.send_telegram_alert", return_value=True) as mock_send_telegram:
+                            with patch("src.notification_worker.mark_alert_event_sent"):
+                                result = send_alert_event(
+                                    {
+                                        "id": 401,
+                                        "user_id": "boongtol",
+                                        "url": "https://web.joongna.com/product/228752931",
+                                        "title": "URL 이미지 추출 테스트",
+                                    }
+                                )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("status"), "sent")
+        mock_fetch_image.assert_called_once_with("228752931")
+        self.assertEqual(
+            mock_send_telegram.call_args.kwargs.get("image_url"),
+            "https://img.joongna.com/p/228752931.jpg",
+        )
+
     def test_send_alert_event_prefers_seen_product_image_over_existing_alert_image(self):
         with patch(
             "src.notification_worker.resolve_user_alert_delivery_policy",
@@ -381,7 +412,7 @@ class NotificationWorkerTest(unittest.TestCase):
         self.assertEqual(result.get("status"), "skipped_not_pending")
         self.assertEqual(mock_send_alert.call_count, 0)
 
-    def test_dispatch_alert_event_immediately_sends_with_fallback_payload(self):
+    def test_dispatch_alert_event_immediately_prefers_db_payload_and_merges_fallback(self):
         with patch("src.notification_worker.mark_alert_event_sending", return_value=True):
             with patch(
                 "src.notification_worker.send_alert_event",
@@ -392,7 +423,14 @@ class NotificationWorkerTest(unittest.TestCase):
                     "reason": "telegram_sent",
                 },
             ) as mock_send_alert:
-                with patch("src.notification_worker.get_alert_event_by_id") as mock_get_alert:
+                with patch(
+                    "src.notification_worker.get_alert_event_by_id",
+                    return_value={
+                        "id": 102,
+                        "user_id": "boongtol",
+                        "product_id": "228752931",
+                    },
+                ) as mock_get_alert:
                     result = dispatch_alert_event_immediately(
                         102,
                         fallback_alert={
@@ -404,11 +442,13 @@ class NotificationWorkerTest(unittest.TestCase):
 
         self.assertTrue(result.get("ok"))
         self.assertEqual(result.get("status"), "sent")
-        self.assertEqual(mock_get_alert.call_count, 0)
+        self.assertEqual(mock_get_alert.call_count, 1)
         self.assertEqual(mock_send_alert.call_count, 1)
         sent_payload = mock_send_alert.call_args.args[0]
         self.assertEqual(sent_payload.get("id"), 102)
         self.assertEqual(sent_payload.get("user_id"), "boongtol")
+        self.assertEqual(sent_payload.get("product_id"), "228752931")
+        self.assertEqual(sent_payload.get("title"), "테스트")
 
 
 if __name__ == "__main__":
