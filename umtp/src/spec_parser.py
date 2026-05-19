@@ -5,7 +5,7 @@ try:
     from src.macbook_air_units import (
         MACBOOK_AIR_PRODUCT_TYPE,
         MAC_MINI_PRODUCT_TYPE,
-        get_macbook_air_base_spec,
+        get_product_base_spec,
         is_valid_silicon_unit,
     )
     from src.numeric_candidate_extractor import extract_numeric_candidates
@@ -13,7 +13,7 @@ except ImportError:
     from macbook_air_units import (
         MACBOOK_AIR_PRODUCT_TYPE,
         MAC_MINI_PRODUCT_TYPE,
-        get_macbook_air_base_spec,
+        get_product_base_spec,
         is_valid_silicon_unit,
     )
     from numeric_candidate_extractor import extract_numeric_candidates
@@ -752,13 +752,13 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
 
     has_base_model_keyword = contains_base_model_keyword(parsing_text) or contains_base_model_keyword(model_name_raw)
     should_apply_base_fallback = (
-        product_type == MACBOOK_AIR_PRODUCT_TYPE
+        product_type in (MACBOOK_AIR_PRODUCT_TYPE, MAC_MINI_PRODUCT_TYPE)
         and chip is not None
         and has_base_model_keyword
         and (ram_gb is None or ssd_gb is None)
     )
     if should_apply_base_fallback:
-        base_spec = get_macbook_air_base_spec(chip, screen_inch)
+        base_spec = get_product_base_spec(product_type, chip, screen_inch)
         if isinstance(base_spec, dict):
             if ram_gb is None:
                 ram_gb = base_spec.get("ram_gb")

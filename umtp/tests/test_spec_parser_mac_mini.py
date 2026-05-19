@@ -11,6 +11,33 @@ from src.spec_parser import INVALID_UNIT_REASON, parse_listing_title  # noqa: E4
 
 
 class SpecParserMacMiniTest(unittest.TestCase):
+    def test_parse_mac_mini_m2_base_model_fallback(self):
+        parsed = parse_listing_title("맥미니 M2 기본형")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["product_type"], "Mac mini")
+        self.assertEqual(parsed["chip"], "M2")
+        self.assertEqual(parsed["screen_inch"], 0)
+        self.assertEqual(parsed["ram_gb"], 8)
+        self.assertEqual(parsed["ssd_gb"], 256)
+
+    def test_parse_mac_mini_m2_pro_kkangtong_fallback(self):
+        parsed = parse_listing_title("맥미니 m2pro 깡통")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["product_type"], "Mac mini")
+        self.assertEqual(parsed["chip"], "M2 Pro")
+        self.assertEqual(parsed["screen_inch"], 0)
+        self.assertEqual(parsed["ram_gb"], 16)
+        self.assertEqual(parsed["ssd_gb"], 512)
+
+    def test_parse_mac_mini_base_model_keeps_explicit_ram(self):
+        parsed = parse_listing_title("맥미니 M4 기본형 24GB")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["product_type"], "Mac mini")
+        self.assertEqual(parsed["chip"], "M4")
+        self.assertEqual(parsed["screen_inch"], 0)
+        self.assertEqual(parsed["ram_gb"], 24)
+        self.assertEqual(parsed["ssd_gb"], 256)
+
     def test_parse_mac_mini_m2_basic(self):
         parsed = parse_listing_title("맥미니 M2 16GB 512GB 팝니다")
         self.assertTrue(parsed["parse_success"])
