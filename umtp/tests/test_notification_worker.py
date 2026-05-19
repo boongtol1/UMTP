@@ -271,6 +271,37 @@ class NotificationWorkerTest(unittest.TestCase):
             "https://img.joongna.com/p/1001.jpg",
         )
 
+    def test_send_alert_event_prefers_seen_product_image_over_existing_alert_image(self):
+        with patch(
+            "src.notification_worker.resolve_user_alert_delivery_policy",
+            return_value={
+                "enabled": True,
+                "telegram_chat_id": "123456",
+                "allow_global_fallback": False,
+            },
+        ):
+            with patch("src.notification_worker._send_fcm_to_user", return_value={"sent": 0, "failed": 0, "attempted": 0, "reason": "no_active_push_tokens"}):
+                with patch("src.notification_worker._telegram_configured", return_value=True):
+                    with patch("src.notification_worker._fetch_listing_image_url_by_product_id", return_value="https://img.joongna.com/p/2002-seen.jpg"):
+                        with patch("src.notification_worker.send_telegram_alert", return_value=True) as mock_send_telegram:
+                            with patch("src.notification_worker.mark_alert_event_sent"):
+                                result = send_alert_event(
+                                    {
+                                        "id": 302,
+                                        "user_id": "boongtol",
+                                        "product_id": "2002",
+                                        "title": "이미지 우선순위 테스트",
+                                        "listing_image_url": "https://old.example.com/old.jpg",
+                                    }
+                                )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("status"), "sent")
+        self.assertEqual(
+            mock_send_telegram.call_args.kwargs.get("image_url"),
+            "https://img.joongna.com/p/2002-seen.jpg",
+        )
+
     def test_send_alert_event_sent_when_push_success_without_telegram(self):
         with patch(
             "src.notification_worker.resolve_user_alert_delivery_policy",

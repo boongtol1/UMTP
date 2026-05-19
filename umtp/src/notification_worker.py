@@ -1409,9 +1409,12 @@ def send_alert_event(alert):
             )
 
         telegram_attempted = True
-        listing_image_url = _normalize_optional_text(alert.get("listing_image_url"))
+        listing_image_url = _fetch_listing_image_url_by_product_id(alert.get("product_id"))
         if listing_image_url is None:
-            listing_image_url = _fetch_listing_image_url_by_product_id(alert.get("product_id"))
+            listing_image_url = (
+                _normalize_optional_text(alert.get("listing_image_url"))
+                or _normalize_optional_text(alert.get("image_url"))
+            )
         if listing_image_url is not None:
             alert["listing_image_url"] = listing_image_url
 
