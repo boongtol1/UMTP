@@ -9,6 +9,7 @@ import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -135,6 +136,10 @@ fun MainTabScreen(
     onAlertNavigated: () -> Unit = {}
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
+    
+    BackHandler(enabled = selectedTab != 0) {
+        selectedTab = 0
+    }
     
     val alerts by viewModel.alerts.collectAsState()
     val readGroupedAlerts by viewModel.readGroupedAlerts.collectAsState()
@@ -276,6 +281,21 @@ fun SettingsNavigator(
     onRefreshRule: (Long) -> Unit,
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.ProductTypeList) }
+
+    BackHandler(enabled = currentScreen != Screen.ProductTypeList) {
+        currentScreen = when (val screen = currentScreen) {
+            is Screen.ChipList -> Screen.ProductTypeList
+            is Screen.ScreenSizeList -> Screen.ChipList(screen.productType)
+            is Screen.RamSsdSettings -> {
+                if (screen.productType == "Mac mini") {
+                    Screen.ChipList(screen.productType)
+                } else {
+                    Screen.ScreenSizeList(screen.productType, screen.chip)
+                }
+            }
+            else -> Screen.ProductTypeList
+        }
+    }
 
     when (val screen = currentScreen) {
         is Screen.ProductTypeList -> {
