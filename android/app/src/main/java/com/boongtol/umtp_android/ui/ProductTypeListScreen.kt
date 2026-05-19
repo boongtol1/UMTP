@@ -1,15 +1,26 @@
 package com.boongtol.umtp_android.ui
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.*
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -18,22 +29,21 @@ import androidx.compose.ui.unit.sp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChipListScreen(
+fun ProductTypeListScreen(
     userId: String,
-    productType: String,
-    chips: List<String>,
+    productTypes: List<String>,
     isRefreshing: Boolean,
     refreshStatusMessage: String?,
     lastRefreshAtText: String?,
     onRefresh: () -> Unit,
-    onChipClick: (String) -> Unit
+    onProductTypeClick: (String) -> Unit,
 ) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { 
+                title = {
                     Column {
-                        Text("$productType 설정", fontSize = 18.sp)
+                        Text("실리콘 Mac 설정", fontSize = 18.sp)
                         Text("User: $userId", fontSize = 12.sp, color = MaterialTheme.colorScheme.secondary)
                     }
                 },
@@ -77,27 +87,24 @@ fun ChipListScreen(
                 }
             }
             Text(
-                text = "지금부터 새로 올라오는 매물만 다시 조회합니다.",
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.Gray,
-            )
-
-            Text(
-                text = "칩 선택",
+                text = "제품 종류 선택",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(16.dp),
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
             )
-            
+
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(chips) { chip ->
+                items(productTypes) { productType ->
                     ListItem(
-                        headlineContent = { Text(chip, fontWeight = FontWeight.Medium) },
+                        headlineContent = { Text(productType, fontWeight = FontWeight.Medium) },
                         trailingContent = { Icon(Icons.Default.KeyboardArrowRight, contentDescription = null) },
-                        modifier = Modifier.clickable { onChipClick(chip) }
+                        modifier = Modifier.clickable { onProductTypeClick(productType) },
                     )
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp, color = Color.LightGray)
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        thickness = 0.5.dp,
+                        color = Color.LightGray,
+                    )
                 }
             }
         }

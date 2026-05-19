@@ -20,6 +20,7 @@ import com.boongtol.umtp_android.network.UserFairPriceItem
 @Composable
 fun RamSsdSettingsScreen(
     userId: String?,
+    productType: String,
     chip: String,
     screenSize: Int,
     units: List<MacBookAirUnit>,
@@ -39,7 +40,13 @@ fun RamSsdSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("$chip Air ${screenSize}인치 설정", fontSize = 18.sp) },
+                title = {
+                    if (productType == "Mac mini") {
+                        Text("$chip $productType 설정", fontSize = 18.sp)
+                    } else {
+                        Text("$chip $productType ${screenSize}인치 설정", fontSize = 18.sp)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -113,6 +120,7 @@ fun RamSsdSettingsScreen(
                 }
                 items(units) { unit ->
                     val setting = userSettings.find { 
+                        it.product_type == unit.product_type &&
                         it.chip == unit.chip && 
                         it.screen_inch == unit.screen_inch && 
                         it.ram_gb == unit.ram_gb && 
@@ -120,7 +128,7 @@ fun RamSsdSettingsScreen(
                     }
                     val ruleId = setting?.id
                     val canRefreshRule = setting?.let { it.id != null && it.enabled && it.has_user_override } == true
-                    val itemKey = "${unit.chip}-${unit.screen_inch}-${unit.ram_gb}-${unit.ssd_gb}"
+                    val itemKey = "${unit.product_type}-${unit.chip}-${unit.screen_inch}-${unit.ram_gb}-${unit.ssd_gb}"
                     
                     MacBookAirSettingCard(
                         userId = userId,

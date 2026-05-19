@@ -275,42 +275,78 @@ fun SettingsNavigator(
     onUpsert: (com.boongtol.umtp_android.network.MacBookAirUnit, Int, Int, String, Boolean, Boolean, String?, Int?) -> Unit,
     onRefreshRule: (Long) -> Unit,
 ) {
-    var currentScreen by remember { mutableStateOf<Screen>(Screen.ChipList) }
+    var currentScreen by remember { mutableStateOf<Screen>(Screen.ProductTypeList) }
 
     when (val screen = currentScreen) {
+        is Screen.ProductTypeList -> {
+            val productTypes = units
+                .map { it.product_type }
+                .distinct()
+                .sortedWith(compareBy({ productTypeSortOrder(it) }, { it }))
+            ProductTypeListScreen(
+                userId = userId,
+                productTypes = productTypes,
+                isRefreshing = isRefreshing,
+                refreshStatusMessage = refreshStatusMessage,
+                lastRefreshAtText = lastRefreshAtText,
+                onRefresh = onRefresh,
+                onProductTypeClick = { currentScreen = Screen.ChipList(it) },
+            )
+        }
         is Screen.ChipList -> {
-            val chips = units.map { it.chip }.distinct().sorted()
+            val chips = units
+                .filter { it.product_type == screen.productType }
+                .map { it.chip }
+                .distinct()
+                .sortedWith(compareBy({ chipSortOrder(it) }, { it }))
             ChipListScreen(
                 userId = userId,
+                productType = screen.productType,
                 chips = chips,
                 isRefreshing = isRefreshing,
                 refreshStatusMessage = refreshStatusMessage,
                 lastRefreshAtText = lastRefreshAtText,
                 onRefresh = onRefresh,
-                onChipClick = { currentScreen = Screen.ScreenSizeList(it) },
-                onLogout = { /* Registration is locked, logout removed */ }
+                onChipClick = { chip ->
+                    if (screen.productType == "Mac mini") {
+                        currentScreen = Screen.RamSsdSettings(screen.productType, chip, 0)
+                    } else {
+                        currentScreen = Screen.ScreenSizeList(screen.productType, chip)
+                    }
+                }
             )
         }
         is Screen.ScreenSizeList -> {
-            val sizes = units.filter { it.chip == screen.chip }
-                .map { it.screen_inch }.distinct().sorted()
+            val sizes = units
+                .filter {
+                    it.product_type == screen.productType &&
+                    it.chip == screen.chip &&
+                    it.screen_inch > 0
+                }
+                .map { it.screen_inch }
+                .distinct()
+                .sorted()
             ScreenSizeListScreen(
+                productType = screen.productType,
                 chip = screen.chip,
                 screenSizes = sizes,
                 isRefreshing = isRefreshing,
                 refreshStatusMessage = refreshStatusMessage,
                 lastRefreshAtText = lastRefreshAtText,
                 onRefresh = onRefresh,
-                onScreenSizeClick = { currentScreen = Screen.RamSsdSettings(screen.chip, it) },
-                onBack = { currentScreen = Screen.ChipList }
+                onScreenSizeClick = { currentScreen = Screen.RamSsdSettings(screen.productType, screen.chip, it) },
+                onBack = { currentScreen = Screen.ChipList(screen.productType) }
             )
         }
         is Screen.RamSsdSettings -> {
-            val filteredUnits = units.filter { 
-                it.chip == screen.chip && it.screen_inch == screen.screenSize 
+            val filteredUnits = units.filter {
+                it.product_type == screen.productType &&
+                it.chip == screen.chip &&
+                it.screen_inch == screen.screenSize
             }
             RamSsdSettingsScreen(
                 userId = userId,
+                productType = screen.productType,
                 chip = screen.chip,
                 screenSize = screen.screenSize,
                 units = filteredUnits,
@@ -325,14 +361,42 @@ fun SettingsNavigator(
                 ruleLastRefreshLabels = ruleLastRefreshLabels,
                 onSave = onUpsert,
                 onRefreshRule = onRefreshRule,
-                onBack = { currentScreen = Screen.ScreenSizeList(screen.chip) }
+                onBack = {
+                    if (screen.productType == "Mac mini") {
+                        currentScreen = Screen.ChipList(screen.productType)
+                    } else {
+                        currentScreen = Screen.ScreenSizeList(screen.productType, screen.chip)
+                    }
+                }
             )
         }
     }
 }
 
 sealed class Screen {
-    object ChipList : Screen()
-    data class ScreenSizeList(val chip: String) : Screen()
-    data class RamSsdSettings(val chip: String, val screenSize: Int) : Screen()
+    object ProductTypeList : Screen()
+    data class ChipList(val productType: String) : Screen()
+    data class ScreenSizeList(val productType: String, val chip: String) : Screen()
+    data class RamSsdSettings(val productType: String, val chip: String, val screenSize: Int) : Screen()
+}
+
+private fun productTypeSortOrder(productType: String): Int {
+    return when (productType) {
+        "MacBook Air" -> 1
+        "Mac mini" -> 2
+        else -> 99
+    }
+}
+
+private fun chipSortOrder(chip: String): Int {
+    return when (chip.trim().uppercase()) {
+        "M1" -> 1
+        "M2" -> 2
+        "M2 PRO" -> 3
+        "M3" -> 4
+        "M4" -> 5
+        "M4 PRO" -> 6
+        "M5" -> 7
+        else -> 99
+    }
 }

@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.sp
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScreenSizeListScreen(
+    productType: String,
     chip: String,
     screenSizes: List<Int>,
     isRefreshing: Boolean,
@@ -31,7 +32,7 @@ fun ScreenSizeListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("$chip Air 선택", fontSize = 18.sp) },
+                title = { Text("$chip $productType 선택", fontSize = 18.sp) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
