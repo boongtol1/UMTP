@@ -428,7 +428,7 @@ WHERE TABLE_SCHEMA = @target_db
   AND INDEX_NAME = 'uq_alert_events_user_rule_product';
 
 SET @sql_drop_uq_user_rule_product_mismatch = IF(
-  @has_uq_user_rule_product = 1
+  @has_uq_user_rule_product > 0
   AND IFNULL(@uq_alert_events_user_rule_product_cols, '') <> 'user_id,watch_rule_id,product_id,sort_date',
   'ALTER TABLE alert_events DROP INDEX uq_alert_events_user_rule_product',
   'SELECT "uq_alert_events_user_rule_product definition ok"'

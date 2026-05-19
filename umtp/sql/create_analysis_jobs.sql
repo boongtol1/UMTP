@@ -99,7 +99,7 @@ WHERE TABLE_SCHEMA = @target_db
   AND INDEX_NAME = 'uq_analysis_jobs_user_rule_product';
 
 SET @sql_drop_uq_analysis_user_rule_product_mismatch = IF(
-  @has_uq_analysis_user_rule_product = 1
+  @has_uq_analysis_user_rule_product > 0
   AND IFNULL(@uq_analysis_user_rule_product_cols, '') <> 'user_id,watch_rule_id,product_id,sort_date',
   'ALTER TABLE analysis_jobs DROP INDEX uq_analysis_jobs_user_rule_product',
   'SELECT "uq_analysis_jobs_user_rule_product definition ok"'

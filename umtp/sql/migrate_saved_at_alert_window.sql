@@ -130,7 +130,7 @@ SET @sql_drop_uq_analysis_jobs_user_rule_product_mismatch = IF(
   @has_analysis_jobs_table = 0,
   'SELECT ''skip drop uq_analysis_jobs_user_rule_product mismatch''',
   IF(
-    @has_uq_analysis_jobs_user_rule_product = 1
+    @has_uq_analysis_jobs_user_rule_product > 0
     AND IFNULL(@uq_analysis_jobs_user_rule_product_cols, '') <> 'user_id,watch_rule_id,product_id,sort_date',
     'ALTER TABLE analysis_jobs DROP INDEX uq_analysis_jobs_user_rule_product',
     'SELECT ''uq_analysis_jobs_user_rule_product definition ok'''
@@ -253,7 +253,7 @@ SET @sql_drop_uq_alert_events_user_rule_product_mismatch = IF(
   @has_alert_events_table = 0,
   'SELECT ''skip drop uq_alert_events_user_rule_product mismatch''',
   IF(
-    @has_uq_alert_events_user_rule_product = 1
+    @has_uq_alert_events_user_rule_product > 0
     AND IFNULL(@uq_alert_events_user_rule_product_cols, '') <> 'user_id,watch_rule_id,product_id,sort_date',
     'ALTER TABLE alert_events DROP INDEX uq_alert_events_user_rule_product',
     'SELECT ''uq_alert_events_user_rule_product definition ok'''
