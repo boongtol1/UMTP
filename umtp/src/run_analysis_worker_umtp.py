@@ -10,12 +10,15 @@ if PROJECT_ROOT not in sys.path:
 
 try:
     from src.listing_analysis_pipeline import process_pending_analysis_jobs
+    from src.worker_heartbeat import write_worker_heartbeat
 except ModuleNotFoundError:
     from listing_analysis_pipeline import process_pending_analysis_jobs
+    from worker_heartbeat import write_worker_heartbeat
 
 
 DEFAULT_INTERVAL_SECONDS = 5
 DEFAULT_LIMIT = 20
+HEARTBEAT_WORKER_NAME = "umtp-analysis-worker"
 
 
 def parse_args():
@@ -52,6 +55,27 @@ def _print_summary(stats):
     print(f"detail_fetch_reason_counts={stats.get('detail_fetch_reason_counts', {})}")
 
 
+def _build_heartbeat_stats(stats):
+    if not isinstance(stats, dict):
+        return {}
+    return {
+        "fetched": stats.get("fetched", 0),
+        "done": stats.get("done", 0),
+        "failed": stats.get("failed", 0),
+        "detail_fetch_count": stats.get("detail_fetch_count", 0),
+        "detail_skipped_count": stats.get("detail_skipped_count", 0),
+        "unchanged_detail_skipped_count": stats.get("unchanged_detail_skipped_count", 0),
+    }
+
+
+def _heartbeat_status(stats):
+    if not isinstance(stats, dict):
+        return "ok"
+    if stats.get("failed", 0) > 0:
+        return "degraded"
+    return "ok"
+
+
 def main():
     args = parse_args()
 
@@ -67,6 +91,18 @@ def main():
         while True:
             stats = process_pending_analysis_jobs(limit=args.limit)
             _print_summary(stats)
+            heartbeat_stats = _build_heartbeat_stats(stats)
+            heartbeat_detail = (
+                f"fetched={heartbeat_stats.get('fetched', 0)} "
+                f"done={heartbeat_stats.get('done', 0)} "
+                f"failed={heartbeat_stats.get('failed', 0)}"
+            )
+            write_worker_heartbeat(
+                HEARTBEAT_WORKER_NAME,
+                status=_heartbeat_status(stats),
+                detail=heartbeat_detail,
+                stats=heartbeat_stats,
+            )
 
             if args.once:
                 break

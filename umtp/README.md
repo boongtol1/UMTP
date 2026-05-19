@@ -127,6 +127,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.8 변경 감지 스킵 구조: `joongna_seen_products`의 이전 관측값과 현재 관측값을 비교해 `new/sort_date_changed/price_changed/title_changed/refresh_key_changed/body_maybe_changed`만 분석 큐로 보내고, `unchanged`는 분석을 스킵합니다.
 - 1.8 DB write 최소화 구조: `unchanged` 매물은 `joongna_seen_products` UPDATE/UPSERT를 수행하지 않고 write를 스킵합니다.
 - 1.8 저장 정책: 변경 감지 후 `new/changed` 매물만 DB에 저장하고, 완전히 동일한 매물은 저장하지 않습니다.
+- 1.8 heartbeat 분리 구조: `last_seen_at/seen_count`를 매 주기 갱신하지 않고, `worker_heartbeats` 전용 row를 통해 worker 생존 신호를 저빈도(기본 60초)로 기록합니다.
 - 1.8 lazy detail fetch 구조: analysis worker는 모든 매물의 상세본문을 조회하지 않고, `new/저가 후보/제목 파싱 실패/제품명만 있고 스펙 부족` 후보에만 상세조회(fetch_html)를 수행합니다.
 - 1.8 알림 속도(priority) 구조: watch_rule(`user_fair_prices`)마다 `priority=FAST/NORMAL/LOW`를 저장하고, polling scheduler는 priority 기준 기본 주기(45/180/600초)에 ±20% jitter를 적용해 다음 조회 시점을 계산합니다.
 - 1.8 변경 로그: polling 요약에 `fetched_count/new_count/changed_count/unchanged_skipped_count/analyzed_count/alert_created_count`를 함께 기록합니다.
@@ -868,12 +869,14 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - priority별 기본 주기는 `FAST=45초`, `NORMAL=180초`, `LOW=600초`입니다.
 - scheduler는 priority별 기본 주기에 jitter(±20%)를 적용해 실제 주기를 계산합니다. 예: `FAST 약 36~54초`, `NORMAL 약 144~216초`, `LOW 약 480~720초`.
 - 운영 DB는 `sql/migrate_watch_rule_priority_polling.sql` 실행으로 `priority` 컬럼을 추가하고 기존 값을 `NORMAL`로 보정합니다.
+- 운영 DB는 `sql/migrate_worker_heartbeats.sql` 실행으로 worker heartbeat 전용 테이블(`worker_heartbeats`)을 생성합니다.
 - `POST /user-fair-prices/upsert`에서 `search_keyword`를 비우면 스펙 기반 기본 검색어(예: `m1맥북에어`)를 자동 생성합니다.
 - `GET /user-fair-prices/recommended-keywords`로 Android 앱에서 추천 검색어를 받아 선택할 수 있습니다.
 - polling worker는 `force_poll=true`인 설정을 우선 due로 처리하고, 검색 완료 후 `force_poll=false`, `last_polled_at=NOW()`로 갱신합니다.
 - `joongna_seen_products`는 단순 중복 차단이 아니라 마지막 관측 상태 저장용으로 사용합니다.
 - 같은 `product_id/seq`라도 가격/제목/`refresh_key`가 바뀌면 재분석합니다.
-- 완전히 동일한 상태(`unchanged`)면 `last_seen_at`, `seen_count`만 갱신하고 중복 분석/중복 알림을 막습니다.
+- 완전히 동일한 상태(`unchanged`)면 `joongna_seen_products` write를 스킵하고 중복 분석/중복 알림을 막습니다.
+- worker 생존 체크는 `worker_heartbeats` 테이블에 `umtp-polling`, `umtp-analysis-worker` heartbeat를 저빈도(기본 60초)로 기록해 확인합니다.
 - analysis worker는 상세조회가 필요한 후보 매물에서만 상세페이지/본문을 조회하고, `unchanged`는 상세조회와 분석을 모두 스킵합니다.
 - Search API 응답의 `url` 필드는 이미지 URL로 저장하며, 실제 매물 URL은 `https://web.joongna.com/product/{seq}`로 생성합니다.
 - 같은 검색어를 쓰는 여러 설정/user는 검색 결과를 공유합니다.

@@ -10,11 +10,14 @@ if PROJECT_ROOT not in sys.path:
 
 try:
     from src.joongna_polling_service import poll_once
+    from src.worker_heartbeat import write_worker_heartbeat
 except ModuleNotFoundError:
     from joongna_polling_service import poll_once
+    from worker_heartbeat import write_worker_heartbeat
 
 
 DEFAULT_INTERVAL_SECONDS = 60
+HEARTBEAT_WORKER_NAME = "umtp-polling"
 
 
 def parse_args():
@@ -80,6 +83,34 @@ def _print_summary(stats):
     )
 
 
+def _build_heartbeat_stats(stats):
+    if not isinstance(stats, dict):
+        return {}
+    return {
+        "fetched_count": stats.get("fetched_count", 0),
+        "new_count": stats.get("new_count", 0),
+        "changed_count": stats.get("changed_count", 0),
+        "unchanged_skipped_count": stats.get("unchanged_skipped_count", 0),
+        "inserted_count": stats.get("inserted_count", 0),
+        "updated_count": stats.get("updated_count", 0),
+        "unchanged_write_skipped_count": stats.get("unchanged_write_skipped_count", 0),
+        "polling_group_count": stats.get("polling_group_count", 0),
+        "external_api_calls": stats.get("external_api_calls", 0),
+        "matched_watch_rules": stats.get("matched_watch_rules", 0),
+        "created_alert_count": stats.get("created_alert_count", 0),
+        "search_errors": stats.get("search_errors", 0),
+        "db_errors": stats.get("db_errors", 0),
+    }
+
+
+def _heartbeat_status(stats):
+    if not isinstance(stats, dict):
+        return "ok"
+    if stats.get("search_errors", 0) > 0 or stats.get("db_errors", 0) > 0:
+        return "degraded"
+    return "ok"
+
+
 def main():
     args = parse_args()
 
@@ -98,6 +129,19 @@ def main():
                 inline_process=False,
             )
             _print_summary(stats)
+            heartbeat_stats = _build_heartbeat_stats(stats)
+            heartbeat_detail = (
+                f"groups={heartbeat_stats.get('polling_group_count', 0)} "
+                f"calls={heartbeat_stats.get('external_api_calls', 0)} "
+                f"fetched={heartbeat_stats.get('fetched_count', 0)} "
+                f"alerts={heartbeat_stats.get('created_alert_count', 0)}"
+            )
+            write_worker_heartbeat(
+                HEARTBEAT_WORKER_NAME,
+                status=_heartbeat_status(stats),
+                detail=heartbeat_detail,
+                stats=heartbeat_stats,
+            )
 
             if args.once:
                 break
