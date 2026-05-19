@@ -133,7 +133,7 @@ class UserWatchRulesTest(unittest.TestCase):
             )
 
         self.assertTrue(response.get("ok"))
-        self.assertEqual(response.get("search_keyword"), "m1맥북에어")
+        self.assertEqual(response.get("search_keyword"), "m1 맥북에어")
 
     def test_due_query_excludes_empty_search_keyword(self):
         fake_cursor = _FakeCursor(rows=[])

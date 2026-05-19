@@ -32,14 +32,21 @@ class SearchKeywordUtilsTest(unittest.TestCase):
                 "ssd_gb": 256,
             }
         )
-        self.assertEqual(keyword, "m1맥북에어")
+        self.assertEqual(keyword, "m1 맥북에어")
 
     def test_build_recommended_keywords_for_spec(self):
         keywords = build_recommended_keywords_for_spec("MacBook Air", "M1", ram_gb=8, ssd_gb=256)
         self.assertGreaterEqual(len(keywords), 4)
-        self.assertEqual(keywords[0], "m1맥북에어")
+        self.assertEqual(keywords[0], "m1 맥북에어")
         self.assertIn("맥북에어 M1", keywords)
         self.assertIn("맥북 M1", keywords)
+
+    def test_build_recommended_keywords_for_mac_mini(self):
+        keywords = build_recommended_keywords_for_spec("Mac mini", "m2pro", ram_gb=16, ssd_gb=1024)
+        self.assertGreaterEqual(len(keywords), 5)
+        self.assertEqual(keywords[0], "m2pro 맥미니")
+        self.assertIn("맥미니 M2 Pro", keywords)
+        self.assertIn("mac mini m2pro", keywords)
 
 
 if __name__ == "__main__":

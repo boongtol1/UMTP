@@ -52,6 +52,26 @@ def _normalize_chip(chip):
     return normalized or None
 
 
+def _canonical_chip(chip):
+    normalized_chip = _normalize_chip(chip)
+    if normalized_chip is None:
+        return None
+
+    lowered_compact = normalized_chip.lower().replace(" ", "")
+    if lowered_compact == "m2pro":
+        return "M2 Pro"
+    if lowered_compact == "m4pro":
+        return "M4 Pro"
+    return normalized_chip
+
+
+def _compact_chip_token(chip):
+    canonical_chip = _canonical_chip(chip)
+    if canonical_chip is None:
+        return None
+    return canonical_chip.lower().replace(" ", "")
+
+
 def _normalize_product_type(product_type):
     if product_type is None:
         return None
@@ -64,10 +84,14 @@ def build_default_keyword_for_watch_rule(rule):
         return None
 
     product_type = _normalize_product_type(rule.get("product_type"))
-    chip = _normalize_chip(rule.get("chip"))
+    chip = _canonical_chip(rule.get("chip"))
+    compact_chip = _compact_chip_token(chip)
 
-    if product_type == "MacBook Air" and chip:
-        return normalize_search_keyword(f"{chip.lower()}맥북에어")
+    if product_type == "MacBook Air" and compact_chip:
+        return normalize_search_keyword(f"{compact_chip} 맥북에어")
+
+    if product_type == "Mac mini" and compact_chip:
+        return normalize_search_keyword(f"{compact_chip} 맥미니")
 
     if chip and product_type:
         return normalize_search_keyword(f"{product_type} {chip}")
@@ -86,19 +110,29 @@ def build_default_keyword_for_watch_rule(rule):
 
 def build_recommended_keywords_for_spec(product_type, chip, ram_gb=None, ssd_gb=None):
     normalized_product_type = _normalize_product_type(product_type)
-    normalized_chip = _normalize_chip(chip)
+    normalized_chip = _canonical_chip(chip)
+    compact_chip = _compact_chip_token(normalized_chip)
 
     keywords = []
 
-    if normalized_product_type == "MacBook Air" and normalized_chip:
-        lower_chip = normalized_chip.lower()
-        keywords.append(f"{lower_chip}맥북에어")
+    if normalized_product_type == "MacBook Air" and normalized_chip and compact_chip:
+        keywords.append(f"{compact_chip} 맥북에어")
         keywords.append(f"맥북에어 {normalized_chip}")
         keywords.append(f"맥북 {normalized_chip}")
 
         if ram_gb is not None and ssd_gb is not None:
-            keywords.append(f"{lower_chip} 맥북에어 {ram_gb} {ssd_gb}")
+            keywords.append(f"{compact_chip} 맥북에어 {ram_gb} {ssd_gb}")
             keywords.append(f"맥북에어 {normalized_chip} {ram_gb} {ssd_gb}")
+
+    if normalized_product_type == "Mac mini" and normalized_chip and compact_chip:
+        keywords.append(f"{compact_chip} 맥미니")
+        keywords.append(f"맥미니 {normalized_chip}")
+        keywords.append(f"mac mini {compact_chip}")
+
+        if ram_gb is not None and ssd_gb is not None:
+            keywords.append(f"{compact_chip} 맥미니 {ram_gb} {ssd_gb}")
+            keywords.append(f"맥미니 {normalized_chip} {ram_gb} {ssd_gb}")
+            keywords.append(f"mac mini {compact_chip} {ram_gb} {ssd_gb}")
 
     if normalized_product_type and normalized_chip:
         keywords.append(f"{normalized_product_type} {normalized_chip}")
