@@ -810,6 +810,7 @@ mysql -u <DB_USER> -p < sql/add_risk_exchange_columns.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_joongna_seen_products.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_joongna_seen_products_refresh_detection.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_user_fair_prices_polling_keywords.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_user_fair_prices_search_keyword_format.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_target_buy_price_generated_column.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_analysis_jobs.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_or_alter_alert_events.sql
@@ -939,10 +940,12 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/add_users_device_id_column.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/drop_users_nickname_column.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/add_user_fair_price_settings_columns.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_user_fair_prices_polling_keywords.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_user_fair_prices_search_keyword_format.sql
 ```
 
 `sql/add_user_fair_price_settings_columns.sql`은 `enabled`, `updated_at` 컬럼 추가를 시도합니다.
 `sql/alter_user_fair_prices_polling_keywords.sql`은 `search_keyword`, `poll_interval_seconds`, `force_poll`, `last_poll_requested_at`, `last_polled_at` 컬럼과 인덱스를 추가합니다.
+`sql/migrate_user_fair_prices_search_keyword_format.sql`은 기존 기본 검색어를 `m1 맥북에어` / `m2pro 맥미니` 형태로 정규화(backfill)합니다.
 MySQL 환경에서 `ADD COLUMN IF NOT EXISTS`가 제한되면, 컬럼 존재 여부를 먼저 확인한 뒤 수동 실행하세요.
 `sql/add_users_device_id_column.sql`은 `users.device_id` 컬럼과 unique index를 안전하게 추가합니다.
 `sql/drop_users_nickname_column.sql`은 users 테이블의 `nickname` 컬럼이 남아 있을 때만 삭제합니다.
