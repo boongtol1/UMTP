@@ -64,6 +64,12 @@ def _print_summary(stats):
         f"db_errors={stats.get('db_errors', 0)}, "
         f"settings_due={stats.get('settings_due', stats.get('watch_rules_due', 0))}"
     )
+    print(
+        f"group_count={stats.get('polling_group_count', 0)}, "
+        f"external_calls={stats.get('external_api_calls', 0)}, "
+        f"matched_watch_rules={stats.get('matched_watch_rules', 0)}, "
+        f"created_alerts={stats.get('created_alert_count', 0)}"
+    )
 
 
 def main():

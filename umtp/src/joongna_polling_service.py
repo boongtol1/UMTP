@@ -47,6 +47,14 @@ def _normalize_optional_user_id(user_id):
     return cleaned or None
 
 
+def _normalize_source(source):
+    if isinstance(source, str):
+        cleaned = source.strip().lower()
+        if cleaned:
+            return cleaned
+    return "joongna"
+
+
 def parse_sort_date(item):
     if not isinstance(item, dict):
         return None
@@ -112,6 +120,10 @@ def _coerce_datetime(value):
 def _build_poll_stats(search_words):
     return {
         "search_words": search_words,
+        "polling_group_count": 0,
+        "external_api_calls": 0,
+        "matched_watch_rules": 0,
+        "created_alert_count": 0,
         "fetched_items": 0,
         "new_items": 0,
         "skipped_no_seq": 0,
@@ -144,6 +156,172 @@ def _build_observed_product(search_word, item):
         "sort_date": parse_sort_date(item),
         "refresh_key": item.get("refresh_key"),
     }
+
+
+def _build_source_search_group_key(source, search_keyword):
+    normalized_source = _normalize_source(source)
+    normalized_keyword = normalize_search_keyword(search_keyword)
+    if not normalized_keyword:
+        return None
+    return normalized_source, normalized_keyword.lower()
+
+
+def group_watch_rules_by_search_source(keyword_targets):
+    group_map = {}
+    group_order = []
+
+    for search_keyword, targets in (keyword_targets or {}).items():
+        for target in targets or []:
+            source = _normalize_source(target.get("source"))
+            group_key = _build_source_search_group_key(source, search_keyword)
+            if group_key is None:
+                continue
+
+            group = group_map.get(group_key)
+            if group is None:
+                normalized_source = group_key[0]
+                normalized_keyword = normalize_search_keyword(search_keyword)
+                group = {
+                    "source": normalized_source,
+                    "search_keyword": normalized_keyword,
+                    "targets": [],
+                }
+                group_map[group_key] = group
+                group_order.append(group_key)
+
+            target_copy = dict(target)
+            target_copy["source"] = group["source"]
+            target_copy["search_keyword"] = group["search_keyword"]
+            group["targets"].append(target_copy)
+
+    groups = []
+    for group_key in group_order:
+        group = group_map.get(group_key)
+        if not group:
+            continue
+        groups.append(group)
+    return groups
+
+
+def collect_active_watch_rules(user_id=None, search_words=None):
+    words, keyword_targets, due_rules, target_source = _resolve_poll_targets(search_words, user_id)
+    groups = group_watch_rules_by_search_source(keyword_targets)
+    return {
+        "words": words,
+        "keyword_targets": keyword_targets,
+        "due_rules": due_rules,
+        "target_source": target_source,
+        "groups": groups,
+    }
+
+
+def fetch_once_per_group(group):
+    source = _normalize_source((group or {}).get("source"))
+    search_keyword = normalize_search_keyword((group or {}).get("search_keyword"))
+    if not search_keyword:
+        return {
+            "ok": False,
+            "reason": "invalid_search_keyword",
+            "source": source,
+            "search_keyword": search_keyword,
+            "items": [],
+        }
+
+    if source != "joongna":
+        return {
+            "ok": False,
+            "reason": "unsupported_source",
+            "source": source,
+            "search_keyword": search_keyword,
+            "items": [],
+        }
+
+    items = search_joongna_products(search_keyword)
+    return {
+        "ok": True,
+        "reason": "ok",
+        "source": source,
+        "search_keyword": search_keyword,
+        "items": items,
+    }
+
+
+def save_polled_listings(observed_products, *, evaluate_and_store):
+    saved_results = []
+    for observed_product in observed_products:
+        product_state = evaluate_and_store(observed_product)
+        if product_state is None:
+            continue
+        saved_results.append(
+            {
+                "observed_product": observed_product,
+                "product_state": product_state,
+            }
+        )
+    return saved_results
+
+
+def _filter_targets_by_saved_window(observed_product, targets):
+    listing_sort_date = _coerce_datetime((observed_product or {}).get("sort_date"))
+    if listing_sort_date is None:
+        return []
+
+    eligible_targets = []
+    for target in targets or []:
+        saved_at = _coerce_datetime(target.get("saved_at"))
+        if saved_at is None:
+            continue
+        if listing_sort_date >= saved_at:
+            eligible_targets.append(target)
+    return eligible_targets
+
+
+def match_saved_listings_to_watch_rules(saved_listing_states, targets, *, stats):
+    matches = []
+    for item in saved_listing_states:
+        observed_product = item.get("observed_product") or {}
+        product_state = item.get("product_state") or {}
+        eligible_targets = _filter_targets_by_saved_window(observed_product, targets)
+        if not eligible_targets:
+            stats["skipped_before_saved_at"] += len(targets or [])
+            continue
+
+        stats["matched_watch_rules"] += len(eligible_targets)
+        matches.append(
+            {
+                "observed_product": observed_product,
+                "eligible_targets": eligible_targets,
+                "change_reason": product_state.get("change_reason"),
+            }
+        )
+    return matches
+
+
+def create_alerts_for_matches(matches, *, stats):
+    for match in matches:
+        observed_product = match.get("observed_product") or {}
+        eligible_targets = match.get("eligible_targets") or []
+        change_reason = match.get("change_reason")
+
+        try:
+            enqueue_result = enqueue_analysis_for_product(
+                observed_product,
+                eligible_targets,
+                change_reason,
+            )
+            created_jobs = enqueue_result.get("created_jobs") or []
+            skipped_jobs = enqueue_result.get("skipped_jobs") or []
+            stats["analysis_jobs_created"] += len(created_jobs)
+            stats["analysis_jobs_skipped_duplicate"] += len(skipped_jobs)
+            stats["created_alert_count"] += len(created_jobs)
+        except Exception as exc:
+            stats["db_errors"] += 1
+            product_id = observed_product.get("product_id")
+            search_keyword = observed_product.get("search_keyword")
+            print(
+                f"[{search_keyword}] analysis job enqueue 실패 "
+                f"(seq={product_id}): {exc}"
+            )
 
 
 def _build_keyword_targets_from_user_fair_prices(watch_rules):
@@ -221,11 +399,16 @@ def _resolve_poll_targets(search_words, user_id):
 
 
 def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_process_limit=50):
-    words, keyword_targets, due_rules, target_source = _resolve_poll_targets(search_words, user_id)
+    poll_context = collect_active_watch_rules(user_id=user_id, search_words=search_words)
+    words = poll_context.get("words") or []
+    due_rules = poll_context.get("due_rules") or []
+    target_source = poll_context.get("target_source")
+    groups = poll_context.get("groups") or []
     stats = _build_poll_stats(words)
     stats["settings_due"] = len(due_rules)
+    stats["polling_group_count"] = len(groups)
 
-    if not words:
+    if not groups:
         print("[polling] enabled 토글 대상 검색어가 없어 이번 주기는 스킵합니다.")
         return stats
 
@@ -274,20 +457,6 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                     stats["db_errors"] += 1
                     print(f"[polling] setting polled_at 갱신 실패 (setting_id={setting_id}): {exc}")
 
-    def filter_targets_by_saved_window(observed_product, targets):
-        listing_sort_date = _coerce_datetime(observed_product.get("sort_date"))
-        if listing_sort_date is None:
-            return []
-
-        eligible_targets = []
-        for target in targets:
-            saved_at = _coerce_datetime(target.get("saved_at"))
-            if saved_at is None:
-                continue
-            if listing_sort_date >= saved_at:
-                eligible_targets.append(target)
-        return eligible_targets
-
     try:
         try:
             connection = get_connection()
@@ -296,111 +465,114 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
         except Exception as exc:
             print(f"[polling] seen DB 연결 실패: {exc}")
 
-        for search_word in words:
-            targets_for_word = keyword_targets.get(search_word) or []
+        for group in groups:
+            source = _normalize_source(group.get("source"))
+            search_word = normalize_search_keyword(group.get("search_keyword")) or ""
+            targets_for_word = group.get("targets") or []
             search_completed_for_word = False
 
             try:
-                print(f"[{search_word}] Search API 조회 시작")
+                print(f"[{source}/{search_word}] Search API 조회 시작")
                 try:
-                    items = search_joongna_products(search_word)
+                    stats["external_api_calls"] += 1
+                    fetch_result = fetch_once_per_group(group)
+                    if not fetch_result.get("ok"):
+                        raise RuntimeError(fetch_result.get("reason") or "search_fetch_failed")
+                    items = fetch_result.get("items") or []
                     search_completed_for_word = True
                     stats["fetched_items"] += len(items)
-                    print(f"[{search_word}] 검색 결과 {len(items)}건")
+                    print(f"[{source}/{search_word}] 검색 결과 {len(items)}건")
                 except Exception as exc:
                     stats["search_errors"] += 1
-                    print(f"[{search_word}] Search API 조회 실패: {exc}")
+                    print(f"[{source}/{search_word}] Search API 조회 실패: {exc}")
                     continue
 
+                observed_products = []
                 for item in items:
                     observed_product = _build_observed_product(search_word, item)
+                    observed_products.append(observed_product)
+
+                def evaluate_and_store(observed_product):
+                    nonlocal seen_db_ready
                     product_id = observed_product.get("product_id")
                     if product_id is None:
                         stats["skipped_no_seq"] += 1
-                        continue
+                        return None
 
                     product_state = processed_products.get(product_id)
-                    if product_state is None:
-                        should_analyze = True
-                        change_reason = "new_product"
+                    if product_state is not None:
+                        return product_state
 
-                        if seen_db_ready and cursor is not None:
-                            try:
-                                existing = get_seen_product(cursor, product_id)
-                                should_analyze, change_reason = should_analyze_seen_product(
-                                    existing,
-                                    observed_product,
-                                )
-                            except Exception as exc:
-                                stats["db_errors"] += 1
-                                print(f"[{search_word}] seen 조회 실패 (seq={product_id}): {exc}")
-                                disable_seen_db(str(exc))
-                                should_analyze = True
-                                change_reason = "new_product"
+                    should_analyze = True
+                    change_reason = "new_product"
 
-                        if seen_db_ready and cursor is not None:
-                            try:
-                                upsert_seen_product_observation(
-                                    cursor,
-                                    observed_product,
-                                    change_reason=change_reason,
-                                    status="analysis_pending" if should_analyze else "unchanged",
-                                )
-                                connection.commit()
-                            except Exception as exc:
-                                stats["db_errors"] += 1
-                                try:
-                                    connection.rollback()
-                                except Exception:
-                                    pass
-                                print(f"[{search_word}] seen 관측 저장 실패 (seq={product_id}): {exc}")
-                                disable_seen_db(str(exc))
-
-                        product_state = {
-                            "should_analyze": should_analyze,
-                            "change_reason": change_reason,
-                        }
-                        processed_products[product_id] = product_state
-
-                        if not should_analyze:
-                            stats["skipped_seen"] += 1
-                            print(f"[{search_word}] 상태 동일(글로벌) (seq={product_id}, reason={change_reason})")
-
-                        if should_analyze:
-                            print(
-                                f"[{search_word}] 분석 큐 등록 대상 감지 "
-                                f"(seq={product_id}, reason={change_reason})"
+                    if seen_db_ready and cursor is not None:
+                        try:
+                            existing = get_seen_product(cursor, product_id)
+                            should_analyze, change_reason = should_analyze_seen_product(
+                                existing,
+                                observed_product,
                             )
-                            stats["new_items"] += 1
+                        except Exception as exc:
+                            stats["db_errors"] += 1
+                            print(f"[{search_word}] seen 조회 실패 (seq={product_id}): {exc}")
+                            disable_seen_db(str(exc))
+                            should_analyze = True
+                            change_reason = "new_product"
 
-                    eligible_targets = filter_targets_by_saved_window(observed_product, targets_for_word)
-                    if not eligible_targets:
-                        stats["skipped_before_saved_at"] += len(targets_for_word)
-                        continue
+                    if seen_db_ready and cursor is not None:
+                        try:
+                            upsert_seen_product_observation(
+                                cursor,
+                                observed_product,
+                                change_reason=change_reason,
+                                status="analysis_pending" if should_analyze else "unchanged",
+                            )
+                            connection.commit()
+                        except Exception as exc:
+                            stats["db_errors"] += 1
+                            try:
+                                connection.rollback()
+                            except Exception:
+                                pass
+                            print(f"[{search_word}] seen 관측 저장 실패 (seq={product_id}): {exc}")
+                            disable_seen_db(str(exc))
 
-                    try:
-                        enqueue_result = enqueue_analysis_for_product(
-                            observed_product,
-                            eligible_targets,
-                            product_state.get("change_reason"),
-                        )
-                        created_jobs = enqueue_result.get("created_jobs") or []
-                        skipped_jobs = enqueue_result.get("skipped_jobs") or []
-                        stats["analysis_jobs_created"] += len(created_jobs)
-                        stats["analysis_jobs_skipped_duplicate"] += len(skipped_jobs)
-                    except Exception as exc:
-                        stats["db_errors"] += 1
+                    product_state = {
+                        "should_analyze": should_analyze,
+                        "change_reason": change_reason,
+                    }
+                    processed_products[product_id] = product_state
+
+                    if not should_analyze:
+                        stats["skipped_seen"] += 1
+                        print(f"[{search_word}] 상태 동일(글로벌) (seq={product_id}, reason={change_reason})")
+
+                    if should_analyze:
                         print(
-                            f"[{search_word}] analysis job enqueue 실패 "
-                            f"(seq={product_id}): {exc}"
+                            f"[{search_word}] 분석 큐 등록 대상 감지 "
+                            f"(seq={product_id}, reason={change_reason})"
                         )
-                        continue
+                        stats["new_items"] += 1
+
+                    return product_state
+
+                saved_listing_states = save_polled_listings(
+                    observed_products,
+                    evaluate_and_store=evaluate_and_store,
+                )
+                matches = match_saved_listings_to_watch_rules(
+                    saved_listing_states,
+                    targets_for_word,
+                    stats=stats,
+                )
+                create_alerts_for_matches(matches, stats=stats)
             finally:
                 if search_completed_for_word:
                     mark_related_rules_polled(targets_for_word)
                 elif target_source == "settings" and targets_for_word:
                     print(
-                        f"[{search_word}] Search API 실패로 setting polled_at 갱신 생략 "
+                        f"[{source}/{search_word}] Search API 실패로 setting polled_at 갱신 생략 "
                         "(force_poll 유지)"
                     )
     finally:
@@ -411,5 +583,13 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
 
     if inline_process:
         print("[polling] inline_process=True 요청이 들어왔지만 enqueue-only 정책으로 무시합니다.")
+
+    print(
+        "[polling] group_summary "
+        f"groups={stats.get('polling_group_count', 0)} "
+        f"external_calls={stats.get('external_api_calls', 0)} "
+        f"matched_watch_rules={stats.get('matched_watch_rules', 0)} "
+        f"created_alerts={stats.get('created_alert_count', 0)}"
+    )
 
     return stats

@@ -319,6 +319,180 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(mock_enqueue.call_count, 0)
         self.assertEqual(stats.get("skipped_before_saved_at"), 1)
 
+    def test_poll_once_fetches_once_for_same_source_and_keyword(self):
+        due_rules = [
+            {
+                "id": 1,
+                "user_id": "u1",
+                "search_keyword": "맥북 m2",
+                "saved_at": "2026-05-15 10:00:00",
+            },
+            {
+                "id": 2,
+                "user_id": "u2",
+                "search_keyword": "맥북 m2",
+                "saved_at": "2026-05-15 10:00:00",
+            },
+            {
+                "id": 3,
+                "user_id": "u3",
+                "search_keyword": "맥북 m2",
+                "saved_at": "2026-05-15 10:00:00",
+            },
+        ]
+        mock_item = {
+            "seq": 1010,
+            "product_id": 1010,
+            "title": "맥북에어 M2 16GB 512GB",
+            "price": 1200000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-1010",
+            "product_url": "https://web.joongna.com/product/1010",
+            "image_url": "",
+        }
+
+        with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+            with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]) as mock_search:
+                with patch("src.joongna_polling_service.get_connection", side_effect=RuntimeError("db down")):
+                    with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                        mock_enqueue.return_value = {
+                            "ok": True,
+                            "created_jobs": [{"job_id": 1}, {"job_id": 2}, {"job_id": 3}],
+                            "skipped_jobs": [],
+                        }
+                        stats = poll_once()
+
+        self.assertEqual(mock_search.call_count, 1)
+        self.assertEqual(mock_enqueue.call_count, 1)
+        self.assertEqual(stats.get("polling_group_count"), 1)
+        self.assertEqual(stats.get("external_api_calls"), 1)
+
+    def test_poll_once_matches_same_listing_to_multiple_watch_rules(self):
+        due_rules = [
+            {
+                "id": 11,
+                "user_id": "user_a",
+                "search_keyword": "맥북 m3",
+                "saved_at": "2026-05-15 10:00:00",
+            },
+            {
+                "id": 12,
+                "user_id": "user_b",
+                "search_keyword": "맥북 m3",
+                "saved_at": "2026-05-15 10:00:00",
+            },
+        ]
+        mock_item = {
+            "seq": 2020,
+            "product_id": 2020,
+            "title": "맥북에어 M3 8GB 256GB",
+            "price": 1100000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-2020",
+            "product_url": "https://web.joongna.com/product/2020",
+            "image_url": "",
+        }
+
+        with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+            with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                with patch("src.joongna_polling_service.get_connection", side_effect=RuntimeError("db down")):
+                    with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                        mock_enqueue.return_value = {
+                            "ok": True,
+                            "created_jobs": [{"job_id": 11}, {"job_id": 12}],
+                            "skipped_jobs": [],
+                        }
+                        stats = poll_once()
+
+        self.assertEqual(mock_enqueue.call_count, 1)
+        self.assertEqual(stats.get("matched_watch_rules"), 2)
+        self.assertEqual(stats.get("created_alert_count"), 2)
+
+    def test_poll_once_continues_when_one_group_fetch_fails(self):
+        due_rules = [
+            {
+                "id": 21,
+                "user_id": "user_fail",
+                "search_keyword": "실패 키워드",
+                "saved_at": "2026-05-15 10:00:00",
+            },
+            {
+                "id": 22,
+                "user_id": "user_ok",
+                "search_keyword": "정상 키워드",
+                "saved_at": "2026-05-15 10:00:00",
+            },
+        ]
+        mock_item = {
+            "seq": 3030,
+            "product_id": 3030,
+            "title": "맥북에어 M2 8GB 256GB",
+            "price": 980000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-3030",
+            "product_url": "https://web.joongna.com/product/3030",
+            "image_url": "",
+        }
+
+        def _search_side_effect(keyword):
+            if keyword == "실패 키워드":
+                raise RuntimeError("temporary upstream error")
+            return [mock_item]
+
+        with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+            with patch("src.joongna_polling_service.search_joongna_products", side_effect=_search_side_effect) as mock_search:
+                with patch("src.joongna_polling_service.get_connection", side_effect=RuntimeError("db down")):
+                    with patch("src.joongna_polling_service.mark_watch_rule_polled") as mock_mark_polled:
+                        with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                            mock_enqueue.return_value = {
+                                "ok": True,
+                                "created_jobs": [{"job_id": 22}],
+                                "skipped_jobs": [],
+                            }
+                            stats = poll_once()
+
+        self.assertEqual(mock_search.call_count, 2)
+        self.assertEqual(mock_enqueue.call_count, 1)
+        self.assertEqual(mock_mark_polled.call_count, 1)
+        self.assertEqual(stats.get("search_errors"), 1)
+        self.assertEqual(stats.get("analysis_jobs_created"), 1)
+
+    def test_poll_once_keeps_duplicate_skip_count_from_enqueue_result(self):
+        due_rules = [
+            {
+                "id": 31,
+                "user_id": "user_dup",
+                "search_keyword": "중복 키워드",
+                "saved_at": "2026-05-15 10:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 4040,
+            "product_id": 4040,
+            "title": "맥북에어 M1 8GB 256GB",
+            "price": 700000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-4040",
+            "product_url": "https://web.joongna.com/product/4040",
+            "image_url": "",
+        }
+
+        with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+            with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                with patch("src.joongna_polling_service.get_connection", side_effect=RuntimeError("db down")):
+                    with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                        mock_enqueue.return_value = {
+                            "ok": True,
+                            "created_jobs": [],
+                            "skipped_jobs": [{"reason": "duplicate_identity_job"}],
+                        }
+                        stats = poll_once()
+
+        self.assertEqual(mock_enqueue.call_count, 1)
+        self.assertEqual(stats.get("analysis_jobs_created"), 0)
+        self.assertEqual(stats.get("analysis_jobs_skipped_duplicate"), 1)
+        self.assertEqual(stats.get("created_alert_count"), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
