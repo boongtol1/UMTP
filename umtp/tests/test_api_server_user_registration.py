@@ -12,6 +12,11 @@ from src import api_server  # noqa: E402
 
 
 class ApiServerUserRegistrationTest(unittest.TestCase):
+    def test_units_endpoint_alias_is_registered(self):
+        paths = {route.path for route in api_server.app.routes}
+        self.assertIn("/macbook-air-units", paths)
+        self.assertIn("/silicon-mac-units", paths)
+
     @patch("src.api_server.get_user_fair_price_settings", return_value=[])
     @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
     def test_user_fair_prices_registers_user_before_loading(self, mock_register_user, mock_get_settings):

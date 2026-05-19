@@ -135,6 +135,7 @@ def security_txt():
 
 
 @app.get("/macbook-air-units")
+@app.get("/silicon-mac-units")
 def macbook_air_units():
     try:
         units = get_all_macbook_air_units_sorted()
@@ -142,7 +143,7 @@ def macbook_air_units():
     except Exception as exc:
         return {
             "ok": False,
-            "reason": f"MacBook Air 단위 목록 조회 실패: {exc}",
+            "reason": f"실리콘 Mac 단위 목록 조회 실패: {exc}",
             "units": [],
         }
 
