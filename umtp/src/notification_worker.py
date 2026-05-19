@@ -337,6 +337,127 @@ def _resolve_body_text_for_display(alert):
     return "본문 내용 없음"
 
 
+def _resolve_url_for_display(alert):
+    product_url = _normalize_optional_text(alert.get("product_url"))
+    if product_url is not None:
+        return product_url
+    url = _normalize_optional_text(alert.get("url"))
+    if url is not None:
+        return url
+    return "URL 정보 없음"
+
+
+def _resolve_product_type_text_for_display(alert):
+    product_type = _normalize_optional_text(alert.get("product_type"))
+    return product_type or "분류 정보 없음"
+
+
+def _resolve_chip_text_for_display(alert):
+    chip = _normalize_optional_text(alert.get("chip"))
+    return chip or "정보 없음"
+
+
+def _resolve_screen_inch_text_for_display(alert):
+    screen_inch = _safe_int(alert.get("screen_inch"))
+    if screen_inch is None or screen_inch <= 0:
+        return "정보 없음"
+    return f"{screen_inch}인치"
+
+
+def _resolve_ram_text_for_display(alert):
+    ram_gb = _safe_int(alert.get("ram_gb"))
+    if ram_gb is None or ram_gb <= 0:
+        return "정보 없음"
+    return f"{ram_gb}GB"
+
+
+def _resolve_ssd_text_for_display(alert):
+    ssd_gb = _safe_int(alert.get("ssd_gb"))
+    if ssd_gb is None or ssd_gb <= 0:
+        return "정보 없음"
+    return f"{ssd_gb}GB"
+
+
+def _resolve_risk_score_for_display(alert):
+    risk_score = _safe_int(alert.get("risk_score"))
+    if risk_score is None:
+        return "정보 없음"
+    return str(risk_score)
+
+
+def _resolve_risk_keywords_text_for_display(alert):
+    parsed_keywords = _parse_risk_keywords(alert.get("risk_keywords"))
+    if not parsed_keywords:
+        return "특이사항 없음"
+    return ", ".join(parsed_keywords)
+
+
+def _resolve_analyzed_at_text_for_display(alert):
+    analyzed_at = alert.get("analyzed_at")
+    if analyzed_at is not None:
+        normalized = _normalize_optional_text(analyzed_at)
+        return normalized or str(analyzed_at)
+
+    created_at = alert.get("created_at")
+    if created_at is not None:
+        normalized = _normalize_optional_text(created_at)
+        return normalized or str(created_at)
+
+    return "분석 시각 정보 없음"
+
+
+def _resolve_trade_flags_text_for_display(alert):
+    trade_type_flags = alert.get("trade_type_flags")
+    if isinstance(trade_type_flags, dict):
+        is_exchange = bool(trade_type_flags.get("is_exchange"))
+        is_free = bool(trade_type_flags.get("is_free"))
+        is_suspicious = bool(trade_type_flags.get("is_suspicious"))
+    else:
+        flags = _build_trade_type_flags(
+            is_exchange_post=_normalize_optional_bool(alert.get("is_exchange_post")),
+            trade_type=_normalize_optional_text(alert.get("trade_type")),
+            risk_level=_normalize_optional_text(alert.get("risk_level")),
+        )
+        is_exchange = bool(flags.get("is_exchange"))
+        is_free = bool(flags.get("is_free"))
+        is_suspicious = bool(flags.get("is_suspicious"))
+
+    labels = []
+    if is_exchange:
+        labels.append("교환")
+    if is_free:
+        labels.append("나눔")
+    if is_suspicious:
+        labels.append("허위/의심")
+    if not labels:
+        return "특이사항 없음"
+    return ", ".join(labels)
+
+
+def _resolve_special_notes_text_for_display(alert, *, risk_label=None, risk_keywords_text=None, trade_flags_text=None):
+    resolved_risk_label = risk_label or _resolve_risk_label_for_display(alert)
+    resolved_risk_keywords_text = risk_keywords_text or _resolve_risk_keywords_text_for_display(alert)
+    resolved_trade_flags_text = trade_flags_text or _resolve_trade_flags_text_for_display(alert)
+
+    notes = []
+    if resolved_risk_label in {"주의", "위험"}:
+        notes.append(f"위험도 {resolved_risk_label}")
+    if resolved_trade_flags_text not in {"특이사항 없음", "정보 없음"}:
+        notes.append(f"거래 유형: {resolved_trade_flags_text}")
+    if resolved_risk_keywords_text != "특이사항 없음":
+        notes.append(f"위험 키워드: {resolved_risk_keywords_text}")
+
+    if not notes:
+        return "특이사항 없음"
+    return " / ".join(notes)
+
+
+def _build_telegram_detail_row(label, value):
+    normalized_label = _normalize_optional_text(label) or "-"
+    normalized_value = _normalize_optional_text(value) or "정보 없음"
+    return f"{normalized_label}\n{normalized_value}"
+
+
 def _fetch_latest_log_details(cursor, *, user_id, url):
     normalized_user_id = _normalize_optional_text(user_id)
     normalized_url = _normalize_optional_text(url)
@@ -703,8 +824,9 @@ def _send_fcm_to_user(user_id, alert):
 
 
 def _build_telegram_message(alert):
-    title = _normalize_optional_text(alert.get("title")) or "제목 없음"
-    url = _normalize_optional_text(alert.get("url")) or "-"
+    source = _normalize_optional_text(alert.get("source")) or "정보 없음"
+    url = _resolve_url_for_display(alert)
+    listing_image_url = _normalize_optional_text(alert.get("listing_image_url")) or "이미지 없음"
     listing_price_krw = _safe_int(alert.get("price_krw"))
     user_market_price_krw = _safe_int(alert.get("user_market_price_krw"))
     if user_market_price_krw is None:
@@ -719,25 +841,48 @@ def _build_telegram_message(alert):
     if price_gap_percent is None:
         price_gap_percent = _normalize_optional_float(alert.get("drop_rate_percent"))
 
-    spec_summary = _build_spec_summary(alert)
     risk_label = _resolve_risk_label_for_display(alert)
+    risk_score = _resolve_risk_score_for_display(alert)
+    risk_keywords_text = _resolve_risk_keywords_text_for_display(alert)
     alert_condition_label = _resolve_alert_condition_label_for_display(alert)
     body_text = _resolve_body_text_for_display(alert)
-
-    return (
-        "[UMTP 알림]\n"
-        f"{title}\n\n"
-        f"가격: {_format_krw_display(listing_price_krw)}\n"
-        f"제품 분류: {spec_summary}\n"
-        f"내가 생각한 시장가: {_format_krw_display(user_market_price_krw)}\n"
-        f"알림 기준 가격: {_format_krw_display(alert_target_price_krw)}\n"
-        f"시장가와의 차이: {_format_percent_display(price_gap_percent)}\n"
-        f"알림 조건: {alert_condition_label}\n"
-        f"위험도: {risk_label}\n"
-        f"본문 내용: {body_text}\n\n"
-        "URL:\n"
-        f"{url}"
+    analyzed_at_text = _resolve_analyzed_at_text_for_display(alert)
+    trade_flags_text = _resolve_trade_flags_text_for_display(alert)
+    special_notes_text = _resolve_special_notes_text_for_display(
+        alert,
+        risk_label=risk_label,
+        risk_keywords_text=risk_keywords_text,
+        trade_flags_text=trade_flags_text,
     )
+
+    sections = [
+        _build_telegram_detail_row("출처", source),
+        _build_telegram_detail_row("URL", url),
+        _build_telegram_detail_row("대표 이미지", listing_image_url),
+        _build_telegram_detail_row("제품 분류", _resolve_product_type_text_for_display(alert)),
+        _build_telegram_detail_row("칩", _resolve_chip_text_for_display(alert)),
+        _build_telegram_detail_row("화면 크기", _resolve_screen_inch_text_for_display(alert)),
+        _build_telegram_detail_row("RAM", _resolve_ram_text_for_display(alert)),
+        _build_telegram_detail_row("SSD", _resolve_ssd_text_for_display(alert)),
+        _build_telegram_detail_row("등록 가격", _format_krw_display(listing_price_krw)),
+        _build_telegram_detail_row("내가 생각한 시장가", _format_krw_display(user_market_price_krw)),
+        _build_telegram_detail_row("알림 기준 가격", _format_krw_display(alert_target_price_krw)),
+        _build_telegram_detail_row("시장가와의 차이", _format_percent_display(price_gap_percent)),
+        _build_telegram_detail_row(
+            "차이율 계산식",
+            "(내가 생각한 시장가 - 등록 가격) / 내가 생각한 시장가 × 100",
+        ),
+        _build_telegram_detail_row("알림 조건", alert_condition_label),
+        _build_telegram_detail_row("위험도", risk_label),
+        _build_telegram_detail_row("위험 점수", risk_score),
+        _build_telegram_detail_row("위험 키워드", risk_keywords_text),
+        _build_telegram_detail_row("본문 내용", body_text),
+        _build_telegram_detail_row("분석 시각", analyzed_at_text),
+        _build_telegram_detail_row("교환/나눔/의심", trade_flags_text),
+        _build_telegram_detail_row("특이사항", special_notes_text),
+    ]
+
+    return "거래 알림 피드\n\n" + "\n\n".join(sections)
 
 
 def get_pending_alert_events(limit=20):
@@ -1002,10 +1147,13 @@ def send_alert_event(alert):
             )
 
         telegram_attempted = True
-        telegram_message = _build_telegram_message(alert)
         listing_image_url = _normalize_optional_text(alert.get("listing_image_url"))
         if listing_image_url is None:
             listing_image_url = _fetch_listing_image_url_by_product_id(alert.get("product_id"))
+        if listing_image_url is not None:
+            alert["listing_image_url"] = listing_image_url
+
+        telegram_message = _build_telegram_message(alert)
         sent_ok = send_telegram_alert(
             telegram_message,
             chat_id=user_chat_id,

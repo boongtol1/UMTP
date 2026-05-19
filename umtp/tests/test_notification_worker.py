@@ -20,24 +20,86 @@ class NotificationWorkerTest(unittest.TestCase):
     def test_build_telegram_message_uses_alert_feed_wording(self):
         message = _build_telegram_message(
             {
-                "title": "맥북에어 m2 기본형",
+                "source": "joongna",
+                "url": "https://web.joongna.com/product/1001",
+                "listing_image_url": "https://img.joongna.com/1001.jpg",
+                "product_type": "MacBook Air",
+                "chip": "M2",
+                "screen_inch": 13,
+                "ram_gb": 16,
+                "ssd_gb": 512,
                 "price_krw": 650000,
                 "fair_price_krw": 800000,
+                "target_price_krw": 795000,
                 "drop_rate_percent": 18.75,
                 "alert_price_direction": "BELOW_OR_EQUAL",
                 "risk_level": "LOW",
-                "url": "https://web.joongna.com/product/1001",
+                "risk_score": 0,
+                "risk_keywords": "[]",
+                "body_text": "m2 기본형",
+                "analyzed_at": "2026-05-19T10:46:58",
+                "trade_type_flags": {
+                    "is_exchange": False,
+                    "is_free": False,
+                    "is_suspicious": False,
+                },
             }
         )
 
-        self.assertIn("[UMTP 알림]", message)
-        self.assertIn("맥북에어 m2 기본형", message)
-        self.assertIn("가격: 650,000원", message)
-        self.assertIn("내가 생각한 시장가: 800,000원", message)
-        self.assertIn("시장가와의 차이: 18.75%", message)
-        self.assertIn("알림 조건: 이 가격 이하이면 알림", message)
-        self.assertIn("위험도: 낮음", message)
+        self.assertIn("거래 알림 피드", message)
+        self.assertIn("출처\njoongna", message)
+        self.assertIn("URL\nhttps://web.joongna.com/product/1001", message)
+        self.assertIn("대표 이미지\nhttps://img.joongna.com/1001.jpg", message)
+        self.assertIn("제품 분류\nMacBook Air", message)
+        self.assertIn("칩\nM2", message)
+        self.assertIn("화면 크기\n13인치", message)
+        self.assertIn("RAM\n16GB", message)
+        self.assertIn("SSD\n512GB", message)
+        self.assertIn("등록 가격\n650,000원", message)
+        self.assertIn("내가 생각한 시장가\n800,000원", message)
+        self.assertIn("알림 기준 가격\n795,000원", message)
+        self.assertIn("시장가와의 차이\n18.75%", message)
+        self.assertIn("차이율 계산식\n(내가 생각한 시장가 - 등록 가격) / 내가 생각한 시장가 × 100", message)
+        self.assertIn("알림 조건\n이 가격 이하이면 알림", message)
+        self.assertIn("위험도\n낮음", message)
+        self.assertIn("위험 점수\n0", message)
+        self.assertIn("위험 키워드\n특이사항 없음", message)
+        self.assertIn("본문 내용\nm2 기본형", message)
+        self.assertIn("분석 시각\n2026-05-19T10:46:58", message)
+        self.assertIn("교환/나눔/의심\n특이사항 없음", message)
+        self.assertIn("특이사항\n특이사항 없음", message)
         self.assertIn("https://web.joongna.com/product/1001", message)
+
+        expected_order_tokens = [
+            "거래 알림 피드",
+            "출처\n",
+            "URL\n",
+            "대표 이미지\n",
+            "제품 분류\n",
+            "칩\n",
+            "화면 크기\n",
+            "RAM\n",
+            "SSD\n",
+            "등록 가격\n",
+            "내가 생각한 시장가\n",
+            "알림 기준 가격\n",
+            "시장가와의 차이\n",
+            "차이율 계산식\n",
+            "알림 조건\n",
+            "위험도\n",
+            "위험 점수\n",
+            "위험 키워드\n",
+            "본문 내용\n",
+            "분석 시각\n",
+            "교환/나눔/의심\n",
+            "\n\n특이사항\n",
+        ]
+        last_index = -1
+        for token in expected_order_tokens:
+            current_index = message.find(token)
+            self.assertNotEqual(current_index, -1, msg=f"missing token: {token}")
+            self.assertGreater(current_index, last_index, msg=f"order mismatch at: {token}")
+            last_index = current_index
 
     def test_send_alert_event_app_only_when_alerts_disabled(self):
         with patch(

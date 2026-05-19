@@ -291,20 +291,9 @@ fun AlertCard(
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(12.dp))
 
-                DetailRow(label = "출처", value = alert.source ?: "정보 없음")
-                DetailRow(label = "URL", value = resolvedUrl ?: "URL 정보 없음")
-                DetailRow(label = "대표 이미지", value = listingImageUrl ?: "이미지 없음")
-                DetailRow(label = "내가 생각한 시장가", value = formatKrwDisplay(alert.user_market_price_krw ?: alert.fair_price_krw))
-                DetailRow(label = "알림 기준 가격", value = formatKrwDisplay(alert.alert_target_price_krw))
-                DetailRow(label = "시장가와의 차이", value = formatPercentDisplay(alert.price_gap_percent ?: alert.diff_ratio))
-                DetailRow(label = "차이율 계산식", value = "(내가 생각한 시장가 - 등록 가격) / 내가 생각한 시장가 × 100")
-                DetailRow(label = "알림 조건", value = resolveAlertConditionLabel(alert))
-                DetailRow(label = "위험도", value = resolveRiskLabel(alert))
-                DetailRow(label = "위험 점수", value = alert.risk_score?.toString() ?: "정보 없음")
-                DetailRow(label = "위험 키워드", value = resolveRiskKeywordsText(alert))
-                DetailRow(label = "본문 내용", value = resolveBodyText(alert))
-                DetailRow(label = "분석 시각", value = alert.analyzed_at ?: alert.created_at ?: "분석 시각 정보 없음")
-                DetailRow(label = "교환/나눔/의심", value = resolveTradeFlagsText(alert.trade_type_flags))
+                buildAlertDetailRows(alert, resolvedUrl, listingImageUrl).forEach { (label, value) ->
+                    DetailRow(label = label, value = value)
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -431,6 +420,91 @@ private fun resolveTradeFlagsText(flags: TradeTypeFlags?): String {
         return "특이사항 없음"
     }
     return labels.joinToString(", ")
+}
+
+private fun resolveProductTypeText(alert: AlertItem): String {
+    return alert.product_type?.takeIf { it.isNotBlank() } ?: "분류 정보 없음"
+}
+
+private fun resolveChipText(alert: AlertItem): String {
+    return alert.chip?.takeIf { it.isNotBlank() } ?: "정보 없음"
+}
+
+private fun resolveScreenInchText(alert: AlertItem): String {
+    val inch = alert.screen_inch
+    if (inch == null || inch <= 0) {
+        return "정보 없음"
+    }
+    return "${inch}인치"
+}
+
+private fun resolveRamText(alert: AlertItem): String {
+    val ram = alert.ram_gb
+    if (ram == null || ram <= 0) {
+        return "정보 없음"
+    }
+    return "${ram}GB"
+}
+
+private fun resolveSsdText(alert: AlertItem): String {
+    val ssd = alert.ssd_gb
+    if (ssd == null || ssd <= 0) {
+        return "정보 없음"
+    }
+    return "${ssd}GB"
+}
+
+private fun resolveSpecialNotesText(alert: AlertItem): String {
+    val notes = mutableListOf<String>()
+    val riskLabel = resolveRiskLabel(alert)
+    if (riskLabel == "주의" || riskLabel == "위험") {
+        notes += "위험도 $riskLabel"
+    }
+
+    val tradeFlagsText = resolveTradeFlagsText(alert.trade_type_flags)
+    if (tradeFlagsText != "특이사항 없음" && tradeFlagsText != "정보 없음") {
+        notes += "거래 유형: $tradeFlagsText"
+    }
+
+    val riskKeywordsText = resolveRiskKeywordsText(alert)
+    if (riskKeywordsText != "특이사항 없음") {
+        notes += "위험 키워드: $riskKeywordsText"
+    }
+
+    if (notes.isEmpty()) {
+        return "특이사항 없음"
+    }
+    return notes.joinToString(" / ")
+}
+
+private fun buildAlertDetailRows(
+    alert: AlertItem,
+    resolvedUrl: String?,
+    listingImageUrl: String?,
+): List<Pair<String, String>> {
+    return listOf(
+        "출처" to (alert.source?.takeIf { it.isNotBlank() } ?: "정보 없음"),
+        "URL" to (resolvedUrl ?: "URL 정보 없음"),
+        "대표 이미지" to (listingImageUrl ?: "이미지 없음"),
+        "제품 분류" to resolveProductTypeText(alert),
+        "칩" to resolveChipText(alert),
+        "화면 크기" to resolveScreenInchText(alert),
+        "RAM" to resolveRamText(alert),
+        "SSD" to resolveSsdText(alert),
+        "등록 가격" to formatKrwDisplay(alert.listing_price_krw),
+        "내가 생각한 시장가" to formatKrwDisplay(alert.user_market_price_krw ?: alert.fair_price_krw),
+        "알림 기준 가격" to formatKrwDisplay(alert.alert_target_price_krw),
+        "시장가와의 차이" to formatPercentDisplay(alert.price_gap_percent ?: alert.diff_ratio),
+        "차이율 계산식" to "(내가 생각한 시장가 - 등록 가격) / 내가 생각한 시장가 × 100",
+        "알림 조건" to resolveAlertConditionLabel(alert),
+        "위험도" to resolveRiskLabel(alert),
+        "위험 점수" to (alert.risk_score?.toString() ?: "정보 없음"),
+        "위험 키워드" to resolveRiskKeywordsText(alert),
+        "본문 내용" to resolveBodyText(alert),
+        "분석 시각" to (alert.analyzed_at ?: alert.created_at ?: "분석 시각 정보 없음"),
+        "교환/나눔/의심" to resolveTradeFlagsText(alert.trade_type_flags),
+        "특이사항" to resolveSpecialNotesText(alert),
+    )
 }
 
 private fun buildSpecSummary(alert: AlertItem): String {
