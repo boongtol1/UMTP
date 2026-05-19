@@ -35,6 +35,7 @@ fun MacBookAirSettingCard(
         enabled: Boolean,
         conditionChangeCandidateNoticeEnabled: Boolean,
         searchKeyword: String?,
+        priority: String,
         boundPrice: Int?
     ) -> Unit
 ) {
@@ -47,6 +48,9 @@ fun MacBookAirSettingCard(
     }
     var searchKeywordText by remember(userSetting) {
         mutableStateOf(userSetting?.custom_search_keyword ?: userSetting?.effective_search_keyword ?: "")
+    }
+    var watchPriority by remember(userSetting) {
+        mutableStateOf(normalizeWatchPriority(userSetting?.priority))
     }
     var desiredPriceText by remember(userSetting) {
         val fair = userSetting?.user_fair_price_krw ?: userSetting?.effective_fair_price_krw
@@ -184,6 +188,31 @@ fun MacBookAirSettingCard(
                 placeholder = { Text(userSetting?.recommended_search_keyword ?: "예: m1맥북에어", fontSize = 12.sp) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "알림 속도",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                WATCH_PRIORITY_UI_OPTIONS.forEach { option ->
+                    FilterChip(
+                        selected = watchPriority == option.value,
+                        onClick = { watchPriority = option.value },
+                        label = { Text(option.label) }
+                    )
+                }
+            }
+            Text(
+                text = WATCH_PRIORITY_UI_OPTIONS.firstOrNull { it.value == watchPriority }?.description
+                    ?: "일반적인 속도",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -362,6 +391,7 @@ fun MacBookAirSettingCard(
                             enabled,
                             conditionChangeCandidateNoticeEnabled,
                             searchKeywordText.trim().ifEmpty { null },
+                            watchPriority,
                             boundPriceInput,
                         )
                     }

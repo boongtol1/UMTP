@@ -1,4 +1,5 @@
 import logging
+import random
 from datetime import datetime
 from decimal import Decimal
 import uuid
@@ -41,6 +42,18 @@ DEFAULT_POLL_INTERVAL_SECONDS = 60
 DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED = False
 CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON = "condition_change_candidate_notice"
 CONDITION_CHANGE_CANDIDATE_NOTICE_SOURCE = "umtp_notice"
+WATCH_PRIORITY_FAST = "FAST"
+WATCH_PRIORITY_NORMAL = "NORMAL"
+WATCH_PRIORITY_LOW = "LOW"
+WATCH_PRIORITY_VALUES = (WATCH_PRIORITY_FAST, WATCH_PRIORITY_NORMAL, WATCH_PRIORITY_LOW)
+DEFAULT_WATCH_PRIORITY = WATCH_PRIORITY_NORMAL
+WATCH_PRIORITY_BASE_INTERVAL_SECONDS = {
+    WATCH_PRIORITY_FAST: 45,
+    WATCH_PRIORITY_NORMAL: 180,
+    WATCH_PRIORITY_LOW: 600,
+}
+POLLING_JITTER_RATIO = 0.2
+MIN_POLLING_INTERVAL_SECONDS = 30
 logger = logging.getLogger("umtp.user_settings")
 
 
@@ -116,6 +129,38 @@ def _normalize_poll_interval_seconds(value):
     if normalized <= 0:
         raise ValueError("invalid_poll_interval_seconds")
     return normalized
+
+
+def normalize_watch_priority(value):
+    normalized = _safe_text(value)
+    if normalized is None:
+        return DEFAULT_WATCH_PRIORITY
+    candidate = normalized.upper()
+    if candidate not in WATCH_PRIORITY_VALUES:
+        return DEFAULT_WATCH_PRIORITY
+    return candidate
+
+
+def apply_polling_jitter(base_seconds, *, random_fn=None, jitter_ratio=POLLING_JITTER_RATIO):
+    normalized_base = _safe_int(base_seconds) or 0
+    normalized_base = max(normalized_base, MIN_POLLING_INTERVAL_SECONDS)
+    ratio = _safe_float(jitter_ratio)
+    if ratio is None or ratio < 0:
+        ratio = POLLING_JITTER_RATIO
+    sampler = random_fn or random.uniform
+    jitter_delta = normalized_base * ratio
+    sampled_offset = sampler(-jitter_delta, jitter_delta)
+    jittered_seconds = int(round(normalized_base + sampled_offset))
+    return max(jittered_seconds, MIN_POLLING_INTERVAL_SECONDS)
+
+
+def polling_interval_for_priority(priority, *, random_fn=None):
+    normalized_priority = normalize_watch_priority(priority)
+    base_seconds = WATCH_PRIORITY_BASE_INTERVAL_SECONDS.get(
+        normalized_priority,
+        WATCH_PRIORITY_BASE_INTERVAL_SECONDS[DEFAULT_WATCH_PRIORITY],
+    )
+    return apply_polling_jitter(base_seconds, random_fn=random_fn)
 
 
 def _normalize_rule_id(rule_id):
@@ -895,7 +940,7 @@ def _fetch_user_overrides_map(cursor, user_id):
                fair_price_krw, alert_drop_rate_percent, target_buy_price_krw, alert_price_direction,
                min_price_krw, max_price_krw,
                enabled, condition_change_candidate_notice_enabled,
-               search_keyword, force_poll, poll_interval_seconds,
+               search_keyword, force_poll, poll_interval_seconds, priority,
                last_polled_at, last_poll_requested_at, saved_at
             FROM user_fair_prices
             WHERE user_id = %s
@@ -929,6 +974,7 @@ def _fetch_user_overrides_map(cursor, user_id):
                     "condition_change_candidate_notice_enabled",
                     DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED,
                 )
+                row["priority"] = DEFAULT_WATCH_PRIORITY
         except Exception as first_fallback_exc:
             if "unknown column" not in str(first_fallback_exc).lower():
                 raise
@@ -975,6 +1021,7 @@ def _fetch_user_overrides_map(cursor, user_id):
                 row["min_price_krw"] = None
                 row["max_price_krw"] = None
                 row["target_buy_price_krw"] = None
+                row["priority"] = DEFAULT_WATCH_PRIORITY
 
     user_map = {}
     for row in rows:
@@ -1001,6 +1048,7 @@ def _fetch_user_overrides_map(cursor, user_id):
             "search_keyword": _normalize_optional_search_keyword(row.get("search_keyword")),
             "force_poll": _safe_bool(row.get("force_poll"), default=False),
             "poll_interval_seconds": _safe_int(row.get("poll_interval_seconds")) or DEFAULT_POLL_INTERVAL_SECONDS,
+            "priority": normalize_watch_priority(row.get("priority")),
             "last_polled_at": row.get("last_polled_at"),
             "last_poll_requested_at": row.get("last_poll_requested_at"),
             "saved_at": row.get("saved_at") or row.get("last_poll_requested_at"),
@@ -1088,6 +1136,11 @@ def get_user_fair_price_settings(user_id):
             if has_user_override
             else DEFAULT_POLL_INTERVAL_SECONDS
         )
+        priority = (
+            normalize_watch_priority(user_item.get("priority"))
+            if has_user_override
+            else DEFAULT_WATCH_PRIORITY
+        )
         last_polled_at = user_item.get("last_polled_at") if has_user_override else None
         last_poll_requested_at = user_item.get("last_poll_requested_at") if has_user_override else None
         saved_at = user_item.get("saved_at") if has_user_override else None
@@ -1144,6 +1197,7 @@ def get_user_fair_price_settings(user_id):
                 "recommended_search_keyword": recommended_search_keyword,
                 "effective_search_keyword": effective_search_keyword,
                 "poll_interval_seconds": poll_interval_seconds,
+                "priority": priority,
                 "force_poll": bool(force_poll),
                 "last_polled_at": last_polled_at,
                 "last_poll_requested_at": last_poll_requested_at,
@@ -1349,6 +1403,7 @@ def upsert_user_fair_price_setting(
     max_price_krw=None,
     search_keyword=None,
     poll_interval_seconds=DEFAULT_POLL_INTERVAL_SECONDS,
+    priority=DEFAULT_WATCH_PRIORITY,
     condition_change_candidate_notice_enabled=DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED,
 ):
     if not isinstance(user_id, str) or not user_id.strip():
@@ -1410,6 +1465,7 @@ def upsert_user_fair_price_setting(
         normalized_poll_interval_seconds = _normalize_poll_interval_seconds(poll_interval_seconds)
     except ValueError as exc:
         return {"ok": False, "reason": str(exc)}
+    normalized_priority = normalize_watch_priority(priority)
 
     try:
         resolved_search_keyword = _resolve_setting_search_keyword(
@@ -1832,9 +1888,36 @@ def upsert_user_fair_price_setting(
                 "search_keyword" in lowered_exc
                 or "poll_interval_seconds" in lowered_exc
                 or "force_poll" in lowered_exc
+                or "priority" in lowered_exc
             ):
                 return {"ok": False, "reason": "missing_polling_columns"}
             if not handled_unknown_column and "alert_price_direction" not in lowered_exc:
+                raise
+
+        try:
+            cursor.execute(
+                """
+                UPDATE user_fair_prices
+                SET priority = %s
+                WHERE user_id = %s
+                  AND product_type = %s
+                  AND chip = %s
+                  AND screen_inch = %s
+                  AND ram_gb = %s
+                  AND ssd_gb = %s
+                """,
+                (
+                    normalized_priority,
+                    normalized_user_id,
+                    normalized_product_type,
+                    normalized_chip,
+                    normalized_screen_inch,
+                    normalized_ram_gb,
+                    normalized_ssd_gb,
+                ),
+            )
+        except Exception as exc:
+            if "unknown column" not in str(exc).lower() or "priority" not in str(exc).lower():
                 raise
 
         try:
@@ -1954,6 +2037,7 @@ def upsert_user_fair_price_setting(
                     ssd_gb=normalized_ssd_gb,
                 ),
                 "poll_interval_seconds": normalized_poll_interval_seconds,
+                "priority": normalized_priority,
             },
         }
     finally:
@@ -1995,6 +2079,7 @@ def _poll_target_row_to_dict(row):
         "enabled": _safe_bool(row.get("enabled"), default=True),
         "force_poll": _safe_bool(row.get("force_poll"), default=False),
         "poll_interval_seconds": _safe_int(row.get("poll_interval_seconds")) or DEFAULT_POLL_INTERVAL_SECONDS,
+        "priority": normalize_watch_priority(row.get("priority")),
         "fair_price_krw": fair_price_krw,
         "alert_drop_rate_percent": alert_drop_rate_percent,
         "target_buy_price_krw": target_buy_price_krw,
@@ -2024,11 +2109,11 @@ def get_due_user_fair_price_polling_targets(user_id=None):
                 SECOND,
                 last_polled_at,
                 CURRENT_TIMESTAMP
-            ) >= GREATEST(COALESCE(poll_interval_seconds, %s), 1)
+            ) >= %s
         )
         """,
     ]
-    params = [DEFAULT_POLL_INTERVAL_SECONDS]
+    params = [MIN_POLLING_INTERVAL_SECONDS]
     normalized_user_id = _safe_text(user_id)
     if normalized_user_id:
         filters.append("user_id = %s")
@@ -2083,6 +2168,7 @@ def get_due_user_fair_price_polling_targets(user_id=None):
                     enabled,
                     force_poll,
                     poll_interval_seconds,
+                    priority,
                     fair_price_krw,
                     alert_drop_rate_percent,
                     target_buy_price_krw,
@@ -2105,6 +2191,7 @@ def get_due_user_fair_price_polling_targets(user_id=None):
             lowered_exc = str(exc).lower()
             if "unknown column" not in lowered_exc:
                 raise
+            handled_unknown_column = False
             if "min_price_krw" in lowered_exc or "max_price_krw" in lowered_exc:
                 cursor.execute(
                     f"""
@@ -2139,6 +2226,8 @@ def get_due_user_fair_price_polling_targets(user_id=None):
                     row["min_price_krw"] = None
                     row["max_price_krw"] = None
                     row["saved_at"] = row.get("saved_at") or row.get("last_poll_requested_at")
+                    row["priority"] = DEFAULT_WATCH_PRIORITY
+                handled_unknown_column = True
             elif "saved_at" in lowered_exc:
                 cursor.execute(
                     f"""
@@ -2173,6 +2262,44 @@ def get_due_user_fair_price_polling_targets(user_id=None):
                 rows = cursor.fetchall() or []
                 for row in rows:
                     row["saved_at"] = row.get("last_poll_requested_at")
+                    row["priority"] = DEFAULT_WATCH_PRIORITY
+                handled_unknown_column = True
+            elif "priority" in lowered_exc:
+                cursor.execute(
+                    f"""
+                    SELECT
+                        id,
+                        user_id,
+                        product_type,
+                        chip,
+                        screen_inch,
+                        ram_gb,
+                        ssd_gb,
+                        search_keyword,
+                        enabled,
+                        force_poll,
+                        poll_interval_seconds,
+                        fair_price_krw,
+                        alert_drop_rate_percent,
+                        target_buy_price_krw,
+                        alert_price_direction,
+                        min_price_krw,
+                        max_price_krw,
+                        last_polled_at,
+                        last_poll_requested_at,
+                        saved_at,
+                        created_at,
+                        updated_at
+                    FROM user_fair_prices
+                    WHERE {where_clause}
+                    ORDER BY id ASC
+                    """,
+                    tuple(params),
+                )
+                rows = cursor.fetchall() or []
+                for row in rows:
+                    row["priority"] = DEFAULT_WATCH_PRIORITY
+                handled_unknown_column = True
             elif "alert_price_direction" in lowered_exc:
                 cursor.execute(
                     f"""
@@ -2207,13 +2334,63 @@ def get_due_user_fair_price_polling_targets(user_id=None):
                     row["min_price_krw"] = None
                     row["max_price_krw"] = None
                     row["saved_at"] = row.get("saved_at") or row.get("last_poll_requested_at")
-                return [_poll_target_row_to_dict(row) for row in rows]
-            logger.warning(
-                "[polling_targets] required polling columns missing (%s); skip polling targets",
-                lowered_exc,
+                    row["priority"] = DEFAULT_WATCH_PRIORITY
+                handled_unknown_column = True
+            if not handled_unknown_column:
+                logger.warning(
+                    "[polling_targets] required polling columns missing (%s); skip polling targets",
+                    lowered_exc,
+                )
+                rows = []
+
+        evaluated_at = datetime.now()
+        due_rows = []
+        for row in rows:
+            target = _poll_target_row_to_dict(row)
+            watch_rule_id = target.get("id")
+            priority = normalize_watch_priority(target.get("priority"))
+            calculated_interval_seconds = polling_interval_for_priority(priority)
+            target["priority"] = priority
+            target["calculated_polling_interval_seconds"] = calculated_interval_seconds
+
+            force_poll = bool(target.get("force_poll"))
+            last_polled_at = _coerce_datetime(target.get("last_polled_at"))
+            if force_poll or last_polled_at is None:
+                print(
+                    f"[polling_priority] watch_rule_id={watch_rule_id} "
+                    f"priority={priority} "
+                    f"calculated_polling_interval_seconds={calculated_interval_seconds} "
+                    "due=true"
+                )
+                logger.info(
+                    "[polling_priority] watch_rule_id=%s priority=%s calculated_polling_interval_seconds=%s due=true",
+                    watch_rule_id,
+                    priority,
+                    calculated_interval_seconds,
+                )
+                due_rows.append(target)
+                continue
+
+            elapsed_seconds = int((evaluated_at - last_polled_at).total_seconds())
+            is_due = elapsed_seconds >= calculated_interval_seconds
+            print(
+                f"[polling_priority] watch_rule_id={watch_rule_id} "
+                f"priority={priority} "
+                f"calculated_polling_interval_seconds={calculated_interval_seconds} "
+                f"elapsed_seconds={elapsed_seconds} due={'true' if is_due else 'false'}"
             )
-            rows = []
-        return [_poll_target_row_to_dict(row) for row in rows]
+            logger.info(
+                "[polling_priority] watch_rule_id=%s priority=%s calculated_polling_interval_seconds=%s elapsed_seconds=%s due=%s",
+                watch_rule_id,
+                priority,
+                calculated_interval_seconds,
+                elapsed_seconds,
+                str(is_due).lower(),
+            )
+            if is_due:
+                due_rows.append(target)
+
+        return due_rows
     finally:
         if cursor is not None:
             cursor.close()

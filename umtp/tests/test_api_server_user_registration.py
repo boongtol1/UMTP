@@ -53,6 +53,7 @@ class ApiServerUserRegistrationTest(unittest.TestCase):
         self.assertFalse(
             mock_upsert_setting.call_args.kwargs.get("condition_change_candidate_notice_enabled")
         )
+        self.assertEqual(mock_upsert_setting.call_args.kwargs.get("priority"), "NORMAL")
 
     @patch("src.api_server.upsert_user_fair_price_setting", return_value={"ok": True})
     @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
@@ -117,6 +118,29 @@ class ApiServerUserRegistrationTest(unittest.TestCase):
         self.assertTrue(
             mock_upsert_setting.call_args.kwargs.get("condition_change_candidate_notice_enabled")
         )
+
+    @patch("src.api_server.upsert_user_fair_price_setting", return_value={"ok": True})
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_user_fair_price_upsert_passes_priority(self, mock_register_user, mock_upsert_setting):
+        request = api_server.UserFairPriceUpsertRequest(
+            user_id="boongtol",
+            product_type="MacBook Air",
+            chip="M4",
+            screen_inch=13,
+            ram_gb=16,
+            ssd_gb=512,
+            fair_price_krw=1600000,
+            alert_drop_rate_percent=10.0,
+            enabled=True,
+            priority="FAST",
+        )
+
+        response = api_server.user_fair_prices_upsert(request)
+
+        self.assertTrue(response.get("ok"))
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_upsert_setting.assert_called_once()
+        self.assertEqual(mock_upsert_setting.call_args.kwargs.get("priority"), "FAST")
 
     @patch("src.api_server.upsert_user_fair_price_setting", return_value={"ok": True})
     @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})

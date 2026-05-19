@@ -108,6 +108,7 @@ class UserFairPriceUpsertRequest(BaseModel):
     condition_change_candidate_notice_enabled: bool = False
     search_keyword: Optional[str] = Field(default=None, max_length=255)
     poll_interval_seconds: int = Field(default=60, ge=1)
+    priority: Optional[str] = Field(default="NORMAL", max_length=20)
 
 
 class PushTokenRequest(BaseModel):
@@ -276,6 +277,7 @@ def user_fair_prices_upsert(request: UserFairPriceUpsertRequest):
             max_price_krw=request.max_price_krw,
             search_keyword=request.search_keyword,
             poll_interval_seconds=request.poll_interval_seconds,
+            priority=request.priority,
             condition_change_candidate_notice_enabled=request.condition_change_candidate_notice_enabled,
         )
     except ValueError:

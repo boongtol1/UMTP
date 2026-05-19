@@ -463,6 +463,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         enabled: Boolean,
         conditionChangeCandidateNoticeEnabled: Boolean,
         searchKeyword: String?,
+        priority: String,
         boundPrice: Int?
     ) {
         val uid = _userId.value ?: return
@@ -506,7 +507,8 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     enabled = enabled,
                     condition_change_candidate_notice_enabled = conditionChangeCandidateNoticeEnabled,
                     search_keyword = searchKeyword?.trim()?.ifEmpty { null },
-                    poll_interval_seconds = 60
+                    poll_interval_seconds = 60,
+                    priority = normalizeWatchPriority(priority),
                 )
                 val response = UmtpApiClient.apiService.upsertUserFairPrice(request)
                 if (response.ok) {

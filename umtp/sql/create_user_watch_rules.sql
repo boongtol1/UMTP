@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS user_watch_rules (
   search_keyword VARCHAR(255) NOT NULL,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   poll_interval_seconds INT NOT NULL DEFAULT 60,
+  priority VARCHAR(20) NOT NULL DEFAULT 'NORMAL',
   target_price_krw INT NULL,
   fair_price_krw INT NULL,
   alert_drop_rate_percent DECIMAL(5,2) NULL,

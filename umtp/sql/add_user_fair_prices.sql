@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS user_fair_prices (
   condition_change_candidate_notice_enabled BOOLEAN NOT NULL DEFAULT FALSE,
   search_keyword VARCHAR(255) NULL,
   poll_interval_seconds INT NOT NULL DEFAULT 60,
+  priority VARCHAR(20) NOT NULL DEFAULT 'NORMAL',
   force_poll BOOLEAN NOT NULL DEFAULT FALSE,
   last_poll_requested_at TIMESTAMP NULL,
   last_polled_at TIMESTAMP NULL,
@@ -73,6 +74,20 @@ PREPARE stmt_condition_change_candidate_notice_enabled FROM @sql_condition_chang
 EXECUTE stmt_condition_change_candidate_notice_enabled;
 DEALLOCATE PREPARE stmt_condition_change_candidate_notice_enabled;
 
+SELECT COUNT(*) INTO @has_priority
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'user_fair_prices'
+  AND column_name = 'priority';
+SET @sql_priority = IF(
+  @has_priority = 0,
+  'ALTER TABLE user_fair_prices ADD COLUMN priority VARCHAR(20) NOT NULL DEFAULT ''NORMAL'' AFTER poll_interval_seconds',
+  'SELECT "priority exists"'
+);
+PREPARE stmt_priority FROM @sql_priority;
+EXECUTE stmt_priority;
+DEALLOCATE PREPARE stmt_priority;
+
 INSERT INTO user_fair_prices (
   user_id,
   product_type,
@@ -89,6 +104,7 @@ INSERT INTO user_fair_prices (
   condition_change_candidate_notice_enabled,
   search_keyword,
   poll_interval_seconds,
+  priority,
   force_poll,
   last_poll_requested_at,
   last_polled_at,
@@ -110,6 +126,7 @@ VALUES (
   FALSE,
   'm1맥북에어',
   60,
+  'NORMAL',
   TRUE,
   CURRENT_TIMESTAMP,
   NULL,
@@ -125,6 +142,7 @@ ON DUPLICATE KEY UPDATE
   condition_change_candidate_notice_enabled = VALUES(condition_change_candidate_notice_enabled),
   search_keyword = VALUES(search_keyword),
   poll_interval_seconds = VALUES(poll_interval_seconds),
+  priority = VALUES(priority),
   force_poll = VALUES(force_poll),
   last_poll_requested_at = VALUES(last_poll_requested_at),
   last_polled_at = VALUES(last_polled_at),

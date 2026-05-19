@@ -50,6 +50,22 @@ PREPARE stmt FROM @force_poll_sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+SET @has_priority = (
+  SELECT COUNT(*)
+  FROM information_schema.columns
+  WHERE table_schema = @schema_name
+    AND table_name = 'user_fair_prices'
+    AND column_name = 'priority'
+);
+SET @priority_sql = IF(
+  @has_priority > 0,
+  'SELECT ''priority already exists''',
+  'ALTER TABLE user_fair_prices ADD COLUMN priority VARCHAR(20) NOT NULL DEFAULT ''NORMAL'' AFTER poll_interval_seconds'
+);
+PREPARE stmt FROM @priority_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 SET @has_last_poll_requested_at = (
   SELECT COUNT(*)
   FROM information_schema.columns
@@ -126,6 +142,13 @@ WHERE search_keyword IS NULL OR TRIM(search_keyword) = '';
 UPDATE user_fair_prices
 SET poll_interval_seconds = 60
 WHERE poll_interval_seconds IS NULL OR poll_interval_seconds <= 0;
+
+UPDATE user_fair_prices
+SET priority = CASE
+  WHEN UPPER(TRIM(priority)) = 'FAST' THEN 'FAST'
+  WHEN UPPER(TRIM(priority)) = 'LOW' THEN 'LOW'
+  ELSE 'NORMAL'
+END;
 
 UPDATE user_fair_prices
 SET

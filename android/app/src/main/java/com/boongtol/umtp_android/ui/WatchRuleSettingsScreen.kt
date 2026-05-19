@@ -103,6 +103,7 @@ fun WatchRuleSettingsScreen(
     var fairPriceText by remember { mutableStateOf("") }
     var targetPriceText by remember { mutableStateOf("") }
     var enabled by remember { mutableStateOf(true) }
+    var watchPriority by remember { mutableStateOf(WATCH_PRIORITY_NORMAL) }
 
     val fairPrice = fairPriceText.toIntOrNull()
     val targetPrice = targetPriceText.toIntOrNull()
@@ -250,6 +251,21 @@ fun WatchRuleSettingsScreen(
             Text("이 조건으로 감시하기")
             Switch(checked = enabled, onCheckedChange = { enabled = it })
         }
+        Text("알림 속도", style = MaterialTheme.typography.labelLarge)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(WATCH_PRIORITY_UI_OPTIONS) { option ->
+                FilterChip(
+                    selected = watchPriority == option.value,
+                    onClick = { watchPriority = option.value },
+                    label = { Text(option.label) }
+                )
+            }
+        }
+        Text(
+            WATCH_PRIORITY_UI_OPTIONS.firstOrNull { it.value == watchPriority }?.description
+                ?: "일반적인 속도",
+            style = MaterialTheme.typography.bodySmall
+        )
 
         Button(
             onClick = {
@@ -264,6 +280,7 @@ fun WatchRuleSettingsScreen(
                         search_keyword = searchKeyword.trim().ifEmpty { null },
                         enabled = enabled,
                         poll_interval_seconds = DEFAULT_POLL_INTERVAL_SECONDS,
+                        priority = watchPriority,
                         target_price_krw = targetPrice,
                         fair_price_krw = fairPrice,
                     )

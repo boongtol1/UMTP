@@ -62,6 +62,7 @@ data class UserFairPriceItem(
     val recommended_search_keyword: String? = null,
     val effective_search_keyword: String? = null,
     val poll_interval_seconds: Int? = null,
+    val priority: String? = null,
     val force_poll: Boolean? = null,
     val last_polled_at: String? = null,
     val last_poll_requested_at: String? = null,
@@ -92,7 +93,8 @@ data class UserFairPriceUpsertRequest(
     val enabled: Boolean,
     val condition_change_candidate_notice_enabled: Boolean = false,
     val search_keyword: String? = null,
-    val poll_interval_seconds: Int = 60
+    val poll_interval_seconds: Int = 60,
+    val priority: String = "NORMAL"
 )
 
 data class UserFairPriceUpsertResponse(

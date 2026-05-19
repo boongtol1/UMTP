@@ -10,6 +10,7 @@ data class WatchRuleUpsertRequest(
     val search_keyword: String?,
     val enabled: Boolean,
     val poll_interval_seconds: Int,
+    val priority: String = "NORMAL",
     val target_price_krw: Int?,
     val fair_price_krw: Int?
 )
@@ -53,6 +54,7 @@ data class WatchRuleItem(
     val enabled: Boolean? = null,
     val force_poll: Boolean? = null,
     val poll_interval_seconds: Int? = null,
+    val priority: String? = null,
     val target_price_krw: Int? = null,
     val fair_price_krw: Int? = null,
     val alert_drop_rate_percent: Double? = null,

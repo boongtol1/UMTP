@@ -33,7 +33,7 @@ fun RamSsdSettingsScreen(
     refreshingRuleIds: Set<Long>,
     ruleRefreshStatusMessages: Map<Long, String>,
     ruleLastRefreshLabels: Map<Long, String>,
-    onSave: (MacBookAirUnit, Int, Int, String, Boolean, Boolean, String?, Int?) -> Unit,
+    onSave: (MacBookAirUnit, Int, Int, String, Boolean, Boolean, String?, String, Int?) -> Unit,
     onRefreshRule: (Long) -> Unit,
     onBack: () -> Unit
 ) {
@@ -144,7 +144,7 @@ fun RamSsdSettingsScreen(
                         } else {
                             null
                         },
-                        onSave = { fairPrice, desiredPrice, alertPriceDirection, enabled, conditionChangeCandidateNoticeEnabled, searchKeyword, boundPrice ->
+                        onSave = { fairPrice, desiredPrice, alertPriceDirection, enabled, conditionChangeCandidateNoticeEnabled, searchKeyword, priority, boundPrice ->
                             onSave(
                                 unit,
                                 fairPrice,
@@ -153,6 +153,7 @@ fun RamSsdSettingsScreen(
                                 enabled,
                                 conditionChangeCandidateNoticeEnabled,
                                 searchKeyword,
+                                priority,
                                 boundPrice,
                             )
                         }
