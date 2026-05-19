@@ -19,6 +19,19 @@ from src.notification_worker import (  # noqa: E402
 
 
 class NotificationWorkerTest(unittest.TestCase):
+    def test_build_telegram_message_defaults_source_to_joongna(self):
+        message = _build_telegram_message(
+            {
+                "url": "https://web.joongna.com/product/999",
+                "price_krw": 500000,
+                "fair_price_krw": 550000,
+                "target_price_krw": 600000,
+            }
+        )
+
+        self.assertIn("출처\njoongna", message)
+        self.assertNotIn("출처\n정보 없음", message)
+
     def test_list_alert_events_rejects_invalid_is_read_filter(self):
         with self.assertRaises(ValueError):
             list_alert_events_for_user("boongtol", is_read="invalid-filter")

@@ -18,14 +18,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -34,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.boongtol.umtp_android.network.AlertItem
+import com.boongtol.umtp_android.network.TradeTypeFlags
 
 @Composable
 fun ReadAlertArchiveScreen(
@@ -43,6 +50,21 @@ fun ReadAlertArchiveScreen(
     onRefresh: () -> Unit,
 ) {
     val context = LocalContext.current
+    var selectedAlert by remember { mutableStateOf<AlertItem?>(null) }
+
+    if (selectedAlert != null) {
+        ReadAlertArchiveDetailScreen(
+            alert = selectedAlert!!,
+            onBack = { selectedAlert = null },
+            onOpenUrl = { alert ->
+                val url = resolveReadArchiveUrl(alert)
+                if (!url.isNullOrBlank()) {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                }
+            },
+        )
+        return
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -129,12 +151,7 @@ fun ReadAlertArchiveScreen(
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    val url = resolveReadArchiveUrl(alert)
-                                    if (!url.isNullOrBlank()) {
-                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                    }
-                                },
+                                .clickable { selectedAlert = alert },
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                             elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
                         ) {
@@ -148,7 +165,7 @@ fun ReadAlertArchiveScreen(
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "가격: ${formatReadArchiveKrw(alert.listing_price_krw)}",
+                                    text = "가격: ${formatKrwDisplay(alert.listing_price_krw)}",
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                                 Text(
@@ -164,6 +181,81 @@ fun ReadAlertArchiveScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadAlertArchiveDetailScreen(
+    alert: AlertItem,
+    onBack: () -> Unit,
+    onOpenUrl: (AlertItem) -> Unit,
+) {
+    val resolvedUrl = resolveReadArchiveUrl(alert)
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "읽음 알림 상세",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "목록으로",
+                modifier = Modifier.clickable { onBack() },
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item {
+                Text(
+                    text = alert.title?.ifBlank { "제목 없음" } ?: "제목 없음",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            items(buildReadArchiveDetailRows(alert, resolvedUrl)) { row ->
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = row.first,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                    )
+                    Text(
+                        text = row.second,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = { onOpenUrl(alert) },
+                    enabled = !resolvedUrl.isNullOrBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("매물 보러가기")
                 }
             }
         }
@@ -188,6 +280,123 @@ private fun buildReadArchiveSpecSummary(alert: AlertItem): String {
     return tokens.joinToString(" · ")
 }
 
+private fun buildReadArchiveDetailRows(alert: AlertItem, resolvedUrl: String?): List<Pair<String, String>> {
+    val riskLabel = resolveReadArchiveRiskLabel(alert)
+    val riskKeywordsText = resolveReadArchiveRiskKeywordsText(alert)
+    val tradeFlagsText = resolveReadArchiveTradeFlagsText(alert.trade_type_flags)
+
+    return listOf(
+        "출처" to (alert.source?.takeIf { it.isNotBlank() } ?: "정보 없음"),
+        "URL" to (resolvedUrl ?: "URL 정보 없음"),
+        "대표 이미지" to (alert.listing_image_url?.takeIf { it.isNotBlank() } ?: "이미지 없음"),
+        "제품 분류" to (alert.product_type?.takeIf { it.isNotBlank() } ?: "분류 정보 없음"),
+        "칩" to (alert.chip?.takeIf { it.isNotBlank() } ?: "정보 없음"),
+        "화면 크기" to (if ((alert.screen_inch ?: 0) > 0) "${alert.screen_inch}인치" else "정보 없음"),
+        "RAM" to (if ((alert.ram_gb ?: 0) > 0) "${alert.ram_gb}GB" else "정보 없음"),
+        "SSD" to (if ((alert.ssd_gb ?: 0) > 0) "${alert.ssd_gb}GB" else "정보 없음"),
+        "등록 가격" to formatKrwDisplay(alert.listing_price_krw),
+        "내가 생각한 시장가" to formatKrwDisplay(alert.user_market_price_krw ?: alert.fair_price_krw),
+        "알림 기준 가격" to formatKrwDisplay(alert.alert_target_price_krw),
+        "시장가와의 차이" to formatPercentDisplay(alert.price_gap_percent ?: alert.diff_ratio),
+        "차이율 계산식" to "(내가 생각한 시장가 - 등록 가격) / 내가 생각한 시장가 × 100",
+        "알림 조건" to resolveReadArchiveConditionLabel(alert),
+        "위험도" to riskLabel,
+        "위험 점수" to (alert.risk_score?.toString() ?: "정보 없음"),
+        "위험 키워드" to riskKeywordsText,
+        "본문 내용" to resolveReadArchiveBodyText(alert),
+        "분석 시각" to (alert.analyzed_at ?: alert.created_at ?: "분석 시각 정보 없음"),
+        "교환/나눔/의심" to tradeFlagsText,
+        "특이사항" to resolveReadArchiveSpecialNotesText(riskLabel, riskKeywordsText, tradeFlagsText),
+    )
+}
+
+private fun resolveReadArchiveConditionLabel(alert: AlertItem): String {
+    val explicit = alert.alert_condition_label?.takeIf { it.isNotBlank() }
+    if (explicit != null) {
+        return explicit
+    }
+    return if ((alert.alert_price_direction ?: "").uppercase() == "ABOVE_OR_EQUAL") {
+        "이 가격 이상이면 알림"
+    } else {
+        "이 가격 이하이면 알림"
+    }
+}
+
+private fun resolveReadArchiveRiskLabel(alert: AlertItem): String {
+    val explicit = alert.formatted_risk_label?.takeIf { it.isNotBlank() }
+    if (explicit != null) {
+        return explicit
+    }
+    return when ((alert.risk_level ?: "").uppercase()) {
+        "LOW", "NONE" -> "낮음"
+        "MEDIUM" -> "주의"
+        "HIGH", "EXCLUDE" -> "위험"
+        else -> "정보 없음"
+    }
+}
+
+private fun resolveReadArchiveRiskKeywordsText(alert: AlertItem): String {
+    val keywords = alert.risk_keywords ?: emptyList()
+    if (keywords.isEmpty()) {
+        return "특이사항 없음"
+    }
+    return keywords.joinToString(", ")
+}
+
+private fun resolveReadArchiveBodyText(alert: AlertItem): String {
+    val body = alert.body_text?.trim()
+    if (!body.isNullOrEmpty()) {
+        return body
+    }
+    val excerpt = alert.body_excerpt?.trim()
+    if (!excerpt.isNullOrEmpty()) {
+        return excerpt
+    }
+    return "본문 내용 없음"
+}
+
+private fun resolveReadArchiveTradeFlagsText(flags: TradeTypeFlags?): String {
+    if (flags == null) {
+        return "정보 없음"
+    }
+
+    val labels = mutableListOf<String>()
+    if (flags.is_exchange) {
+        labels += "교환"
+    }
+    if (flags.is_free) {
+        labels += "나눔"
+    }
+    if (flags.is_suspicious) {
+        labels += "허위/의심"
+    }
+    if (labels.isEmpty()) {
+        return "특이사항 없음"
+    }
+    return labels.joinToString(", ")
+}
+
+private fun resolveReadArchiveSpecialNotesText(
+    riskLabel: String,
+    riskKeywordsText: String,
+    tradeFlagsText: String,
+): String {
+    val notes = mutableListOf<String>()
+    if (riskLabel == "주의" || riskLabel == "위험") {
+        notes += "위험도 $riskLabel"
+    }
+    if (tradeFlagsText != "특이사항 없음" && tradeFlagsText != "정보 없음") {
+        notes += "거래 유형: $tradeFlagsText"
+    }
+    if (riskKeywordsText != "특이사항 없음") {
+        notes += "위험 키워드: $riskKeywordsText"
+    }
+    if (notes.isEmpty()) {
+        return "특이사항 없음"
+    }
+    return notes.joinToString(" / ")
+}
+
 private fun chipSortGroupOrder(chip: String): Int {
     return when (chip.uppercase()) {
         "M1" -> 1
@@ -206,11 +415,4 @@ private fun screenSortGroupOrder(screen: String): Int {
     } else {
         screen.toIntOrNull() ?: 50
     }
-}
-
-private fun formatReadArchiveKrw(value: Int?): String {
-    if (value == null) {
-        return "정보 없음"
-    }
-    return "${String.format("%,d", value)}원"
 }

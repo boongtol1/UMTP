@@ -526,6 +526,209 @@ def _fetch_latest_log_details(cursor, *, user_id, url):
     return row
 
 
+def _fetch_analysis_job_details(cursor, *, analysis_job_id):
+    normalized_analysis_job_id = _safe_int(analysis_job_id)
+    if normalized_analysis_job_id is None:
+        return {}
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                source,
+                url,
+                title,
+                price_krw,
+                sort_date,
+                created_at
+            FROM analysis_jobs
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (normalized_analysis_job_id,),
+        )
+    except Exception as exc:
+        lowered_exc = str(exc).lower()
+        if "unknown column" in lowered_exc or "doesn't exist" in lowered_exc:
+            return {}
+        raise
+
+    row = cursor.fetchone()
+    if not row:
+        return {}
+    return row
+
+
+def _fetch_listing_result_details(cursor, *, analysis_job_id):
+    normalized_analysis_job_id = _safe_int(analysis_job_id)
+    if normalized_analysis_job_id is None:
+        return {}
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                product_type,
+                chip,
+                screen_inch,
+                ram_gb,
+                ssd_gb,
+                body_text,
+                created_at
+            FROM listing_analysis_results
+            WHERE analysis_job_id = %s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (normalized_analysis_job_id,),
+        )
+    except Exception as exc:
+        lowered_exc = str(exc).lower()
+        if "unknown column" in lowered_exc or "doesn't exist" in lowered_exc:
+            return {}
+        raise
+
+    row = cursor.fetchone()
+    if not row:
+        return {}
+    return row
+
+
+def _apply_missing_text_field(alert, key, *candidates):
+    if _normalize_optional_text(alert.get(key)) is not None:
+        return
+    for candidate in candidates:
+        normalized = _normalize_optional_text(candidate)
+        if normalized is not None:
+            alert[key] = normalized
+            return
+
+
+def _apply_missing_int_field(alert, key, *candidates, allow_zero=False):
+    existing = _safe_int(alert.get(key))
+    if existing is not None and (allow_zero or existing > 0):
+        return
+
+    for candidate in candidates:
+        parsed = _safe_int(candidate)
+        if parsed is None:
+            continue
+        if not allow_zero and parsed <= 0:
+            continue
+        alert[key] = parsed
+        return
+
+
+def _enrich_alert_for_display(alert):
+    if not isinstance(alert, dict):
+        return
+
+    normalized_user_id = _normalize_optional_text(alert.get("user_id"))
+    normalized_url = _normalize_optional_text(alert.get("url"))
+    normalized_analysis_job_id = _safe_int(alert.get("analysis_job_id"))
+    if normalized_user_id is None:
+        return
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        analysis_job_detail = {}
+        listing_result_detail = {}
+        log_detail = {}
+
+        if normalized_analysis_job_id is not None:
+            analysis_job_detail = _fetch_analysis_job_details(
+                cursor,
+                analysis_job_id=normalized_analysis_job_id,
+            )
+            listing_result_detail = _fetch_listing_result_details(
+                cursor,
+                analysis_job_id=normalized_analysis_job_id,
+            )
+
+        if normalized_url is not None:
+            log_detail = _fetch_latest_log_details(
+                cursor,
+                user_id=normalized_user_id,
+                url=normalized_url,
+            )
+
+        _apply_missing_text_field(
+            alert,
+            "source",
+            analysis_job_detail.get("source"),
+            log_detail.get("source"),
+            "joongna",
+        )
+        _apply_missing_text_field(alert, "url", analysis_job_detail.get("url"))
+        _apply_missing_text_field(alert, "product_url", alert.get("url"), analysis_job_detail.get("url"))
+        _apply_missing_text_field(alert, "title", analysis_job_detail.get("title"))
+        _apply_missing_int_field(alert, "price_krw", analysis_job_detail.get("price_krw"), allow_zero=True)
+
+        _apply_missing_text_field(
+            alert,
+            "product_type",
+            listing_result_detail.get("product_type"),
+            log_detail.get("product_type"),
+        )
+        _apply_missing_text_field(
+            alert,
+            "chip",
+            listing_result_detail.get("chip"),
+            log_detail.get("chip"),
+        )
+        _apply_missing_int_field(
+            alert,
+            "screen_inch",
+            listing_result_detail.get("screen_inch"),
+            log_detail.get("screen_inch"),
+        )
+        _apply_missing_int_field(
+            alert,
+            "ram_gb",
+            listing_result_detail.get("ram_gb"),
+            log_detail.get("ram_gb"),
+        )
+        _apply_missing_int_field(
+            alert,
+            "ssd_gb",
+            listing_result_detail.get("ssd_gb"),
+            log_detail.get("ssd_gb"),
+        )
+
+        _apply_missing_text_field(
+            alert,
+            "body_text",
+            listing_result_detail.get("body_text"),
+            log_detail.get("body_text"),
+        )
+        _apply_missing_text_field(alert, "body_excerpt", alert.get("body_text"))
+
+        _apply_missing_text_field(alert, "risk_level", log_detail.get("risk_level"))
+        _apply_missing_int_field(alert, "risk_score", log_detail.get("risk_score"), allow_zero=True)
+        _apply_missing_text_field(alert, "risk_keywords", log_detail.get("risk_keywords"))
+        if alert.get("is_exchange_post") is None and log_detail.get("is_exchange_post") is not None:
+            alert["is_exchange_post"] = bool(log_detail.get("is_exchange_post"))
+        _apply_missing_text_field(alert, "trade_type", log_detail.get("trade_type"))
+
+        _apply_missing_text_field(
+            alert,
+            "analyzed_at",
+            alert.get("analyzed_at"),
+            log_detail.get("created_at"),
+            listing_result_detail.get("created_at"),
+            analysis_job_detail.get("created_at"),
+        )
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
 def _fetch_alert_rows(cursor, *, normalized_user_id, normalized_limit, normalized_is_read):
     read_filter_clause = ""
     if normalized_is_read == "0":
@@ -877,7 +1080,7 @@ def _send_fcm_to_user(user_id, alert):
 
 
 def _build_telegram_message(alert):
-    source = _normalize_optional_text(alert.get("source")) or "정보 없음"
+    source = _normalize_optional_text(alert.get("source")) or "joongna"
     url = _resolve_url_for_display(alert)
     listing_image_url = _normalize_optional_text(alert.get("listing_image_url")) or "이미지 없음"
     listing_price_krw = _safe_int(alert.get("price_krw"))
@@ -1176,6 +1379,12 @@ def send_alert_event(alert):
             "status": "app_only",
             "reason": "alerts_disabled",
         }
+
+    try:
+        _enrich_alert_for_display(alert)
+    except Exception:
+        # Alert delivery should continue even when best-effort display enrichment fails.
+        pass
 
     push_result = _send_fcm_to_user(user_id, alert)
     push_sent = int(push_result.get("sent", 0))
