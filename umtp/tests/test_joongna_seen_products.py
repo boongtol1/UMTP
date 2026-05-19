@@ -8,7 +8,12 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.joongna_seen_products import should_analyze_seen_product, upsert_seen_product_observation
+from src.joongna_seen_products import (
+    detect_listing_change,
+    should_analyze_listing,
+    should_analyze_seen_product,
+    upsert_seen_product_observation,
+)
 
 
 class _FakeCursor:
@@ -20,6 +25,15 @@ class _FakeCursor:
 
 
 class ShouldAnalyzeSeenProductTest(unittest.TestCase):
+    def test_should_analyze_listing_matrix(self):
+        self.assertTrue(should_analyze_listing("new"))
+        self.assertTrue(should_analyze_listing("sort_date_changed"))
+        self.assertTrue(should_analyze_listing("price_changed"))
+        self.assertTrue(should_analyze_listing("title_changed"))
+        self.assertTrue(should_analyze_listing("refresh_key_changed"))
+        self.assertTrue(should_analyze_listing("body_maybe_changed"))
+        self.assertFalse(should_analyze_listing("unchanged"))
+
     def test_new_product(self):
         should_analyze, reason = should_analyze_seen_product(
             None,
@@ -30,7 +44,7 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
             },
         )
         self.assertTrue(should_analyze)
-        self.assertEqual(reason, "new_product")
+        self.assertEqual(reason, "new")
 
     def test_price_changed(self):
         should_analyze, reason = should_analyze_seen_product(
@@ -151,7 +165,24 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
             },
         )
         self.assertTrue(should_analyze)
-        self.assertEqual(reason, "sort_date_changed")
+        self.assertEqual(reason, "title_changed")
+
+    def test_detect_listing_change_body_hash_changed(self):
+        reason = detect_listing_change(
+            {
+                "last_title": "M3 맥북에어 8/256",
+                "last_price_krw": 1200000,
+                "last_refresh_key": "rk-1",
+                "body_hash": "abc",
+            },
+            {
+                "title": "M3 맥북에어 8/256",
+                "price": 1200000,
+                "refresh_key": "rk-1",
+                "body_hash": "xyz",
+            },
+        )
+        self.assertEqual(reason, "body_maybe_changed")
 
     def test_upsert_seen_product_tracks_sort_date_columns(self):
         cursor = _FakeCursor()

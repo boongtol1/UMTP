@@ -4,8 +4,9 @@ try:
     from src.db import get_connection
     from src.joongna_search_client import search_joongna_products
     from src.joongna_seen_products import (
+        detect_listing_change,
         get_seen_product,
-        should_analyze_seen_product,
+        should_analyze_listing,
         upsert_seen_product_observation,
     )
     from src.listing_analysis_pipeline import (
@@ -20,8 +21,9 @@ except ModuleNotFoundError:
     from db import get_connection
     from joongna_search_client import search_joongna_products
     from joongna_seen_products import (
+        detect_listing_change,
         get_seen_product,
-        should_analyze_seen_product,
+        should_analyze_listing,
         upsert_seen_product_observation,
     )
     from listing_analysis_pipeline import (
@@ -124,6 +126,12 @@ def _build_poll_stats(search_words):
         "external_api_calls": 0,
         "matched_watch_rules": 0,
         "created_alert_count": 0,
+        "fetched_count": 0,
+        "new_count": 0,
+        "changed_count": 0,
+        "unchanged_skipped_count": 0,
+        "analyzed_count": 0,
+        "alert_created_count": 0,
         "fetched_items": 0,
         "new_items": 0,
         "skipped_no_seq": 0,
@@ -314,6 +322,7 @@ def create_alerts_for_matches(matches, *, stats):
             stats["analysis_jobs_created"] += len(created_jobs)
             stats["analysis_jobs_skipped_duplicate"] += len(skipped_jobs)
             stats["created_alert_count"] += len(created_jobs)
+            stats["alert_created_count"] += len(created_jobs)
         except Exception as exc:
             stats["db_errors"] += 1
             product_id = observed_product.get("product_id")
@@ -322,6 +331,56 @@ def create_alerts_for_matches(matches, *, stats):
                 f"[{search_keyword}] analysis job enqueue 실패 "
                 f"(seq={product_id}): {exc}"
             )
+
+
+def upsert_seen_product_and_detect_change(
+    cursor,
+    observed_product,
+    *,
+    seen_db_ready,
+    on_db_error,
+):
+    if not seen_db_ready or cursor is None:
+        return {
+            "should_analyze": True,
+            "change_reason": "new",
+            "existing": None,
+        }
+
+    existing = get_seen_product(cursor, observed_product.get("product_id"))
+    change_reason = detect_listing_change(existing, observed_product)
+    should_analyze = should_analyze_listing(change_reason)
+    status = "analysis_pending" if should_analyze else "unchanged"
+
+    try:
+        upsert_seen_product_observation(
+            cursor,
+            observed_product,
+            change_reason=change_reason,
+            status=status,
+        )
+    except Exception as exc:
+        on_db_error(exc)
+        return {
+            "should_analyze": True,
+            "change_reason": "new",
+            "existing": existing,
+        }
+
+    return {
+        "should_analyze": should_analyze,
+        "change_reason": change_reason,
+        "existing": existing,
+    }
+
+
+def analyze_only_changed_listings(matches):
+    changed_matches = []
+    for match in matches or []:
+        change_reason = match.get("change_reason")
+        if should_analyze_listing(change_reason):
+            changed_matches.append(match)
+    return changed_matches
 
 
 def _build_keyword_targets_from_user_fair_prices(watch_rules):
@@ -481,6 +540,7 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                     items = fetch_result.get("items") or []
                     search_completed_for_word = True
                     stats["fetched_items"] += len(items)
+                    stats["fetched_count"] += len(items)
                     print(f"[{source}/{search_word}] 검색 결과 {len(items)}건")
                 except Exception as exc:
                     stats["search_errors"] += 1
@@ -503,40 +563,39 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                     if product_state is not None:
                         return product_state
 
-                    should_analyze = True
-                    change_reason = "new_product"
+                    def _handle_seen_db_error(exc):
+                        nonlocal seen_db_ready
+                        stats["db_errors"] += 1
+                        try:
+                            connection.rollback()
+                        except Exception:
+                            pass
+                        print(f"[{search_word}] seen 관측 처리 실패 (seq={product_id}): {exc}")
+                        disable_seen_db(str(exc))
 
                     if seen_db_ready and cursor is not None:
                         try:
-                            existing = get_seen_product(cursor, product_id)
-                            should_analyze, change_reason = should_analyze_seen_product(
-                                existing,
-                                observed_product,
-                            )
-                        except Exception as exc:
-                            stats["db_errors"] += 1
-                            print(f"[{search_word}] seen 조회 실패 (seq={product_id}): {exc}")
-                            disable_seen_db(str(exc))
-                            should_analyze = True
-                            change_reason = "new_product"
-
-                    if seen_db_ready and cursor is not None:
-                        try:
-                            upsert_seen_product_observation(
+                            detected = upsert_seen_product_and_detect_change(
                                 cursor,
                                 observed_product,
-                                change_reason=change_reason,
-                                status="analysis_pending" if should_analyze else "unchanged",
+                                seen_db_ready=seen_db_ready,
+                                on_db_error=_handle_seen_db_error,
                             )
                             connection.commit()
                         except Exception as exc:
-                            stats["db_errors"] += 1
-                            try:
-                                connection.rollback()
-                            except Exception:
-                                pass
-                            print(f"[{search_word}] seen 관측 저장 실패 (seq={product_id}): {exc}")
-                            disable_seen_db(str(exc))
+                            _handle_seen_db_error(exc)
+                            detected = {
+                                "should_analyze": True,
+                                "change_reason": "new",
+                            }
+                    else:
+                        detected = {
+                            "should_analyze": True,
+                            "change_reason": "new",
+                        }
+
+                    should_analyze = bool(detected.get("should_analyze"))
+                    change_reason = detected.get("change_reason") or "new"
 
                     product_state = {
                         "should_analyze": should_analyze,
@@ -544,11 +603,19 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                     }
                     processed_products[product_id] = product_state
 
+                    if change_reason == "new":
+                        stats["new_count"] += 1
+                    elif change_reason == "unchanged":
+                        stats["unchanged_skipped_count"] += 1
+                    else:
+                        stats["changed_count"] += 1
+
                     if not should_analyze:
                         stats["skipped_seen"] += 1
                         print(f"[{search_word}] 상태 동일(글로벌) (seq={product_id}, reason={change_reason})")
 
                     if should_analyze:
+                        stats["analyzed_count"] += 1
                         print(
                             f"[{search_word}] 분석 큐 등록 대상 감지 "
                             f"(seq={product_id}, reason={change_reason})"
@@ -566,7 +633,8 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                     targets_for_word,
                     stats=stats,
                 )
-                create_alerts_for_matches(matches, stats=stats)
+                changed_only_matches = analyze_only_changed_listings(matches)
+                create_alerts_for_matches(changed_only_matches, stats=stats)
             finally:
                 if search_completed_for_word:
                     mark_related_rules_polled(targets_for_word)
@@ -590,6 +658,15 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
         f"external_calls={stats.get('external_api_calls', 0)} "
         f"matched_watch_rules={stats.get('matched_watch_rules', 0)} "
         f"created_alerts={stats.get('created_alert_count', 0)}"
+    )
+    print(
+        "[polling] change_summary "
+        f"fetched_count={stats.get('fetched_count', 0)} "
+        f"new_count={stats.get('new_count', 0)} "
+        f"changed_count={stats.get('changed_count', 0)} "
+        f"unchanged_skipped_count={stats.get('unchanged_skipped_count', 0)} "
+        f"analyzed_count={stats.get('analyzed_count', 0)} "
+        f"alert_created_count={stats.get('alert_created_count', 0)}"
     )
 
     return stats

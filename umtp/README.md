@@ -124,6 +124,8 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.7 polling 규칙: 검색어는 후보 수집용이며 최종 알림 대상은 스펙 파싱 결과 + 사용자 설정 공정가/알림기준으로 결정합니다.
 - 1.8 진행 현황: polling은 감지된 매물을 `analysis_jobs`에 enqueue하고, analysis worker가 pending job을 처리해 `listing_analysis_results` 및 `alert_events`를 생성합니다.
 - 1.8 polling 구조: 같은 `source + search_keyword`는 같은 polling cycle에서 외부 Search API를 1회만 호출하고, 결과를 저장한 뒤 여러 설정(`user_fair_prices`)은 저장 결과를 내부 매칭으로 공유합니다.
+- 1.8 변경 감지 스킵 구조: `joongna_seen_products`의 이전 관측값과 현재 관측값을 비교해 `new/sort_date_changed/price_changed/title_changed/refresh_key_changed/body_maybe_changed`만 분석 큐로 보내고, `unchanged`는 분석을 스킵합니다.
+- 1.8 변경 로그: polling 요약에 `fetched_count/new_count/changed_count/unchanged_skipped_count/analyzed_count/alert_created_count`를 함께 기록합니다.
 - 1.8 알림 구조: notification worker가 `alert_events` pending을 읽어 Telegram 전송(`sent`) 또는 앱 피드 전용 상태(`app_only`)로 처리합니다.
 - 1.8 운영 구조: polling은 enqueue 전용이며, analysis는 `run_analysis_worker_umtp.py`, Telegram 전송은 `run_notification_worker_umtp.py` 전용 worker로 처리합니다.
 - identity 정책: `analysis_jobs`/`alert_events`의 중복 기준은 `(user_id, watch_rule_id, product_id, sort_date)`입니다.

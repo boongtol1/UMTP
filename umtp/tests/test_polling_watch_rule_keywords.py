@@ -175,7 +175,7 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         enqueue_args = mock_enqueue.call_args.args
         self.assertEqual(enqueue_args[0].get("product_id"), 1001)
         self.assertEqual(len(enqueue_args[1]), 2)
-        self.assertEqual(enqueue_args[2], "new_product")
+        self.assertEqual(enqueue_args[2], "new")
         self.assertEqual(mock_mark_polled.call_count, 2)
         self.assertEqual(stats.get("analysis_jobs_created"), 2)
         self.assertEqual(stats.get("analysis_jobs_processed"), 0)
@@ -286,8 +286,9 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
                             with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
                                 stats = poll_once()
 
-        self.assertEqual(mock_enqueue.call_count, 1)
-        self.assertEqual(mock_enqueue.call_args.args[2], "unchanged")
+        self.assertEqual(mock_enqueue.call_count, 0)
+        self.assertEqual(stats.get("unchanged_skipped_count"), 1)
+        self.assertEqual(stats.get("alert_created_count"), 0)
         self.assertEqual(stats.get("skipped_seen"), 1)
 
     def test_poll_once_excludes_listings_before_saved_at(self):
@@ -490,6 +491,51 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
 
         self.assertEqual(mock_enqueue.call_count, 1)
         self.assertEqual(stats.get("analysis_jobs_created"), 0)
+        self.assertEqual(stats.get("analysis_jobs_skipped_duplicate"), 1)
+        self.assertEqual(stats.get("created_alert_count"), 0)
+
+    def test_poll_once_changed_listing_keeps_duplicate_skip_count(self):
+        due_rules = [
+            {
+                "id": 41,
+                "user_id": "user_dup",
+                "search_keyword": "변경 중복 키워드",
+                "saved_at": "2026-05-15 10:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 5050,
+            "product_id": 5050,
+            "title": "맥북에어 M2 16GB 512GB",
+            "price": 1500000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-new",
+            "product_url": "https://web.joongna.com/product/5050",
+            "image_url": "",
+        }
+        existing_seen = {
+            "seq": 5050,
+            "last_title": "맥북에어 M2 16GB 512GB",
+            "last_price_krw": 1500000,
+            "last_refresh_key": "rk-old",
+            "last_sort_date": "2026-05-15 12:28:52",
+        }
+
+        with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+            with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                with patch("src.joongna_polling_service.get_connection", return_value=_FakeConnection()):
+                    with patch("src.joongna_polling_service.get_seen_product", return_value=existing_seen):
+                        with patch("src.joongna_polling_service.upsert_seen_product_observation"):
+                            with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                                mock_enqueue.return_value = {
+                                    "ok": True,
+                                    "created_jobs": [],
+                                    "skipped_jobs": [{"reason": "duplicate_identity_job"}],
+                                }
+                                stats = poll_once()
+
+        self.assertEqual(mock_enqueue.call_count, 1)
+        self.assertEqual(stats.get("changed_count"), 1)
         self.assertEqual(stats.get("analysis_jobs_skipped_duplicate"), 1)
         self.assertEqual(stats.get("created_alert_count"), 0)
 

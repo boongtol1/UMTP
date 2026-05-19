@@ -1,8 +1,26 @@
 import re
+import hashlib
+import json
 from datetime import datetime, timezone
 
 
 UNKNOWN_COLUMN_ERRNO = 1054
+CHANGE_REASON_NEW = "new"
+CHANGE_REASON_SORT_DATE_CHANGED = "sort_date_changed"
+CHANGE_REASON_PRICE_CHANGED = "price_changed"
+CHANGE_REASON_TITLE_CHANGED = "title_changed"
+CHANGE_REASON_BODY_MAYBE_CHANGED = "body_maybe_changed"
+CHANGE_REASON_REFRESH_KEY_CHANGED = "refresh_key_changed"
+CHANGE_REASON_UNCHANGED = "unchanged"
+
+ANALYZE_REQUIRED_CHANGE_REASONS = {
+    CHANGE_REASON_NEW,
+    CHANGE_REASON_SORT_DATE_CHANGED,
+    CHANGE_REASON_PRICE_CHANGED,
+    CHANGE_REASON_TITLE_CHANGED,
+    CHANGE_REASON_BODY_MAYBE_CHANGED,
+    CHANGE_REASON_REFRESH_KEY_CHANGED,
+}
 
 
 def _coerce_product_id(product_id):
@@ -92,6 +110,48 @@ def _coerce_sort_date_datetime(value):
         parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
 
     return parsed.replace(microsecond=0)
+
+
+def _build_stable_hash(value):
+    if value is None:
+        return None
+
+    if isinstance(value, str):
+        payload = value.strip()
+    else:
+        try:
+            payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        except Exception:
+            payload = str(value).strip()
+
+    if not payload:
+        return None
+
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _resolve_body_fingerprint(record):
+    if not isinstance(record, dict):
+        return None
+
+    for key in ("body_hash", "content_hash", "self_check_hash", "body_fingerprint", "content_fingerprint"):
+        hashed_value = _coerce_text(record.get(key))
+        if hashed_value:
+            return hashed_value
+
+    if record.get("self_check_fields") is not None:
+        hashed_self_check = _build_stable_hash(record.get("self_check_fields"))
+        if hashed_self_check:
+            return hashed_self_check
+
+    for key in ("body_text", "body", "content", "description"):
+        raw_text = _coerce_text(record.get(key))
+        if raw_text:
+            hashed_text = _build_stable_hash(raw_text)
+            if hashed_text:
+                return hashed_text
+
+    return None
 
 
 def _is_unknown_column_error(exc):
@@ -192,33 +252,50 @@ def get_seen_product(cursor, product_id):
     }
 
 
-def should_analyze_seen_product(existing, current):
-    if not existing:
-        return True, "new_product"
+def detect_listing_change(previous, current):
+    if not previous:
+        return CHANGE_REASON_NEW
 
-    current_sort_date = _coerce_sort_date_datetime(current.get("sort_date"))
-    existing_sort_date = _coerce_sort_date_datetime(existing.get("last_sort_date"))
-    if current_sort_date is not None and existing_sort_date is not None and current_sort_date != existing_sort_date:
-        return True, "sort_date_changed"
-
-    current_refresh_key = _coerce_text(current.get("refresh_key"))
-    existing_refresh_key = _coerce_text(existing.get("last_refresh_key"))
-    if current_refresh_key and current_refresh_key != existing_refresh_key:
-        return True, "refresh_key_changed"
-
-    existing_title = _coerce_text(existing.get("last_title")) or _coerce_text(existing.get("title"))
+    previous_title = _coerce_text(previous.get("last_title")) or _coerce_text(previous.get("title"))
     current_title = _coerce_text(current.get("title"))
-    if existing_title != current_title:
-        return True, "title_changed"
+    if previous_title != current_title:
+        return CHANGE_REASON_TITLE_CHANGED
 
-    existing_price = _coerce_price(existing.get("last_price_krw"))
-    if existing_price is None:
-        existing_price = _coerce_price(existing.get("price"))
+    previous_price = _coerce_price(previous.get("last_price_krw"))
+    if previous_price is None:
+        previous_price = _coerce_price(previous.get("price"))
     current_price = _coerce_price(current.get("price"))
-    if existing_price != current_price:
-        return True, "price_changed"
+    if previous_price != current_price:
+        return CHANGE_REASON_PRICE_CHANGED
 
-    return False, "unchanged"
+    previous_sort_date = _coerce_sort_date_datetime(previous.get("last_sort_date"))
+    current_sort_date = _coerce_sort_date_datetime(current.get("sort_date"))
+    if previous_sort_date is not None and current_sort_date is not None and previous_sort_date != current_sort_date:
+        return CHANGE_REASON_SORT_DATE_CHANGED
+
+    previous_refresh_key = _coerce_text(previous.get("last_refresh_key"))
+    current_refresh_key = _coerce_text(current.get("refresh_key"))
+    if current_refresh_key and current_refresh_key != previous_refresh_key:
+        return CHANGE_REASON_REFRESH_KEY_CHANGED
+
+    previous_body_fingerprint = _resolve_body_fingerprint(previous)
+    current_body_fingerprint = _resolve_body_fingerprint(current)
+    if previous_body_fingerprint and current_body_fingerprint and previous_body_fingerprint != current_body_fingerprint:
+        return CHANGE_REASON_BODY_MAYBE_CHANGED
+
+    return CHANGE_REASON_UNCHANGED
+
+
+def should_analyze_listing(change_reason):
+    normalized_reason = _coerce_text(change_reason)
+    if normalized_reason == "new_product":
+        normalized_reason = CHANGE_REASON_NEW
+    return normalized_reason in ANALYZE_REQUIRED_CHANGE_REASONS
+
+
+def should_analyze_seen_product(existing, current):
+    change_reason = detect_listing_change(existing, current)
+    return should_analyze_listing(change_reason), change_reason
 
 
 def upsert_seen_product_observation(

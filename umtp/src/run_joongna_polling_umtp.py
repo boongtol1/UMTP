@@ -70,6 +70,14 @@ def _print_summary(stats):
         f"matched_watch_rules={stats.get('matched_watch_rules', 0)}, "
         f"created_alerts={stats.get('created_alert_count', 0)}"
     )
+    print(
+        f"fetched_count={stats.get('fetched_count', 0)}, "
+        f"new_count={stats.get('new_count', 0)}, "
+        f"changed_count={stats.get('changed_count', 0)}, "
+        f"unchanged_skipped_count={stats.get('unchanged_skipped_count', 0)}, "
+        f"analyzed_count={stats.get('analyzed_count', 0)}, "
+        f"alert_created_count={stats.get('alert_created_count', 0)}"
+    )
 
 
 def main():
