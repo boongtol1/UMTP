@@ -539,6 +539,137 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(stats.get("analysis_jobs_skipped_duplicate"), 1)
         self.assertEqual(stats.get("created_alert_count"), 0)
 
+    def test_poll_once_tracks_inserted_count_for_new_listing(self):
+        due_rules = [
+            {
+                "id": 51,
+                "user_id": "user_new",
+                "search_keyword": "신규 키워드",
+                "saved_at": "2026-05-15 10:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 6060,
+            "product_id": 6060,
+            "title": "맥북에어 M2 8GB 256GB",
+            "price": 990000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-6060",
+            "product_url": "https://web.joongna.com/product/6060",
+            "image_url": "",
+        }
+
+        with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+            with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                with patch("src.joongna_polling_service.get_connection", return_value=_FakeConnection()):
+                    with patch("src.joongna_polling_service.get_seen_product", return_value=None):
+                        with patch("src.joongna_polling_service.upsert_seen_product_observation"):
+                            with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                                mock_enqueue.return_value = {
+                                    "ok": True,
+                                    "created_jobs": [],
+                                    "skipped_jobs": [],
+                                }
+                                stats = poll_once()
+
+        self.assertEqual(stats.get("inserted_count"), 1)
+        self.assertEqual(stats.get("updated_count"), 0)
+        self.assertEqual(stats.get("unchanged_write_skipped_count"), 0)
+        self.assertEqual(stats.get("write_skip_ratio"), 0.0)
+        self.assertEqual(stats.get("changed_reason_counts", {}).get("new"), 1)
+
+    def test_poll_once_tracks_updated_count_for_changed_listing(self):
+        due_rules = [
+            {
+                "id": 52,
+                "user_id": "user_changed",
+                "search_keyword": "변경 키워드",
+                "saved_at": "2026-05-15 10:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 7070,
+            "product_id": 7070,
+            "title": "맥북에어 M2 16GB 512GB",
+            "price": 1350000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-7070-new",
+            "product_url": "https://web.joongna.com/product/7070",
+            "image_url": "",
+        }
+        existing_seen = {
+            "seq": 7070,
+            "last_title": "맥북에어 M2 16GB 512GB",
+            "last_price_krw": 1350000,
+            "last_refresh_key": "rk-7070-old",
+            "last_sort_date": "2026-05-15 12:28:52",
+        }
+
+        with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+            with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                with patch("src.joongna_polling_service.get_connection", return_value=_FakeConnection()):
+                    with patch("src.joongna_polling_service.get_seen_product", return_value=existing_seen):
+                        with patch("src.joongna_polling_service.upsert_seen_product_observation"):
+                            with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                                mock_enqueue.return_value = {
+                                    "ok": True,
+                                    "created_jobs": [],
+                                    "skipped_jobs": [],
+                                }
+                                stats = poll_once()
+
+        self.assertEqual(stats.get("inserted_count"), 0)
+        self.assertEqual(stats.get("updated_count"), 1)
+        self.assertEqual(stats.get("changed_reason_counts", {}).get("refresh_key_changed"), 1)
+
+    def test_poll_once_unchanged_listing_skips_db_write(self):
+        due_rules = [
+            {
+                "id": 53,
+                "user_id": "user_same",
+                "search_keyword": "동일 키워드",
+                "saved_at": "2026-05-15 10:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 8080,
+            "product_id": 8080,
+            "title": "맥북에어 M3 8GB 256GB",
+            "price": 1190000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-8080",
+            "product_url": "https://web.joongna.com/product/8080",
+            "image_url": "",
+        }
+        existing_seen = {
+            "seq": 8080,
+            "last_title": "맥북에어 M3 8GB 256GB",
+            "last_price_krw": 1190000,
+            "last_refresh_key": "rk-8080",
+            "last_sort_date": "2026-05-15 12:28:52",
+        }
+
+        with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+            with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                with patch("src.joongna_polling_service.get_connection", return_value=_FakeConnection()):
+                    with patch("src.joongna_polling_service.get_seen_product", return_value=existing_seen):
+                        with patch("src.joongna_polling_service.upsert_seen_product_observation") as mock_upsert:
+                            with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                                mock_enqueue.return_value = {
+                                    "ok": True,
+                                    "created_jobs": [],
+                                    "skipped_jobs": [],
+                                }
+                                stats = poll_once()
+
+        self.assertEqual(mock_upsert.call_count, 0)
+        self.assertEqual(mock_enqueue.call_count, 0)
+        self.assertEqual(stats.get("inserted_count"), 0)
+        self.assertEqual(stats.get("updated_count"), 0)
+        self.assertEqual(stats.get("unchanged_write_skipped_count"), 1)
+        self.assertEqual(stats.get("write_skip_ratio"), 1.0)
+        self.assertEqual(stats.get("changed_reason_counts", {}).get("unchanged"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

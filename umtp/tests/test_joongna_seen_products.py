@@ -10,8 +10,11 @@ if PROJECT_ROOT not in sys.path:
 
 from src.joongna_seen_products import (
     detect_listing_change,
+    normalize_price_for_compare,
+    normalize_title_for_compare,
     should_analyze_listing,
     should_analyze_seen_product,
+    should_write_seen_product,
     upsert_seen_product_observation,
 )
 
@@ -33,6 +36,15 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
         self.assertTrue(should_analyze_listing("refresh_key_changed"))
         self.assertTrue(should_analyze_listing("body_maybe_changed"))
         self.assertFalse(should_analyze_listing("unchanged"))
+
+    def test_should_write_seen_product_matrix(self):
+        self.assertTrue(should_write_seen_product("new"))
+        self.assertTrue(should_write_seen_product("sort_date_changed"))
+        self.assertTrue(should_write_seen_product("price_changed"))
+        self.assertTrue(should_write_seen_product("title_changed"))
+        self.assertTrue(should_write_seen_product("refresh_key_changed"))
+        self.assertTrue(should_write_seen_product("body_maybe_changed"))
+        self.assertFalse(should_write_seen_product("unchanged"))
 
     def test_new_product(self):
         should_analyze, reason = should_analyze_seen_product(
@@ -227,6 +239,44 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
         )
         self.assertFalse(should_analyze)
         self.assertEqual(reason, "unchanged")
+
+    def test_title_whitespace_only_difference_is_unchanged(self):
+        should_analyze, reason = should_analyze_seen_product(
+            {
+                "last_title": "M2  맥북에어   16/512",
+                "last_price_krw": 1200000,
+                "last_refresh_key": "rk-1",
+            },
+            {
+                "title": "m2 맥북에어 16/512",
+                "price": 1200000,
+                "refresh_key": "rk-1",
+            },
+        )
+        self.assertFalse(should_analyze)
+        self.assertEqual(reason, "unchanged")
+
+    def test_price_string_and_number_same_value_is_unchanged(self):
+        should_analyze, reason = should_analyze_seen_product(
+            {
+                "last_title": "M2 맥북에어 16/512",
+                "last_price_krw": "1,200,000원",
+                "last_refresh_key": "rk-1",
+            },
+            {
+                "title": "M2 맥북에어 16/512",
+                "price": 1200000,
+                "refresh_key": "rk-1",
+            },
+        )
+        self.assertFalse(should_analyze)
+        self.assertEqual(reason, "unchanged")
+
+    def test_normalize_title_for_compare(self):
+        self.assertEqual(normalize_title_for_compare("  M2   MacBook Air  "), "m2macbookair")
+
+    def test_normalize_price_for_compare(self):
+        self.assertEqual(normalize_price_for_compare("1,230,000원"), 1230000)
 
 
 if __name__ == "__main__":

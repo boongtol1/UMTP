@@ -125,6 +125,8 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.8 진행 현황: polling은 감지된 매물을 `analysis_jobs`에 enqueue하고, analysis worker가 pending job을 처리해 `listing_analysis_results` 및 `alert_events`를 생성합니다.
 - 1.8 polling 구조: 같은 `source + search_keyword`는 같은 polling cycle에서 외부 Search API를 1회만 호출하고, 결과를 저장한 뒤 여러 설정(`user_fair_prices`)은 저장 결과를 내부 매칭으로 공유합니다.
 - 1.8 변경 감지 스킵 구조: `joongna_seen_products`의 이전 관측값과 현재 관측값을 비교해 `new/sort_date_changed/price_changed/title_changed/refresh_key_changed/body_maybe_changed`만 분석 큐로 보내고, `unchanged`는 분석을 스킵합니다.
+- 1.8 DB write 최소화 구조: `unchanged` 매물은 `joongna_seen_products` UPDATE/UPSERT를 수행하지 않고 write를 스킵합니다.
+- 1.8 저장 정책: 변경 감지 후 `new/changed` 매물만 DB에 저장하고, 완전히 동일한 매물은 저장하지 않습니다.
 - 1.8 lazy detail fetch 구조: analysis worker는 모든 매물의 상세본문을 조회하지 않고, `new/저가 후보/제목 파싱 실패/제품명만 있고 스펙 부족` 후보에만 상세조회(fetch_html)를 수행합니다.
 - 1.8 알림 속도(priority) 구조: watch_rule(`user_fair_prices`)마다 `priority=FAST/NORMAL/LOW`를 저장하고, polling scheduler는 priority 기준 기본 주기(45/180/600초)에 ±20% jitter를 적용해 다음 조회 시점을 계산합니다.
 - 1.8 변경 로그: polling 요약에 `fetched_count/new_count/changed_count/unchanged_skipped_count/analyzed_count/alert_created_count`를 함께 기록합니다.

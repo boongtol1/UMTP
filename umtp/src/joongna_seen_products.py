@@ -21,6 +21,7 @@ ANALYZE_REQUIRED_CHANGE_REASONS = {
     CHANGE_REASON_BODY_MAYBE_CHANGED,
     CHANGE_REASON_REFRESH_KEY_CHANGED,
 }
+WRITE_REQUIRED_CHANGE_REASONS = set(ANALYZE_REQUIRED_CHANGE_REASONS)
 
 
 def _coerce_product_id(product_id):
@@ -71,6 +72,20 @@ def _coerce_text(value):
 
     cleaned = str(value).strip()
     return cleaned or None
+
+
+def normalize_title_for_compare(title):
+    normalized_title = _coerce_text(title)
+    if normalized_title is None:
+        return None
+
+    normalized_title = normalized_title.lower()
+    normalized_title = re.sub(r"\s+", "", normalized_title)
+    return normalized_title or None
+
+
+def normalize_price_for_compare(price):
+    return _coerce_price(price)
 
 
 def _coerce_sort_date_datetime(value):
@@ -256,15 +271,17 @@ def detect_listing_change(previous, current):
     if not previous:
         return CHANGE_REASON_NEW
 
-    previous_title = _coerce_text(previous.get("last_title")) or _coerce_text(previous.get("title"))
-    current_title = _coerce_text(current.get("title"))
+    previous_title = normalize_title_for_compare(previous.get("last_title"))
+    if previous_title is None:
+        previous_title = normalize_title_for_compare(previous.get("title"))
+    current_title = normalize_title_for_compare(current.get("title"))
     if previous_title != current_title:
         return CHANGE_REASON_TITLE_CHANGED
 
-    previous_price = _coerce_price(previous.get("last_price_krw"))
+    previous_price = normalize_price_for_compare(previous.get("last_price_krw"))
     if previous_price is None:
-        previous_price = _coerce_price(previous.get("price"))
-    current_price = _coerce_price(current.get("price"))
+        previous_price = normalize_price_for_compare(previous.get("price"))
+    current_price = normalize_price_for_compare(current.get("price"))
     if previous_price != current_price:
         return CHANGE_REASON_PRICE_CHANGED
 
@@ -275,7 +292,7 @@ def detect_listing_change(previous, current):
 
     previous_refresh_key = _coerce_text(previous.get("last_refresh_key"))
     current_refresh_key = _coerce_text(current.get("refresh_key"))
-    if current_refresh_key and current_refresh_key != previous_refresh_key:
+    if previous_refresh_key != current_refresh_key:
         return CHANGE_REASON_REFRESH_KEY_CHANGED
 
     previous_body_fingerprint = _resolve_body_fingerprint(previous)
@@ -291,6 +308,13 @@ def should_analyze_listing(change_reason):
     if normalized_reason == "new_product":
         normalized_reason = CHANGE_REASON_NEW
     return normalized_reason in ANALYZE_REQUIRED_CHANGE_REASONS
+
+
+def should_write_seen_product(change_reason):
+    normalized_reason = _coerce_text(change_reason)
+    if normalized_reason == "new_product":
+        normalized_reason = CHANGE_REASON_NEW
+    return normalized_reason in WRITE_REQUIRED_CHANGE_REASONS
 
 
 def should_analyze_seen_product(existing, current):

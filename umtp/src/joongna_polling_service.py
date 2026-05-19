@@ -7,6 +7,7 @@ try:
         detect_listing_change,
         get_seen_product,
         should_analyze_listing,
+        should_write_seen_product,
         upsert_seen_product_observation,
     )
     from src.listing_analysis_pipeline import (
@@ -24,6 +25,7 @@ except ModuleNotFoundError:
         detect_listing_change,
         get_seen_product,
         should_analyze_listing,
+        should_write_seen_product,
         upsert_seen_product_observation,
     )
     from listing_analysis_pipeline import (
@@ -130,6 +132,11 @@ def _build_poll_stats(search_words):
         "new_count": 0,
         "changed_count": 0,
         "unchanged_skipped_count": 0,
+        "inserted_count": 0,
+        "updated_count": 0,
+        "unchanged_write_skipped_count": 0,
+        "write_skip_ratio": 0.0,
+        "changed_reason_counts": {},
         "analyzed_count": 0,
         "alert_created_count": 0,
         "fetched_items": 0,
@@ -149,6 +156,15 @@ def _build_poll_stats(search_words):
         "analysis_jobs_processed": 0,
         "analysis_jobs_process_failed": 0,
     }
+
+
+def _increment_changed_reason_count(stats, change_reason):
+    reason = change_reason or "unknown"
+    reason_counts = stats.get("changed_reason_counts")
+    if not isinstance(reason_counts, dict):
+        reason_counts = {}
+        stats["changed_reason_counts"] = reason_counts
+    reason_counts[reason] = reason_counts.get(reason, 0) + 1
 
 
 def _build_observed_product(search_word, item):
@@ -345,12 +361,24 @@ def upsert_seen_product_and_detect_change(
             "should_analyze": True,
             "change_reason": "new",
             "existing": None,
+            "write_performed": False,
+            "write_action": "skipped_no_db",
         }
 
     existing = get_seen_product(cursor, observed_product.get("product_id"))
     change_reason = detect_listing_change(existing, observed_product)
     should_analyze = should_analyze_listing(change_reason)
     status = "analysis_pending" if should_analyze else "unchanged"
+    should_write = should_write_seen_product(change_reason)
+
+    if not should_write:
+        return {
+            "should_analyze": should_analyze,
+            "change_reason": change_reason,
+            "existing": existing,
+            "write_performed": False,
+            "write_action": "skipped",
+        }
 
     try:
         upsert_seen_product_observation(
@@ -365,12 +393,17 @@ def upsert_seen_product_and_detect_change(
             "should_analyze": True,
             "change_reason": "new",
             "existing": existing,
+            "write_performed": False,
+            "write_action": "failed",
         }
 
+    write_action = "inserted" if change_reason == "new" else "updated"
     return {
         "should_analyze": should_analyze,
         "change_reason": change_reason,
         "existing": existing,
+        "write_performed": True,
+        "write_action": write_action,
     }
 
 
@@ -581,27 +614,42 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                                 seen_db_ready=seen_db_ready,
                                 on_db_error=_handle_seen_db_error,
                             )
-                            connection.commit()
+                            if detected.get("write_performed"):
+                                connection.commit()
                         except Exception as exc:
                             _handle_seen_db_error(exc)
                             detected = {
                                 "should_analyze": True,
                                 "change_reason": "new",
+                                "write_performed": False,
+                                "write_action": "failed",
                             }
                     else:
                         detected = {
                             "should_analyze": True,
                             "change_reason": "new",
+                            "write_performed": False,
+                            "write_action": "skipped_no_db",
                         }
 
                     should_analyze = bool(detected.get("should_analyze"))
                     change_reason = detected.get("change_reason") or "new"
+                    write_action = detected.get("write_action") or "unknown"
 
                     product_state = {
                         "should_analyze": should_analyze,
                         "change_reason": change_reason,
+                        "write_action": write_action,
                     }
                     processed_products[product_id] = product_state
+                    _increment_changed_reason_count(stats, change_reason)
+
+                    if write_action == "inserted":
+                        stats["inserted_count"] += 1
+                    elif write_action == "updated":
+                        stats["updated_count"] += 1
+                    elif write_action == "skipped" and change_reason == "unchanged":
+                        stats["unchanged_write_skipped_count"] += 1
 
                     if change_reason == "new":
                         stats["new_count"] += 1
@@ -652,6 +700,19 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
     if inline_process:
         print("[polling] inline_process=True 요청이 들어왔지만 enqueue-only 정책으로 무시합니다.")
 
+    total_write_decisions = (
+        stats.get("inserted_count", 0)
+        + stats.get("updated_count", 0)
+        + stats.get("unchanged_write_skipped_count", 0)
+    )
+    if total_write_decisions > 0:
+        stats["write_skip_ratio"] = round(
+            stats.get("unchanged_write_skipped_count", 0) / float(total_write_decisions),
+            4,
+        )
+    else:
+        stats["write_skip_ratio"] = 0.0
+
     print(
         "[polling] group_summary "
         f"groups={stats.get('polling_group_count', 0)} "
@@ -665,6 +726,11 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
         f"new_count={stats.get('new_count', 0)} "
         f"changed_count={stats.get('changed_count', 0)} "
         f"unchanged_skipped_count={stats.get('unchanged_skipped_count', 0)} "
+        f"inserted_count={stats.get('inserted_count', 0)} "
+        f"updated_count={stats.get('updated_count', 0)} "
+        f"unchanged_write_skipped_count={stats.get('unchanged_write_skipped_count', 0)} "
+        f"write_skip_ratio={stats.get('write_skip_ratio', 0.0)} "
+        f"changed_reason_counts={stats.get('changed_reason_counts', {})} "
         f"analyzed_count={stats.get('analyzed_count', 0)} "
         f"alert_created_count={stats.get('alert_created_count', 0)}"
     )
