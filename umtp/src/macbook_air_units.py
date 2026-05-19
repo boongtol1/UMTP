@@ -1,3 +1,11 @@
+MACBOOK_AIR_PRODUCT_TYPE = "MacBook Air"
+MAC_MINI_PRODUCT_TYPE = "Mac mini"
+PRODUCT_TYPE = MACBOOK_AIR_PRODUCT_TYPE
+SUPPORTED_PRODUCT_TYPES = (
+    MACBOOK_AIR_PRODUCT_TYPE,
+    MAC_MINI_PRODUCT_TYPE,
+)
+
 VALID_MACBOOK_AIR_UNITS = {
     "M1": {
         13: {
@@ -47,7 +55,43 @@ VALID_MACBOOK_AIR_UNITS = {
     },
 }
 
-PRODUCT_TYPE = "MacBook Air"
+VALID_MAC_MINI_UNITS = {
+    "M1": {
+        0: {
+            "ram_gb": [8, 16],
+            "ssd_gb": [256, 512, 1024, 2048],
+        }
+    },
+    "M2": {
+        0: {
+            "ram_gb": [8, 16, 24],
+            "ssd_gb": [256, 512, 1024, 2048],
+        }
+    },
+    "M3": {
+        0: {
+            "ram_gb": [8, 16, 24],
+            "ssd_gb": [256, 512, 1024, 2048],
+        }
+    },
+    "M4": {
+        0: {
+            "ram_gb": [16, 24, 32],
+            "ssd_gb": [256, 512, 1024, 2048],
+        }
+    },
+    "M5": {
+        0: {
+            "ram_gb": [16, 24, 32],
+            "ssd_gb": [512, 1024, 2048, 4096],
+        }
+    },
+}
+
+VALID_SILICON_UNITS_BY_PRODUCT = {
+    MACBOOK_AIR_PRODUCT_TYPE: VALID_MACBOOK_AIR_UNITS,
+    MAC_MINI_PRODUCT_TYPE: VALID_MAC_MINI_UNITS,
+}
 BASE_FAIR_PRICE_KRW = 550000
 
 CHIP_PRICE_OFFSETS = {
@@ -79,20 +123,36 @@ SSD_PRICE_OFFSETS = {
 }
 
 
-def is_valid_macbook_air_unit(chip, screen_inch, ram_gb, ssd_gb):
-    chip_units = VALID_MACBOOK_AIR_UNITS.get(chip)
-    if not chip_units:
+def is_supported_product_type(product_type):
+    return product_type in VALID_SILICON_UNITS_BY_PRODUCT
+
+
+def _get_product_units(product_type):
+    return VALID_SILICON_UNITS_BY_PRODUCT.get(product_type)
+
+
+def is_valid_silicon_unit(product_type, chip, screen_inch, ram_gb, ssd_gb):
+    product_units = _get_product_units(product_type)
+    if not isinstance(product_units, dict):
+        return False
+
+    chip_units = product_units.get(chip)
+    if not isinstance(chip_units, dict):
         return False
 
     screen_units = chip_units.get(screen_inch)
-    if not screen_units:
+    if not isinstance(screen_units, dict):
         return False
 
     return ram_gb in screen_units["ram_gb"] and ssd_gb in screen_units["ssd_gb"]
 
 
-def get_macbook_air_base_spec(chip, screen_inch):
-    chip_units = VALID_MACBOOK_AIR_UNITS.get(chip)
+def get_product_base_spec(product_type, chip, screen_inch):
+    product_units = _get_product_units(product_type)
+    if not isinstance(product_units, dict):
+        return None
+
+    chip_units = product_units.get(chip)
     if not isinstance(chip_units, dict):
         return None
 
@@ -107,24 +167,25 @@ def get_macbook_air_base_spec(chip, screen_inch):
     if not ram_options or not ssd_options:
         return None
 
-    min_ram_gb = min(ram_options)
-    min_ssd_gb = min(ssd_options)
-
     return {
-        "ram_gb": min_ram_gb,
-        "ssd_gb": min_ssd_gb,
+        "ram_gb": min(ram_options),
+        "ssd_gb": min(ssd_options),
     }
 
 
-def generate_macbook_air_units():
+def generate_units_for_product(product_type):
+    product_units = _get_product_units(product_type)
+    if not isinstance(product_units, dict):
+        return []
+
     units = []
-    for chip, screen_map in VALID_MACBOOK_AIR_UNITS.items():
+    for chip, screen_map in product_units.items():
         for screen_inch, options in screen_map.items():
             for ram_gb in options["ram_gb"]:
                 for ssd_gb in options["ssd_gb"]:
                     units.append(
                         {
-                            "product_type": PRODUCT_TYPE,
+                            "product_type": product_type,
                             "chip": chip,
                             "screen_inch": screen_inch,
                             "ram_gb": ram_gb,
@@ -132,6 +193,31 @@ def generate_macbook_air_units():
                         }
                     )
     return units
+
+
+def generate_supported_units():
+    units = []
+    for product_type in SUPPORTED_PRODUCT_TYPES:
+        units.extend(generate_units_for_product(product_type))
+    return units
+
+
+def is_valid_macbook_air_unit(chip, screen_inch, ram_gb, ssd_gb):
+    return is_valid_silicon_unit(
+        MACBOOK_AIR_PRODUCT_TYPE,
+        chip,
+        screen_inch,
+        ram_gb,
+        ssd_gb,
+    )
+
+
+def get_macbook_air_base_spec(chip, screen_inch):
+    return get_product_base_spec(MACBOOK_AIR_PRODUCT_TYPE, chip, screen_inch)
+
+
+def generate_macbook_air_units():
+    return generate_units_for_product(MACBOOK_AIR_PRODUCT_TYPE)
 
 
 def calculate_rule_based_fair_price(chip, screen_inch, ram_gb, ssd_gb):

@@ -13,7 +13,13 @@ from src.alert_price_direction import (
     normalize_alert_price_direction,
 )
 from src.db import get_connection
-from src.macbook_air_units import PRODUCT_TYPE, generate_macbook_air_units, is_valid_macbook_air_unit
+from src.macbook_air_units import (
+    SUPPORTED_PRODUCT_TYPES,
+    generate_supported_units,
+    is_valid_macbook_air_unit,
+    is_supported_product_type,
+    is_valid_silicon_unit,
+)
 from src.search_keyword_utils import (
     build_default_keyword_for_watch_rule,
     build_recommended_keywords_for_spec,
@@ -29,6 +35,7 @@ CHIP_SORT_ORDER = {
     "M4": 4,
     "M5": 5,
 }
+PRODUCT_TYPE_SORT_ORDER = {name: index for index, name in enumerate(SUPPORTED_PRODUCT_TYPES, start=1)}
 DEFAULT_SYSTEM_ALERT_DROP_RATE_PERCENT = 20.0
 DEFAULT_POLL_INTERVAL_SECONDS = 60
 DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED = False
@@ -826,10 +833,11 @@ def _ensure_users_device_id_column(cursor):
 
 
 def get_all_macbook_air_units_sorted():
-    units = generate_macbook_air_units()
+    units = generate_supported_units()
     return sorted(
         units,
         key=lambda unit: (
+            PRODUCT_TYPE_SORT_ORDER.get(unit.get("product_type"), 999),
             CHIP_SORT_ORDER.get(unit.get("chip"), 999),
             unit.get("screen_inch"),
             unit.get("ram_gb"),
@@ -839,13 +847,14 @@ def get_all_macbook_air_units_sorted():
 
 
 def _fetch_system_defaults_map(cursor):
+    product_type_placeholders = ", ".join(["%s"] * len(SUPPORTED_PRODUCT_TYPES))
     cursor.execute(
-        """
+        f"""
         SELECT product_type, chip, screen_inch, ram_gb, ssd_gb, fair_price_krw
         FROM mac_fair_prices
-        WHERE product_type = %s
+        WHERE product_type IN ({product_type_placeholders})
         """,
-        (PRODUCT_TYPE,),
+        tuple(SUPPORTED_PRODUCT_TYPES),
     )
     rows = cursor.fetchall() or []
     system_map = {}
@@ -862,20 +871,23 @@ def _fetch_system_defaults_map(cursor):
 
 
 def _fetch_user_overrides_map(cursor, user_id):
+    product_type_placeholders = ", ".join(["%s"] * len(SUPPORTED_PRODUCT_TYPES))
+    query_params = (user_id, *SUPPORTED_PRODUCT_TYPES)
+
     try:
         cursor.execute(
-                """
-                SELECT id, product_type, chip, screen_inch, ram_gb, ssd_gb,
-                   fair_price_krw, alert_drop_rate_percent, target_buy_price_krw, alert_price_direction,
-                   min_price_krw, max_price_krw,
-                   enabled, condition_change_candidate_notice_enabled,
-                   search_keyword, force_poll, poll_interval_seconds,
-                   last_polled_at, last_poll_requested_at, saved_at
-                FROM user_fair_prices
-                WHERE user_id = %s
-              AND product_type = %s
+            f"""
+            SELECT id, product_type, chip, screen_inch, ram_gb, ssd_gb,
+               fair_price_krw, alert_drop_rate_percent, target_buy_price_krw, alert_price_direction,
+               min_price_krw, max_price_krw,
+               enabled, condition_change_candidate_notice_enabled,
+               search_keyword, force_poll, poll_interval_seconds,
+               last_polled_at, last_poll_requested_at, saved_at
+            FROM user_fair_prices
+            WHERE user_id = %s
+              AND product_type IN ({product_type_placeholders})
             """,
-            (user_id, PRODUCT_TYPE),
+            query_params,
         )
         rows = cursor.fetchall() or []
     except Exception as exc:
@@ -883,16 +895,16 @@ def _fetch_user_overrides_map(cursor, user_id):
             raise
         try:
             cursor.execute(
-                """
+                f"""
                 SELECT id, product_type, chip, screen_inch, ram_gb, ssd_gb,
                    fair_price_krw, alert_drop_rate_percent, target_buy_price_krw, alert_price_direction, enabled,
                    search_keyword, force_poll, poll_interval_seconds,
                    last_polled_at, last_poll_requested_at
                 FROM user_fair_prices
                 WHERE user_id = %s
-              AND product_type = %s
-            """,
-                (user_id, PRODUCT_TYPE),
+                  AND product_type IN ({product_type_placeholders})
+                """,
+                query_params,
             )
             rows = cursor.fetchall() or []
             for row in rows:
@@ -908,30 +920,31 @@ def _fetch_user_overrides_map(cursor, user_id):
                 raise
             try:
                 cursor.execute(
-                """
-                SELECT id, product_type, chip, screen_inch, ram_gb, ssd_gb,
-                       fair_price_krw, alert_drop_rate_percent, enabled
-                FROM user_fair_prices
-                WHERE user_id = %s
-                  AND product_type = %s
-                """,
-                (user_id, PRODUCT_TYPE),
-            )
+                    f"""
+                    SELECT id, product_type, chip, screen_inch, ram_gb, ssd_gb,
+                           fair_price_krw, alert_drop_rate_percent, enabled
+                    FROM user_fair_prices
+                    WHERE user_id = %s
+                      AND product_type IN ({product_type_placeholders})
+                    """,
+                    query_params,
+                )
                 rows = cursor.fetchall() or []
             except Exception as second_exc:
                 if "unknown column" not in str(second_exc).lower() or "enabled" not in str(second_exc).lower():
                     raise
                 cursor.execute(
-                    """
+                    f"""
                     SELECT id, product_type, chip, screen_inch, ram_gb, ssd_gb,
                            fair_price_krw, alert_drop_rate_percent
                     FROM user_fair_prices
                     WHERE user_id = %s
-                      AND product_type = %s
+                      AND product_type IN ({product_type_placeholders})
                     """,
-                    (user_id, PRODUCT_TYPE),
+                    query_params,
                 )
                 rows = cursor.fetchall() or []
+
             for row in rows:
                 row.setdefault("enabled", True)
                 row.setdefault(
@@ -1331,7 +1344,7 @@ def upsert_user_fair_price_setting(
     normalized_product_type = product_type.strip() if isinstance(product_type, str) else ""
     normalized_chip = chip.strip().upper() if isinstance(chip, str) else ""
 
-    if normalized_product_type != PRODUCT_TYPE:
+    if not is_supported_product_type(normalized_product_type):
         return {"ok": False, "reason": "invalid_product_type"}
 
     try:
@@ -1370,10 +1383,14 @@ def upsert_user_fair_price_setting(
     if not isinstance(condition_change_candidate_notice_enabled, bool):
         return {"ok": False, "reason": "invalid_condition_change_candidate_notice_enabled"}
 
-    if not is_valid_macbook_air_unit(
-        normalized_chip, normalized_screen_inch, normalized_ram_gb, normalized_ssd_gb
+    if not is_valid_silicon_unit(
+        normalized_product_type,
+        normalized_chip,
+        normalized_screen_inch,
+        normalized_ram_gb,
+        normalized_ssd_gb,
     ):
-        return {"ok": False, "reason": "invalid_macbook_air_unit"}
+        return {"ok": False, "reason": "invalid_silicon_unit"}
 
     try:
         normalized_poll_interval_seconds = _normalize_poll_interval_seconds(poll_interval_seconds)
