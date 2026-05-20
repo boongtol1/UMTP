@@ -543,6 +543,100 @@ def _is_price_match_for_rule(listing_price_krw, rule_snapshot):
     )
 
 
+def _normalize_drop_percent_for_compare(value):
+    normalized = _safe_float(value)
+    if normalized is None:
+        return None
+    return round(normalized, 4)
+
+
+def _insert_user_fair_price_history_if_changed(
+    cursor,
+    *,
+    user_fair_price_id,
+    user_id,
+    product_type,
+    chip,
+    screen_inch,
+    ram_gb,
+    ssd_gb,
+    old_rule_snapshot,
+    new_rule_snapshot,
+    changed_at,
+):
+    normalized_rule_id = _safe_int(user_fair_price_id)
+    if normalized_rule_id is None or normalized_rule_id <= 0:
+        return {"created": False, "reason": "invalid_user_fair_price_id"}
+    if not isinstance(old_rule_snapshot, dict) or not isinstance(new_rule_snapshot, dict):
+        return {"created": False, "reason": "missing_rule_snapshot"}
+
+    old_fair_price_krw = _safe_int(old_rule_snapshot.get("fair_price_krw"))
+    new_fair_price_krw = _safe_int(new_rule_snapshot.get("fair_price_krw"))
+
+    old_drop_percent = _safe_float(old_rule_snapshot.get("alert_drop_rate_percent"))
+    new_drop_percent = _safe_float(new_rule_snapshot.get("alert_drop_rate_percent"))
+
+    old_desired_price_krw = _safe_int(old_rule_snapshot.get("target_buy_price_krw"))
+    if old_desired_price_krw is None:
+        old_desired_price_krw = compute_target_buy_price_krw(old_fair_price_krw, old_drop_percent)
+    new_desired_price_krw = _safe_int(new_rule_snapshot.get("target_buy_price_krw"))
+    if new_desired_price_krw is None:
+        new_desired_price_krw = compute_target_buy_price_krw(new_fair_price_krw, new_drop_percent)
+
+    fair_changed = old_fair_price_krw != new_fair_price_krw
+    desired_changed = old_desired_price_krw != new_desired_price_krw
+    drop_changed = (
+        _normalize_drop_percent_for_compare(old_drop_percent)
+        != _normalize_drop_percent_for_compare(new_drop_percent)
+    )
+    if not (fair_changed or desired_changed or drop_changed):
+        return {"created": False, "reason": "no_meaningful_change"}
+
+    normalized_changed_at = _coerce_datetime(changed_at) or datetime.now()
+    cursor.execute(
+        """
+        INSERT INTO user_fair_price_history (
+            user_fair_price_id,
+            user_id,
+            product_type,
+            chip,
+            screen_inch,
+            ram_gb,
+            ssd_gb,
+            old_fair_price_krw,
+            new_fair_price_krw,
+            old_desired_price_krw,
+            new_desired_price_krw,
+            old_drop_percent,
+            new_drop_percent,
+            change_type,
+            changed_at
+        )
+        VALUES (
+            %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, 'updated', %s
+        )
+        """,
+        (
+            normalized_rule_id,
+            _safe_text(user_id),
+            _safe_text(product_type),
+            _safe_text(chip),
+            _safe_int(screen_inch),
+            _safe_int(ram_gb),
+            _safe_int(ssd_gb),
+            old_fair_price_krw,
+            new_fair_price_krw,
+            old_desired_price_krw,
+            new_desired_price_krw,
+            old_drop_percent,
+            new_drop_percent,
+            normalized_changed_at,
+        ),
+    )
+    return {"created": True, "reason": "created"}
+
+
 def _fetch_existing_user_fair_price_rule_state(
     cursor,
     *,
@@ -2000,6 +2094,32 @@ def upsert_user_fair_price_setting(
         except Exception as exc:
             if "unknown column" not in str(exc).lower() or "saved_at" not in str(exc).lower():
                 raise
+
+        if rule_id is not None and old_rule_snapshot is not None:
+            try:
+                _insert_user_fair_price_history_if_changed(
+                    cursor,
+                    user_fair_price_id=rule_id,
+                    user_id=normalized_user_id,
+                    product_type=normalized_product_type,
+                    chip=normalized_chip,
+                    screen_inch=normalized_screen_inch,
+                    ram_gb=normalized_ram_gb,
+                    ssd_gb=normalized_ssd_gb,
+                    old_rule_snapshot=old_rule_snapshot,
+                    new_rule_snapshot=new_rule_snapshot,
+                    changed_at=current_saved_at,
+                )
+            except Exception as history_exc:
+                lowered_history_exc = str(history_exc).lower()
+                if "doesn't exist" in lowered_history_exc and "user_fair_price_history" in lowered_history_exc:
+                    logger.warning(
+                        "user_fair_price_history table missing; skip history insert user_id=%s rule_id=%s",
+                        normalized_user_id,
+                        rule_id,
+                    )
+                else:
+                    raise
 
         if (
             previous_saved_at is not None
