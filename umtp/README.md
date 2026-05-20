@@ -978,6 +978,7 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/drop_users_nickname_column.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/add_user_fair_price_settings_columns.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_user_fair_prices_polling_keywords.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_user_fair_prices_search_keyword_format.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/add_user_settings_save_logs.sql
 ```
 
 `sql/add_user_fair_price_settings_columns.sql`은 `enabled`, `updated_at` 컬럼 추가를 시도합니다.
@@ -986,6 +987,7 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_user_fair_prices_search
 MySQL 환경에서 `ADD COLUMN IF NOT EXISTS`가 제한되면, 컬럼 존재 여부를 먼저 확인한 뒤 수동 실행하세요.
 `sql/add_users_device_id_column.sql`은 `users.device_id` 컬럼과 unique index를 안전하게 추가합니다.
 `sql/drop_users_nickname_column.sql`은 users 테이블의 `nickname` 컬럼이 남아 있을 때만 삭제합니다.
+`sql/add_user_settings_save_logs.sql`은 설정 저장 요청/응답/부분실패 정보를 추적하는 `user_settings_save_logs` 테이블을 생성합니다.
 
 #### 2) 실행 방법
 

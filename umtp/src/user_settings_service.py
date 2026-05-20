@@ -1,3 +1,4 @@
+import json
 import logging
 import random
 from datetime import datetime
@@ -54,6 +55,162 @@ WATCH_PRIORITY_BASE_INTERVAL_SECONDS = {
 POLLING_JITTER_RATIO = 0.2
 MIN_POLLING_INTERVAL_SECONDS = 30
 logger = logging.getLogger("umtp.user_settings")
+
+USER_SETTINGS_SAVE_LOG_ERROR_CONDITION_CHANGE_NOTICE_INSERT_FAILED = (
+    "CONDITION_CHANGE_NOTICE_INSERT_FAILED"
+)
+USER_SETTINGS_SAVE_LOG_ERROR_SAVE_FAILED = "USER_SETTINGS_SAVE_FAILED"
+USER_SETTINGS_SAVE_LOG_SENSITIVE_KEYWORDS = (
+    "token",
+    "password",
+    "passwd",
+    "secret",
+    "api_key",
+    "apikey",
+    "authorization",
+    "auth",
+    "credential",
+    "push_token",
+    "fcm_token",
+)
+
+
+def _is_sensitive_log_key(key):
+    normalized = _safe_text(key)
+    if normalized is None:
+        return False
+    lowered = normalized.lower()
+    return any(keyword in lowered for keyword in USER_SETTINGS_SAVE_LOG_SENSITIVE_KEYWORDS)
+
+
+def _mask_sensitive_log_value(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        if len(value) <= 8:
+            return "***"
+        return f"{value[:2]}***{value[-2:]}"
+    return "***"
+
+
+def _sanitize_payload_for_log(payload):
+    if isinstance(payload, dict):
+        sanitized = {}
+        for key, value in payload.items():
+            if _is_sensitive_log_key(key):
+                sanitized[key] = _mask_sensitive_log_value(value)
+            else:
+                sanitized[key] = _sanitize_payload_for_log(value)
+        return sanitized
+
+    if isinstance(payload, list):
+        return [_sanitize_payload_for_log(item) for item in payload]
+
+    if isinstance(payload, tuple):
+        return [_sanitize_payload_for_log(item) for item in payload]
+
+    return payload
+
+
+def _json_default_serializer(value):
+    if isinstance(value, datetime):
+        return value.isoformat(sep=" ")
+    if isinstance(value, Decimal):
+        return float(value)
+    return str(value)
+
+
+def _to_json_text_or_none(value):
+    if value is None:
+        return None
+    return json.dumps(value, ensure_ascii=False, default=_json_default_serializer)
+
+
+def _insert_user_settings_save_log(
+    *,
+    user_id,
+    watch_rule_id,
+    action_type,
+    request_payload,
+    response_payload,
+    success,
+    error_code=None,
+    error_message=None,
+    metadata=None,
+    connection=None,
+    cursor=None,
+    commit=False,
+):
+    normalized_user_id = _safe_text(user_id)
+    normalized_action_type = _safe_text(action_type)
+    if normalized_user_id is None or normalized_action_type is None:
+        return None
+
+    normalized_watch_rule_id = _safe_int_or_none(watch_rule_id)
+    normalized_error_code = _safe_text(error_code)
+    normalized_error_message = _safe_text(error_message)
+    normalized_request_payload = _sanitize_payload_for_log(request_payload)
+    normalized_response_payload = _sanitize_payload_for_log(response_payload)
+    normalized_metadata = _sanitize_payload_for_log(metadata)
+    normalized_success = 1 if bool(success) else 0
+
+    local_connection = None
+    local_cursor = None
+    target_connection = connection
+    target_cursor = cursor
+
+    try:
+        if target_connection is None or target_cursor is None:
+            local_connection = get_connection()
+            target_connection = local_connection
+            target_cursor = target_connection.cursor()
+            commit = True
+
+        target_cursor.execute(
+            """
+            INSERT INTO user_settings_save_logs (
+                user_id,
+                watch_rule_id,
+                action_type,
+                request_json,
+                response_json,
+                success,
+                error_code,
+                error_message,
+                metadata_json
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                normalized_user_id,
+                normalized_watch_rule_id,
+                normalized_action_type,
+                _to_json_text_or_none(normalized_request_payload),
+                _to_json_text_or_none(normalized_response_payload),
+                normalized_success,
+                normalized_error_code,
+                normalized_error_message,
+                _to_json_text_or_none(normalized_metadata),
+            ),
+        )
+        inserted_id = _safe_int_or_none(getattr(target_cursor, "lastrowid", None))
+        if commit and target_connection is not None:
+            target_connection.commit()
+        return inserted_id
+    except Exception:
+        logger.warning(
+            "user-settings save log insert failed user_id=%s watch_rule_id=%s action_type=%s",
+            normalized_user_id,
+            normalized_watch_rule_id,
+            normalized_action_type,
+            exc_info=True,
+        )
+        return None
+    finally:
+        if local_cursor is not None:
+            local_cursor.close()
+        if local_connection is not None and local_connection.is_connected():
+            local_connection.close()
 
 
 def _mask_device_id(device_id):
@@ -2079,8 +2236,28 @@ def upsert_user_fair_price_setting(
     except ValueError as exc:
         return {"ok": False, "reason": str(exc)}
 
+    request_payload = {
+        "user_id": normalized_user_id,
+        "product_type": normalized_product_type,
+        "chip": normalized_chip,
+        "screen_inch": normalized_screen_inch,
+        "ram_gb": normalized_ram_gb,
+        "ssd_gb": normalized_ssd_gb,
+        "fair_price_krw": normalized_fair_price_krw,
+        "alert_drop_rate_percent": normalized_alert_drop_rate_percent,
+        "enabled": enabled,
+        "alert_price_direction": normalized_alert_price_direction,
+        "min_price_krw": normalized_min_price_krw,
+        "max_price_krw": normalized_max_price_krw,
+        "search_keyword": resolved_search_keyword,
+        "poll_interval_seconds": normalized_poll_interval_seconds,
+        "priority": normalized_priority,
+        "condition_change_candidate_notice_enabled": condition_change_candidate_notice_enabled,
+    }
+
     connection = None
     cursor = None
+    save_action_type = "save_user_fair_price"
     immediate_poll_requested = bool(enabled)
     previous_saved_at = None
     current_saved_at = None
@@ -2102,6 +2279,33 @@ def upsert_user_fair_price_setting(
         max_price_krw=normalized_max_price_krw,
         enabled=enabled,
     )
+
+    def _build_save_log_metadata():
+        return {
+            "missed_candidate_count": missed_candidate_count,
+            "condition_change_notice_created": condition_change_notice_created,
+            "condition_change_notice_error": condition_change_notice_error,
+            "previous_saved_at": previous_saved_at,
+            "current_saved_at": current_saved_at,
+        }
+
+    def _log_failed_save_result(reason, *, error_code=None, error_message=None):
+        save_log_id = _insert_user_settings_save_log(
+            user_id=normalized_user_id,
+            watch_rule_id=rule_id,
+            action_type=save_action_type,
+            request_payload=request_payload,
+            response_payload=None,
+            success=False,
+            error_code=error_code or USER_SETTINGS_SAVE_LOG_ERROR_SAVE_FAILED,
+            error_message=error_message or reason,
+            metadata=_build_save_log_metadata(),
+        )
+        result = {"ok": False, "reason": reason}
+        if save_log_id is not None:
+            result["save_log_id"] = save_log_id
+        return result
+
     try:
         connection = get_connection()
         cursor = connection.cursor()
@@ -2118,6 +2322,7 @@ def upsert_user_fair_price_setting(
             previous_saved_at = _coerce_datetime(existing_rule_state.get("previous_saved_at"))
             old_rule_snapshot = existing_rule_state.get("rule_snapshot")
             rule_id = _safe_int(existing_rule_state.get("rule_id"))
+        save_action_type = "update_watch_rule" if rule_id is not None else "create_watch_rule"
 
         try:
             cursor.execute("SELECT CURRENT_TIMESTAMP")
@@ -2486,14 +2691,22 @@ def upsert_user_fair_price_setting(
                 )
                 handled_unknown_column = True
             elif "enabled" in lowered_exc:
-                return {"ok": False, "reason": "missing_enabled_column"}
+                return _log_failed_save_result(
+                    "missing_enabled_column",
+                    error_code=USER_SETTINGS_SAVE_LOG_ERROR_SAVE_FAILED,
+                    error_message=str(exc),
+                )
             if (
                 "search_keyword" in lowered_exc
                 or "poll_interval_seconds" in lowered_exc
                 or "force_poll" in lowered_exc
                 or "priority" in lowered_exc
             ):
-                return {"ok": False, "reason": "missing_polling_columns"}
+                return _log_failed_save_result(
+                    "missing_polling_columns",
+                    error_code=USER_SETTINGS_SAVE_LOG_ERROR_SAVE_FAILED,
+                    error_message=str(exc),
+                )
             if not handled_unknown_column and "alert_price_direction" not in lowered_exc:
                 raise
 
@@ -2687,7 +2900,6 @@ def upsert_user_fair_price_setting(
                     exc_info=True,
                 )
 
-        connection.commit()
         response_message = "사용자 공정가 설정 저장 완료"
         if missed_candidate_count > 0 and condition_change_candidate_notice_enabled:
             if condition_change_notice_created:
@@ -2697,7 +2909,7 @@ def upsert_user_fair_price_setting(
                     "조건 변경 사이 후보는 찾았지만 참고 알림 생성에 실패했어요. 서버 로그를 확인해 주세요."
                 )
 
-        return {
+        response_payload = {
             "ok": True,
             "message": response_message,
             "immediate_poll_requested": immediate_poll_requested,
@@ -2737,6 +2949,59 @@ def upsert_user_fair_price_setting(
                 "priority": normalized_priority,
             },
         }
+        condition_change_notice_attempted = bool(
+            missed_candidate_count > 0 and condition_change_candidate_notice_enabled
+        )
+        condition_change_notice_failed = bool(
+            condition_change_notice_attempted and not condition_change_notice_created
+        )
+        save_log_id = _insert_user_settings_save_log(
+            user_id=normalized_user_id,
+            watch_rule_id=rule_id,
+            action_type=save_action_type,
+            request_payload=request_payload,
+            response_payload=response_payload,
+            success=True,
+            error_code=(
+                USER_SETTINGS_SAVE_LOG_ERROR_CONDITION_CHANGE_NOTICE_INSERT_FAILED
+                if condition_change_notice_failed
+                else None
+            ),
+            error_message=condition_change_notice_error if condition_change_notice_failed else None,
+            metadata=_build_save_log_metadata(),
+            connection=connection,
+            cursor=cursor,
+            commit=False,
+        )
+        if save_log_id is not None:
+            response_payload["save_log_id"] = save_log_id
+
+        connection.commit()
+        return response_payload
+    except Exception as exc:
+        if connection is not None and connection.is_connected():
+            try:
+                connection.rollback()
+            except Exception:
+                logger.warning(
+                    "user-fair-price upsert rollback failed user_id=%s rule_id=%s",
+                    normalized_user_id,
+                    rule_id,
+                    exc_info=True,
+                )
+
+        _insert_user_settings_save_log(
+            user_id=normalized_user_id,
+            watch_rule_id=rule_id,
+            action_type=save_action_type,
+            request_payload=request_payload,
+            response_payload=None,
+            success=False,
+            error_code=USER_SETTINGS_SAVE_LOG_ERROR_SAVE_FAILED,
+            error_message=str(exc),
+            metadata=_build_save_log_metadata(),
+        )
+        raise
     finally:
         if cursor is not None:
             cursor.close()
