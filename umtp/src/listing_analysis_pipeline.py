@@ -57,7 +57,6 @@ except ModuleNotFoundError:
     )
 DUPLICATE_ENTRY_ERROR_CODE = 1062
 ALERT_BODY_EXCERPT_MAX_LEN = 500
-DETAIL_FETCH_LOW_PRICE_RATIO = 0.95
 
 _MAC_PRODUCT_NAME_PATTERN = re.compile(
     r"(맥북에어|맥북|맥\s*미니|맥미니|맥\s*스튜디오|맥스튜디오|macbook(?:\s*air)?|mac\s*mini|mac\s*studio|macmini|macstudio)",
@@ -148,32 +147,15 @@ def _is_title_product_name_only_spec_missing(title, parsed_spec):
     )
 
 
-def _is_listing_price_cheap(listing_price_krw, target_price_krw):
-    listing_price = _normalize_optional_int(listing_price_krw)
-    target_price = _normalize_optional_int(target_price_krw)
-
-    if listing_price is None or target_price is None:
-        return False
-    if listing_price <= 0 or target_price <= 0:
-        return False
-
-    low_threshold = int(target_price * DETAIL_FETCH_LOW_PRICE_RATIO)
-    return listing_price <= low_threshold
-
-
 def should_fetch_detail(listing, change_reason, title_parse_result, *, target_price_krw=None):
     normalized_reason = _normalize_optional_text(change_reason)
     normalized_title = _normalize_optional_text((listing or {}).get("title"))
-    listing_price_krw = _normalize_optional_int((listing or {}).get("price"))
 
     if normalized_reason == "unchanged":
         return False, "unchanged"
 
     if normalized_reason == "new":
         return True, "new"
-
-    if _is_listing_price_cheap(listing_price_krw, target_price_krw):
-        return True, "price_cheap"
 
     if _is_title_product_name_only_spec_missing(normalized_title, title_parse_result):
         return True, "product_only_spec_missing"

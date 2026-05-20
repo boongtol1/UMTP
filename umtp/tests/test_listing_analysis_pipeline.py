@@ -568,7 +568,7 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
         self.assertTrue(should_fetch)
         self.assertEqual(reason, "product_only_spec_missing")
 
-    def test_should_fetch_detail_when_price_is_cheap(self):
+    def test_should_fetch_detail_for_changed_listing_without_price_cheap_rule(self):
         should_fetch, reason = should_fetch_detail(
             {"title": "맥북에어 M2 8GB 256GB", "price": 700000},
             "price_changed",
@@ -577,7 +577,7 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
         )
 
         self.assertTrue(should_fetch)
-        self.assertEqual(reason, "price_cheap")
+        self.assertEqual(reason, "changed_listing")
 
     def test_unchanged_listing_skips_detail_fetch_function_call(self):
         fake_cursor = _FakeCursor()
