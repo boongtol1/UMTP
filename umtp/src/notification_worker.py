@@ -1057,6 +1057,84 @@ def _normalize_alert_id_list(alert_event_ids):
     return normalized_ids
 
 
+def _safe_json_dumps(value):
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return json.dumps(str(value), ensure_ascii=False)
+
+
+def _insert_alert_read_archive_event_log(
+    cursor,
+    *,
+    user_id,
+    action_type,
+    alert_event_id=None,
+    requested_count=None,
+    affected_count=None,
+    skipped_count=None,
+    not_found_ids=None,
+    reason=None,
+    metadata=None,
+):
+    normalized_user_id = _normalize_required_text(user_id, "user_id")
+    normalized_action_type = _normalize_required_text(action_type, "action_type")
+    normalized_alert_event_id = _normalize_optional_int(alert_event_id, "alert_event_id")
+    normalized_requested_count = _normalize_optional_int(requested_count, "requested_count")
+    normalized_affected_count = _normalize_optional_int(affected_count, "affected_count")
+    normalized_skipped_count = _normalize_optional_int(skipped_count, "skipped_count")
+
+    normalized_not_found_ids = []
+    for value in list(not_found_ids or []):
+        try:
+            normalized_not_found_ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+
+    metadata_json = _safe_json_dumps(metadata) if metadata is not None else None
+    not_found_ids_json = _safe_json_dumps(normalized_not_found_ids) if normalized_not_found_ids else None
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO alert_read_archive_events (
+                user_id,
+                alert_event_id,
+                action_type,
+                requested_count,
+                affected_count,
+                skipped_count,
+                not_found_ids_json,
+                reason,
+                metadata_json,
+                created_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            """,
+            (
+                normalized_user_id,
+                normalized_alert_event_id,
+                normalized_action_type,
+                normalized_requested_count,
+                normalized_affected_count,
+                normalized_skipped_count,
+                not_found_ids_json,
+                _normalize_optional_text(reason),
+                metadata_json,
+            ),
+        )
+        return True
+    except Exception as exc:
+        lowered = str(exc).lower()
+        if any(
+            token in lowered
+            for token in ("doesn't exist", "no such table", "unknown column")
+        ):
+            return False
+        print(f"[alert_read_archive_events] insert failed: {exc}")
+        return False
+
+
 def _telegram_configured():
     load_dotenv()
     bot_token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
@@ -2034,8 +2112,6 @@ def mark_alert_event_read_for_user(*, user_id, alert_event_id):
                 }
             raise
 
-        connection.commit()
-
         if updated_rows == 0:
             cursor.execute(
                 """
@@ -2049,12 +2125,38 @@ def mark_alert_event_read_for_user(*, user_id, alert_event_id):
             )
             existing = cursor.fetchone()
             if not existing:
+                _insert_alert_read_archive_event_log(
+                    cursor,
+                    user_id=normalized_user_id,
+                    action_type="mark_read_single",
+                    alert_event_id=normalized_alert_id,
+                    requested_count=1,
+                    affected_count=0,
+                    skipped_count=1,
+                    reason="alert_event_not_found",
+                )
+                connection.commit()
                 return {
                     "ok": False,
                     "reason": "alert_event_not_found",
                     "alert_event_id": normalized_alert_id,
                 }
 
+            _insert_alert_read_archive_event_log(
+                cursor,
+                user_id=normalized_user_id,
+                action_type="mark_read_single",
+                alert_event_id=normalized_alert_id,
+                requested_count=1,
+                affected_count=0,
+                skipped_count=1,
+                reason="already_read",
+                metadata={
+                    "is_read": bool(_safe_int(existing.get("is_read")) or 0),
+                    "read_at": existing.get("read_at"),
+                },
+            )
+            connection.commit()
             return {
                 "ok": True,
                 "alert_event_id": normalized_alert_id,
@@ -2074,6 +2176,21 @@ def mark_alert_event_read_for_user(*, user_id, alert_event_id):
             (normalized_alert_id, normalized_user_id),
         )
         row = cursor.fetchone() or {}
+        _insert_alert_read_archive_event_log(
+            cursor,
+            user_id=normalized_user_id,
+            action_type="mark_read_single",
+            alert_event_id=normalized_alert_id,
+            requested_count=1,
+            affected_count=int(updated_rows),
+            skipped_count=0,
+            reason="marked_read",
+            metadata={
+                "is_read": bool(_safe_int(row.get("is_read")) or 0),
+                "read_at": row.get("read_at"),
+            },
+        )
+        connection.commit()
         return {
             "ok": True,
             "alert_event_id": normalized_alert_id,
@@ -2118,6 +2235,15 @@ def mark_all_alert_events_read_for_user(*, user_id):
                 }
             raise
 
+        _insert_alert_read_archive_event_log(
+            cursor,
+            user_id=normalized_user_id,
+            action_type="mark_read_all",
+            requested_count=None,
+            affected_count=int(updated_rows),
+            skipped_count=None,
+            reason="marked_unread_as_read",
+        )
         connection.commit()
         return {
             "ok": True,
@@ -2162,6 +2288,15 @@ def clear_all_read_alert_events_for_user(*, user_id):
                 }
             raise
 
+        _insert_alert_read_archive_event_log(
+            cursor,
+            user_id=normalized_user_id,
+            action_type="clear_read_archive_all",
+            requested_count=None,
+            affected_count=int(cleared_rows),
+            skipped_count=None,
+            reason="cleared_read_archive",
+        )
         connection.commit()
         return {
             "ok": True,
@@ -2249,9 +2384,19 @@ def clear_selected_read_alert_events_for_user(*, user_id, alert_event_ids):
             )
             cleared_count = int(cursor.rowcount or 0)
 
-        connection.commit()
         requested_count = len(normalized_ids)
         skipped_count = max(0, requested_count - cleared_count - len(not_found_ids))
+        _insert_alert_read_archive_event_log(
+            cursor,
+            user_id=normalized_user_id,
+            action_type="clear_read_archive_selected",
+            requested_count=requested_count,
+            affected_count=cleared_count,
+            skipped_count=skipped_count,
+            not_found_ids=not_found_ids,
+            reason="clear_selected_completed",
+        )
+        connection.commit()
         return {
             "ok": True,
             "requested_count": requested_count,
