@@ -725,13 +725,17 @@ def _count_missed_candidates_between_saved_windows(
     *,
     user_id,
     rule_id,
+    source,
+    search_keyword,
     previous_saved_at,
     current_saved_at,
     old_rule_snapshot,
     new_rule_snapshot,
 ):
     normalized_rule_id = _safe_int(rule_id)
-    if normalized_rule_id is None or normalized_rule_id <= 0:
+    normalized_source = (_safe_text(source) or "joongna").lower()
+    normalized_search_keyword = _normalize_optional_search_keyword(search_keyword)
+    if normalized_search_keyword is None:
         return 0
 
     previous_saved_at_dt = _coerce_datetime(previous_saved_at)
@@ -749,7 +753,8 @@ def _count_missed_candidates_between_saved_windows(
             SELECT product_id, sort_date, price_krw
             FROM analysis_jobs
             WHERE user_id = %s
-              AND watch_rule_id = %s
+              AND source = %s
+              AND LOWER(TRIM(search_keyword)) = LOWER(TRIM(%s))
               AND sort_date IS NOT NULL
               AND sort_date >= %s
               AND sort_date < %s
@@ -758,7 +763,8 @@ def _count_missed_candidates_between_saved_windows(
             """,
             (
                 user_id,
-                normalized_rule_id,
+                normalized_source,
+                normalized_search_keyword,
                 previous_saved_at_dt,
                 current_saved_at_dt,
             ),
@@ -770,10 +776,19 @@ def _count_missed_candidates_between_saved_windows(
 
     rows = cursor.fetchall() or []
     if not rows:
+        logger.info(
+            "[condition_change_candidate] count_scope=keyword user_id=%s source=%s search_keyword=%s candidate_rows=%s missed_candidate_count=%s rule_id=%s",
+            user_id,
+            normalized_source,
+            normalized_search_keyword,
+            0,
+            0,
+            normalized_rule_id,
+        )
         return 0
 
     missed_count = 0
-    counted_product_ids = set()
+    grouped_rows = {}
     for row in rows:
         if not isinstance(row, (tuple, list)) or len(row) < 3:
             continue
@@ -787,19 +802,31 @@ def _count_missed_candidates_between_saved_windows(
 
         if product_id is not None:
             dedupe_key = product_id
-            if dedupe_key in counted_product_ids:
-                continue
         else:
             dedupe_key = f"anon:{listing_sort_date.isoformat()}:{listing_price_krw}"
-            if dedupe_key in counted_product_ids:
-                continue
 
-        old_rule_match = _is_price_match_for_rule(listing_price_krw, old_rule_snapshot)
-        new_rule_match = _is_price_match_for_rule(listing_price_krw, new_rule_snapshot)
-        if new_rule_match and not old_rule_match:
-            counted_product_ids.add(dedupe_key)
+        grouped_rows.setdefault(dedupe_key, []).append((listing_sort_date, listing_price_krw))
+
+    for dedupe_key_rows in grouped_rows.values():
+        has_missed_candidate = False
+        for _, listing_price_krw in dedupe_key_rows:
+            old_rule_match = _is_price_match_for_rule(listing_price_krw, old_rule_snapshot)
+            new_rule_match = _is_price_match_for_rule(listing_price_krw, new_rule_snapshot)
+            if new_rule_match and not old_rule_match:
+                has_missed_candidate = True
+                break
+        if has_missed_candidate:
             missed_count += 1
 
+    logger.info(
+        "[condition_change_candidate] count_scope=keyword user_id=%s source=%s search_keyword=%s candidate_rows=%s missed_candidate_count=%s rule_id=%s",
+        user_id,
+        normalized_source,
+        normalized_search_keyword,
+        len(rows),
+        missed_count,
+        normalized_rule_id,
+    )
     return missed_count
 
 
@@ -1984,6 +2011,8 @@ def upsert_user_fair_price_setting(
                 cursor,
                 user_id=normalized_user_id,
                 rule_id=rule_id,
+                source="joongna",
+                search_keyword=resolved_search_keyword,
                 previous_saved_at=previous_saved_at,
                 current_saved_at=current_saved_at,
                 old_rule_snapshot=old_rule_snapshot,

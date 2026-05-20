@@ -54,6 +54,8 @@ class UserSettingsMissedCandidateNoticeTest(unittest.TestCase):
             cursor,
             user_id="boongtol",
             rule_id=7,
+            source="joongna",
+            search_keyword="m4 맥미니",
             previous_saved_at=self.previous_saved_at,
             current_saved_at=self.current_saved_at,
             old_rule_snapshot=old_rule,
@@ -61,7 +63,10 @@ class UserSettingsMissedCandidateNoticeTest(unittest.TestCase):
         )
 
         self.assertEqual(count, 1)
-        self.assertEqual(cursor.executed[0][1], ("boongtol", 7, self.previous_saved_at, self.current_saved_at))
+        self.assertEqual(
+            cursor.executed[0][1],
+            ("boongtol", "joongna", "m4 맥미니", self.previous_saved_at, self.current_saved_at),
+        )
 
     def test_excludes_listing_that_already_matched_old_rule(self):
         cursor = _FakeCursor(
@@ -86,6 +91,8 @@ class UserSettingsMissedCandidateNoticeTest(unittest.TestCase):
             cursor,
             user_id="boongtol",
             rule_id=7,
+            source="joongna",
+            search_keyword="m4 맥미니",
             previous_saved_at=self.previous_saved_at,
             current_saved_at=self.current_saved_at,
             old_rule_snapshot=old_rule,
@@ -117,6 +124,8 @@ class UserSettingsMissedCandidateNoticeTest(unittest.TestCase):
             cursor,
             user_id="boongtol",
             rule_id=7,
+            source="joongna",
+            search_keyword="m4 맥미니",
             previous_saved_at=self.previous_saved_at,
             current_saved_at=self.current_saved_at,
             old_rule_snapshot=old_rule,
@@ -148,6 +157,8 @@ class UserSettingsMissedCandidateNoticeTest(unittest.TestCase):
             cursor,
             user_id="boongtol",
             rule_id=7,
+            source="joongna",
+            search_keyword="m4 맥미니",
             previous_saved_at=self.previous_saved_at,
             current_saved_at=self.current_saved_at,
             old_rule_snapshot=old_rule,
@@ -179,6 +190,8 @@ class UserSettingsMissedCandidateNoticeTest(unittest.TestCase):
             cursor,
             user_id="boongtol",
             rule_id=7,
+            source="joongna",
+            search_keyword="m4 맥미니",
             previous_saved_at=self.previous_saved_at,
             current_saved_at=self.current_saved_at,
             old_rule_snapshot=old_rule,
@@ -186,6 +199,44 @@ class UserSettingsMissedCandidateNoticeTest(unittest.TestCase):
         )
 
         self.assertEqual(count, 0)
+
+    def test_counts_keyword_scope_even_when_current_rule_id_differs(self):
+        # Simulates: product observed under another watch_rule_id previously, but same user/source/search_keyword scope.
+        cursor = _FakeCursor(
+            rows=[
+                ("228796648", datetime(2026, 5, 18, 15, 10, 0), 650000),
+            ]
+        )
+        old_rule = _build_rule_snapshot(
+            fair_price_krw=640000,
+            alert_drop_rate_percent=0,
+            alert_price_direction="BELOW_OR_EQUAL",
+            enabled=True,
+        )
+        new_rule = _build_rule_snapshot(
+            fair_price_krw=650000,
+            alert_drop_rate_percent=0,
+            alert_price_direction="BELOW_OR_EQUAL",
+            enabled=True,
+        )
+
+        count = _count_missed_candidates_between_saved_windows(
+            cursor,
+            user_id="boongtol",
+            rule_id=14,
+            source="joongna",
+            search_keyword="m4 맥미니",
+            previous_saved_at=self.previous_saved_at,
+            current_saved_at=self.current_saved_at,
+            old_rule_snapshot=old_rule,
+            new_rule_snapshot=new_rule,
+        )
+
+        self.assertEqual(count, 1)
+        self.assertEqual(
+            cursor.executed[0][1],
+            ("boongtol", "joongna", "m4 맥미니", self.previous_saved_at, self.current_saved_at),
+        )
 
 
 if __name__ == "__main__":
