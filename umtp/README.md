@@ -823,6 +823,8 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_user_push_tokens.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_listing_analysis_results_pipeline.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_identity_user_product.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_joongna_sort_date_tracking.sql
+# heartbeat 롤백(066b3e5 제거) 시에만 실행
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_remove_worker_heartbeats.sql
 ```
 
 #### 2) 실행 방법
