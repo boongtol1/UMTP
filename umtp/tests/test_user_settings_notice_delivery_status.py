@@ -34,6 +34,13 @@ class _NoticeInsertCursor:
         self._last_query = normalized_query
 
         if "insert into alert_events" in normalized_query:
+            expected_placeholder_count = normalized_query.count("%s")
+            actual_param_count = len(params or ())
+            if expected_placeholder_count != actual_param_count:
+                raise AssertionError(
+                    f"placeholder_mismatch expected={expected_placeholder_count} actual={actual_param_count}"
+                )
+
             self._insert_attempt_count += 1
             if self._insert_attempt_count == 1 and self.fail_primary:
                 raise RuntimeError("unknown column detail_col")

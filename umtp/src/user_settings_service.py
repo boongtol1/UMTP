@@ -730,7 +730,7 @@ def _insert_condition_change_candidate_notice_alert_event(
             VALUES (
                 %s, %s, NULL, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, NULL, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 0, 0, NULL
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 0, 0, NULL
             )
             """,
             (
