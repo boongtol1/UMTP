@@ -819,6 +819,7 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_user_fair_prices_polling_
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_user_fair_prices_search_keyword_format.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_target_buy_price_generated_column.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_analysis_jobs.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_analysis_jobs_lookup_indexes.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_or_alter_alert_events.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_user_push_tokens.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_listing_analysis_results_pipeline.sql
@@ -827,6 +828,21 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_joongna_sort_date_track
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_search_query_results_cache.sql
 # heartbeat 롤백(066b3e5 제거) 시에만 실행
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_remove_worker_heartbeats.sql
+```
+
+적용 확인:
+
+```sql
+SHOW INDEX FROM analysis_jobs;
+
+EXPLAIN
+SELECT *
+FROM analysis_jobs
+WHERE user_id = 'boongtol'
+  AND source = 'joongna'
+  AND search_keyword = 'm2 맥북에어'
+  AND created_at >= '2026-05-20 15:00:00'
+  AND created_at < '2026-05-20 16:00:00';
 ```
 
 #### 2) 실행 방법
@@ -867,6 +883,7 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - 설정 저장 시 `enabled=true`이면 `force_poll=true`, `last_poll_requested_at=NOW()`, `last_polled_at=NULL`이 되어 즉시 due 대상이 됩니다.
 - polling worker는 due 설정을 읽어 검색하며, 같은 검색어를 여러 사용자가 켜도 Search API는 검색어당 1회만 호출합니다.
 - polling worker는 조회한 그룹 결과를 `search_queries`/`search_results`에도 저장해 후속 집계와 디버깅에 재사용할 수 있습니다.
+- 참고 알림/놓친 후보 집계 성능을 위해 `analysis_jobs`에 `(user_id, source, search_keyword, created_at)` 및 `(user_id, source, search_keyword, product_id, created_at)` 조회 인덱스를 적용합니다.
 - 알림 속도(priority)는 UI에 `빠름/보통/절전`으로 표시되며 내부값은 `FAST/NORMAL/LOW`를 사용합니다.
 - priority별 기본 주기는 `FAST=45초`, `NORMAL=180초`, `LOW=600초`입니다.
 - scheduler는 priority별 기본 주기에 jitter(±20%)를 적용해 실제 주기를 계산합니다. 예: `FAST 약 36~54초`, `NORMAL 약 144~216초`, `LOW 약 480~720초`.
