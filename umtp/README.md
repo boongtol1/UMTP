@@ -136,7 +136,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - saved_at 정책: UMTP는 사용자가 저장한 시각(`saved_at`) 이후에 등록된 매물(`sort_date >= saved_at`)만 알림 후보로 봅니다.
 - 재저장 정책: 같은 저장 조건에서 저장 버튼을 다시 누르면 `saved_at`이 현재 시각으로 갱신되고, 그 시점부터 새로 조회를 시작합니다.
 - 새로고침 정책: 새로고침은 저장 조건의 `saved_at`을 현재 시각으로 갱신합니다. 전체 새로고침은 활성 규칙 전체를, 단일 새로고침은 선택한 규칙 하나만 갱신합니다. 새로고침 후 UMTP는 `sort_date >= saved_at` 인 매물만 정식 알림 후보로 봅니다.
-- 조건 변경 참고 메시지 정책: 조건을 다시 저장할 때 이전 `saved_at`과 새 `saved_at` 사이에 등록된 매물 중 새 조건에는 맞지만 이전 조건에는 맞지 않았던 매물은 정식 알림이 아니라 참고 메시지로만 표시합니다. 정식 알림 기준은 항상 `sort_date >= 현재 saved_at` 입니다.
+- 조건 변경 참고 메시지 정책: 조건을 다시 저장할 때 이전 `saved_at`과 새 `saved_at` 사이에 등록된 매물 중 새 조건에는 맞지만 이전 조건에는 맞지 않았던 매물은 참고 메시지로 생성됩니다. 이 참고 메시지는 `alert_events.status='pending'`으로 저장되어 일반 알림 전송 루트(앱/텔레그램)로도 전달될 수 있습니다. 정식 알림 기준은 항상 `sort_date >= 현재 saved_at` 입니다.
 - 재알림 정책: 같은 `product_id`라도 `sort_date`가 바뀐(끌올/재등록) 경우 사용자/규칙 기준으로 재알림 가능합니다. 단, 같은 사용자/같은 규칙/같은 `product_id`/같은 `sort_date` 조합 알림은 한 번만 보냅니다.
 - 마이그레이션: 기존 운영 DB는 `sql/migrate_realert_identity_sort_date.sql`을 실행해 `(user_id, watch_rule_id, product_id, sort_date)` 기준 unique key를 반영합니다.
 - Telegram 발송 기준: 새 `alert_events` insert 성공 시 1회만 발송됩니다.
