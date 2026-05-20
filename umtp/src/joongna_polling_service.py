@@ -468,7 +468,18 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
     stats["polling_group_count"] = len(groups)
 
     if not groups:
-        print("[polling] enabled 토글 대상 검색어가 없어 이번 주기는 스킵합니다.")
+        if target_source == "settings":
+            if due_rules:
+                print("[polling] due watch_rule은 있으나 유효한 검색어가 없어 이번 주기는 스킵합니다.")
+            else:
+                print(
+                    "[polling] 이번 주기 due 대상 검색어가 없어 스킵합니다. "
+                    "(enabled=true라도 polling interval 미도래 시 제외)"
+                )
+        elif target_source == "cli":
+            print("[polling] 요청한 검색어에 매칭되는 due 대상이 없어 이번 주기는 스킵합니다.")
+        else:
+            print("[polling] polling 대상 검색어가 없어 이번 주기는 스킵합니다.")
         return stats
 
     connection = None

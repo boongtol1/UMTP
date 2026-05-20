@@ -247,6 +247,32 @@ def _coerce_datetime(value):
     return None
 
 
+def _resolve_db_current_timestamp(cursor):
+    if cursor is None or not hasattr(cursor, "execute") or not hasattr(cursor, "fetchone"):
+        return None
+
+    try:
+        cursor.execute("SELECT CURRENT_TIMESTAMP")
+        row = cursor.fetchone()
+    except Exception:
+        return None
+
+    if row is None:
+        return None
+
+    if isinstance(row, dict):
+        for key in ("CURRENT_TIMESTAMP", "current_timestamp", "current_ts", "now", "evaluated_at"):
+            parsed = _coerce_datetime(row.get(key))
+            if parsed is not None:
+                return parsed
+        return None
+
+    if isinstance(row, (tuple, list)) and row:
+        return _coerce_datetime(row[0])
+
+    return _coerce_datetime(row)
+
+
 def _format_saved_at_notice_message(missed_candidate_count):
     normalized_count = _safe_int(missed_candidate_count) or 0
     return f"조건 변경 사이에 새 기준에 맞는 매물이 {normalized_count}개 있었어요."
@@ -2343,7 +2369,7 @@ def get_due_user_fair_price_polling_targets(user_id=None):
                 )
                 rows = []
 
-        evaluated_at = datetime.now()
+        evaluated_at = _resolve_db_current_timestamp(cursor) or datetime.now()
         due_rows = []
         for row in rows:
             target = _poll_target_row_to_dict(row)
@@ -2372,6 +2398,24 @@ def get_due_user_fair_price_polling_targets(user_id=None):
                 continue
 
             elapsed_seconds = int((evaluated_at - last_polled_at).total_seconds())
+            if elapsed_seconds < 0:
+                print(
+                    f"[polling_priority] watch_rule_id={watch_rule_id} "
+                    f"priority={priority} "
+                    f"calculated_polling_interval_seconds={calculated_interval_seconds} "
+                    f"elapsed_seconds={elapsed_seconds} due=true skew_detected=true"
+                )
+                logger.warning(
+                    "[polling_priority] watch_rule_id=%s priority=%s calculated_polling_interval_seconds=%s "
+                    "elapsed_seconds=%s due=true skew_detected=true",
+                    watch_rule_id,
+                    priority,
+                    calculated_interval_seconds,
+                    elapsed_seconds,
+                )
+                due_rows.append(target)
+                continue
+
             is_due = elapsed_seconds >= calculated_interval_seconds
             print(
                 f"[polling_priority] watch_rule_id={watch_rule_id} "
