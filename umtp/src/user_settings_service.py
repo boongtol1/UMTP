@@ -2086,6 +2086,8 @@ def upsert_user_fair_price_setting(
     current_saved_at = None
     missed_candidate_count = 0
     representative_missed_candidate = None
+    condition_change_notice_created = False
+    condition_change_notice_error = None
     rule_id = None
     old_rule_snapshot = None
     new_rule_snapshot = _build_rule_snapshot(
@@ -2610,7 +2612,7 @@ def upsert_user_fair_price_setting(
             and rule_id is not None
         ):
             try:
-                _insert_condition_change_candidate_notice_alert_event(
+                notice_insert_result = _insert_condition_change_candidate_notice_alert_event(
                     cursor,
                     user_id=normalized_user_id,
                     watch_rule_id=rule_id,
@@ -2659,18 +2661,41 @@ def upsert_user_fair_price_setting(
                         else None
                     ),
                 )
+                condition_change_notice_created = bool(
+                    isinstance(notice_insert_result, dict)
+                    and notice_insert_result.get("created") is True
+                )
+                if not condition_change_notice_created:
+                    if isinstance(notice_insert_result, dict):
+                        condition_change_notice_error = _safe_text(notice_insert_result.get("reason"))
+                    if condition_change_notice_error is None:
+                        condition_change_notice_error = "notice_not_created"
+                    logger.warning(
+                        "condition-change candidate notice not created user_id=%s rule_id=%s result=%s",
+                        normalized_user_id,
+                        rule_id,
+                        notice_insert_result,
+                    )
             except Exception as notice_exc:
+                condition_change_notice_created = False
+                condition_change_notice_error = _safe_text(str(notice_exc)) or "notice_insert_failed"
                 logger.warning(
                     "condition-change candidate notice insert skipped user_id=%s rule_id=%s reason=%s",
                     normalized_user_id,
                     rule_id,
                     notice_exc,
+                    exc_info=True,
                 )
 
         connection.commit()
         response_message = "사용자 공정가 설정 저장 완료"
         if missed_candidate_count > 0 and condition_change_candidate_notice_enabled:
-            response_message = _format_saved_at_notice_message(missed_candidate_count)
+            if condition_change_notice_created:
+                response_message = _format_saved_at_notice_message(missed_candidate_count)
+            else:
+                response_message = (
+                    "조건 변경 사이 후보는 찾았지만 참고 알림 생성에 실패했어요. 서버 로그를 확인해 주세요."
+                )
 
         return {
             "ok": True,
@@ -2679,6 +2704,8 @@ def upsert_user_fair_price_setting(
             "saved_at": current_saved_at,
             "previous_saved_at": previous_saved_at,
             "missed_candidate_count": missed_candidate_count,
+            "condition_change_notice_created": condition_change_notice_created,
+            "condition_change_notice_error": condition_change_notice_error,
             "item": {
                 "id": rule_id,
                 "user_id": normalized_user_id,
