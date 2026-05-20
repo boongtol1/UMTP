@@ -17,6 +17,11 @@ import com.boongtol.umtp_android.network.MacBookAirUnit
 import com.boongtol.umtp_android.network.UserFairPriceItem
 import kotlin.math.roundToInt
 
+private enum class PriceSyncSource {
+    TARGET_PRICE,
+    GAP_PERCENT,
+}
+
 @Composable
 fun MacBookAirSettingCard(
     userId: String?,
@@ -58,6 +63,15 @@ fun MacBookAirSettingCard(
         val initialDesiredPrice = calculateDesiredPrice(fair, dropRate)
         mutableStateOf(initialDesiredPrice?.toString() ?: "")
     }
+    var gapPercentText by remember(userSetting) {
+        val fair = userSetting?.user_fair_price_krw ?: userSetting?.effective_fair_price_krw
+        val dropRate = userSetting?.user_alert_drop_rate_percent ?: userSetting?.effective_alert_drop_rate_percent
+        val initialDesiredPrice = calculateDesiredPrice(fair, dropRate)
+        mutableStateOf(toEditablePercentText(computeMarketPriceGapPercent(fair, initialDesiredPrice)))
+    }
+    var priceSyncSource by remember(userSetting) {
+        mutableStateOf(PriceSyncSource.TARGET_PRICE)
+    }
     var alertPriceDirection by remember(userSetting) {
         mutableStateOf(
             normalizeAlertDirection(
@@ -76,6 +90,7 @@ fun MacBookAirSettingCard(
     val fairPriceInput = fairPriceText.toIntOrNull()
     val desiredPriceInput = desiredPriceText.toIntOrNull()
     val computedGapPercent = computeMarketPriceGapPercent(fairPriceInput, desiredPriceInput)
+    val displayGapPercent = computedGapPercent ?: gapPercentText.toDoubleOrNull()
     val effectiveFairPrice = userSetting?.effective_fair_price_krw
     val effectiveTargetPrice = userSetting?.effective_target_buy_price_krw ?: calculateDesiredPrice(
         effectiveFairPrice,
@@ -223,9 +238,24 @@ fun MacBookAirSettingCard(
             ) {
                 OutlinedTextField(
                     value = fairPriceText,
-                    onValueChange = {
-                        if (it.all { char -> char.isDigit() }) {
-                            fairPriceText = normalizePriceTextInput(it)
+                    onValueChange = { nextFairPriceText ->
+                        if (nextFairPriceText.all { char -> char.isDigit() }) {
+                            fairPriceText = normalizePriceTextInput(nextFairPriceText)
+                            val fairPrice = fairPriceText.toIntOrNull()
+                            if (fairPrice != null) {
+                                if (priceSyncSource == PriceSyncSource.GAP_PERCENT) {
+                                    val gapPercent = gapPercentText.toDoubleOrNull()
+                                    if (gapPercent != null) {
+                                        desiredPriceText = calculateDesiredPrice(fairPrice, gapPercent)?.toString() ?: ""
+                                    }
+                                } else {
+                                    gapPercentText = toEditablePercentText(
+                                        computeMarketPriceGapPercent(fairPrice, desiredPriceText.toIntOrNull())
+                                    )
+                                }
+                            } else {
+                                gapPercentText = ""
+                            }
                         }
                     },
                     label = { Text("$marketPriceLabel (원)", fontSize = 12.sp) },
@@ -235,9 +265,13 @@ fun MacBookAirSettingCard(
                 )
                 OutlinedTextField(
                     value = desiredPriceText,
-                    onValueChange = {
-                        if (it.all { char -> char.isDigit() }) {
-                            desiredPriceText = normalizePriceTextInput(it)
+                    onValueChange = { nextDesiredPriceText ->
+                        if (nextDesiredPriceText.all { char -> char.isDigit() }) {
+                            desiredPriceText = normalizePriceTextInput(nextDesiredPriceText)
+                            priceSyncSource = PriceSyncSource.TARGET_PRICE
+                            gapPercentText = toEditablePercentText(
+                                computeMarketPriceGapPercent(fairPriceText.toIntOrNull(), desiredPriceText.toIntOrNull())
+                            )
                         }
                     },
                     label = { Text("알림 기준 가격 (원)", fontSize = 12.sp) },
@@ -248,9 +282,30 @@ fun MacBookAirSettingCard(
             }
 
             Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = gapPercentText,
+                onValueChange = { nextGapPercentText ->
+                    if (isValidPercentInput(nextGapPercentText)) {
+                        gapPercentText = nextGapPercentText
+                        priceSyncSource = PriceSyncSource.GAP_PERCENT
+                        val fairPrice = fairPriceText.toIntOrNull()
+                        val gapPercent = nextGapPercentText.toDoubleOrNull()
+                        if (fairPrice != null && gapPercent != null) {
+                            desiredPriceText = calculateDesiredPrice(fairPrice, gapPercent)?.toString() ?: ""
+                        }
+                    }
+                },
+                label = { Text("시장가와의 차이 (%)", fontSize = 12.sp) },
+                placeholder = { Text("예: 20 또는 -15.5", fontSize = 12.sp) },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = if (computedGapPercent != null) {
-                    "시장가와의 차이(%): ${formatPercentDisplay(computedGapPercent)}"
+                text = if (displayGapPercent != null) {
+                    "시장가와의 차이(%): ${formatPercentDisplay(displayGapPercent)}"
                 } else {
                     "시장가와의 차이(%): 정보 없음"
                 },
@@ -415,6 +470,24 @@ private fun calculateDesiredPrice(fairPrice: Int?, dropRate: Double?): Int? {
     }
     val desired = fairPrice.toDouble() * (1.0 - (dropRate / 100.0))
     return desired.roundToInt().coerceAtLeast(0)
+}
+
+private fun isValidPercentInput(value: String): Boolean {
+    if (value.isEmpty() || value == "-") {
+        return true
+    }
+    return value.matches(Regex("^-?\\d*(?:\\.\\d{0,2})?$"))
+}
+
+private fun toEditablePercentText(value: Double?): String {
+    if (value == null) {
+        return ""
+    }
+    val rounded = kotlin.math.round(value * 100.0) / 100.0
+    if (rounded % 1.0 == 0.0) {
+        return rounded.toInt().toString()
+    }
+    return String.format(java.util.Locale.US, "%.2f", rounded)
 }
 
 @Composable
