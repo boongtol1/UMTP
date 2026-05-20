@@ -2,7 +2,6 @@ import logging
 import random
 from datetime import datetime
 from decimal import Decimal
-import uuid
 
 from src.alert_price_direction import (
     DEFAULT_ALERT_PRICE_DIRECTION,
@@ -310,22 +309,35 @@ def _insert_condition_change_candidate_notice_alert_event(
     alert_price_direction,
     missed_candidate_count,
     sort_date,
+    listing_product_id=None,
+    listing_title=None,
+    listing_url=None,
+    listing_source=None,
+    listing_price_krw=None,
+    listing_sort_date=None,
 ):
     normalized_user_id = _safe_text(user_id)
     normalized_rule_id = _safe_int(watch_rule_id)
-    normalized_sort_date = _coerce_datetime(sort_date) or datetime.now()
+    normalized_notice_sort_date = _coerce_datetime(sort_date) or datetime.now()
+    normalized_sort_date = _coerce_datetime(listing_sort_date) or normalized_notice_sort_date
     normalized_message = _format_saved_at_notice_message(missed_candidate_count)
 
     if normalized_user_id is None or normalized_rule_id is None or normalized_rule_id <= 0:
         return {"created": False, "reason": "invalid_reference_notice_context"}
 
-    product_id = f"cccn-{normalized_rule_id}-{uuid.uuid4().hex[:16]}"
-    title = _build_condition_change_candidate_notice_title(
+    product_id = _safe_text(listing_product_id)
+    if product_id is None:
+        product_id = f"cccn-{normalized_rule_id}-{int(normalized_notice_sort_date.timestamp())}"
+
+    title = _safe_text(listing_title) or _build_condition_change_candidate_notice_title(
         chip=chip,
         screen_inch=screen_inch,
         ram_gb=ram_gb,
         ssd_gb=ssd_gb,
     )
+    normalized_listing_source = _safe_text(listing_source) or CONDITION_CHANGE_CANDIDATE_NOTICE_SOURCE
+    normalized_listing_url = _safe_text(listing_url) or ""
+    normalized_listing_price_krw = _safe_int(listing_price_krw)
     body_text = (
         f"{normalized_message}\n"
         "정식 알림 기준은 저장 이후 매물이며, 이 항목은 참고용 후보입니다."
@@ -343,6 +355,7 @@ def _insert_condition_change_candidate_notice_alert_event(
                 source,
                 url,
                 title,
+                price_krw,
                 product_type,
                 chip,
                 screen_inch,
@@ -365,8 +378,8 @@ def _insert_condition_change_candidate_notice_alert_event(
             )
             VALUES (
                 %s, %s, NULL, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, NULL, %s, %s, %s, %s,
-                %s, %s, %s, 'app_only', 0, 0, NULL
+                %s, %s, %s, %s, %s, %s, NULL, %s, %s, %s,
+                %s, %s, %s, %s, 'app_only', 0, 0, NULL
             )
             """,
             (
@@ -374,9 +387,10 @@ def _insert_condition_change_candidate_notice_alert_event(
                 normalized_rule_id,
                 product_id,
                 normalized_sort_date,
-                CONDITION_CHANGE_CANDIDATE_NOTICE_SOURCE,
-                "",
+                normalized_listing_source,
+                normalized_listing_url,
                 title,
+                normalized_listing_price_krw,
                 _safe_text(product_type),
                 _safe_text(chip),
                 _safe_int(screen_inch),
@@ -388,7 +402,7 @@ def _insert_condition_change_candidate_notice_alert_event(
                 _safe_text(alert_price_direction),
                 normalized_message,
                 body_text,
-                normalized_sort_date,
+                normalized_notice_sort_date,
                 CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON,
                 normalized_message,
             ),
@@ -410,6 +424,7 @@ def _insert_condition_change_candidate_notice_alert_event(
                 source,
                 url,
                 title,
+                price_krw,
                 fair_price_krw,
                 target_price_krw,
                 alert_drop_rate_percent,
@@ -419,16 +434,17 @@ def _insert_condition_change_candidate_notice_alert_event(
                 status,
                 send_attempts
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'app_only', 0)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'app_only', 0)
             """,
             (
                 normalized_user_id,
                 normalized_rule_id,
                 product_id,
                 normalized_sort_date,
-                CONDITION_CHANGE_CANDIDATE_NOTICE_SOURCE,
-                "",
+                normalized_listing_source,
+                normalized_listing_url,
                 title,
+                normalized_listing_price_krw,
                 _safe_int(fair_price_krw),
                 _safe_int(target_price_krw),
                 _safe_float(alert_drop_rate_percent),
@@ -450,6 +466,7 @@ def _insert_condition_change_candidate_notice_alert_event(
             product_id,
             url,
             title,
+            price_krw,
             fair_price_krw,
             target_price_krw,
             trigger_reason,
@@ -457,13 +474,14 @@ def _insert_condition_change_candidate_notice_alert_event(
             status,
             send_attempts
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'app_only', 0)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'app_only', 0)
         """,
         (
             normalized_user_id,
             product_id,
-            "",
+            normalized_listing_url,
             title,
+            normalized_listing_price_krw,
             _safe_int(fair_price_krw),
             _safe_int(target_price_krw),
             CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON,
@@ -814,7 +832,7 @@ def _fetch_existing_user_fair_price_rule_state(
     return None
 
 
-def _count_missed_candidates_between_saved_windows(
+def _collect_missed_candidates_between_saved_windows(
     cursor,
     *,
     user_id,
@@ -830,21 +848,21 @@ def _count_missed_candidates_between_saved_windows(
     normalized_source = (_safe_text(source) or "joongna").lower()
     normalized_search_keyword = _normalize_optional_search_keyword(search_keyword)
     if normalized_search_keyword is None:
-        return 0
+        return {"candidate_rows": 0, "missed_count": 0, "representative_candidate": None}
 
     previous_saved_at_dt = _coerce_datetime(previous_saved_at)
     current_saved_at_dt = _coerce_datetime(current_saved_at)
     if previous_saved_at_dt is None or current_saved_at_dt is None:
-        return 0
+        return {"candidate_rows": 0, "missed_count": 0, "representative_candidate": None}
     if previous_saved_at_dt >= current_saved_at_dt:
-        return 0
+        return {"candidate_rows": 0, "missed_count": 0, "representative_candidate": None}
     if not _safe_bool(new_rule_snapshot.get("enabled"), default=True):
-        return 0
+        return {"candidate_rows": 0, "missed_count": 0, "representative_candidate": None}
 
     try:
         cursor.execute(
             """
-            SELECT product_id, sort_date, price_krw
+            SELECT product_id, sort_date, price_krw, title, url, source
             FROM analysis_jobs
             WHERE user_id = %s
               AND source = %s
@@ -865,30 +883,44 @@ def _count_missed_candidates_between_saved_windows(
         )
     except Exception as exc:
         if _is_unknown_column_error(exc):
-            return 0
+            return {"candidate_rows": 0, "missed_count": 0, "representative_candidate": None}
         raise
 
     rows = cursor.fetchall() or []
     if not rows:
-        logger.info(
-            "[condition_change_candidate] count_scope=keyword user_id=%s source=%s search_keyword=%s candidate_rows=%s missed_candidate_count=%s rule_id=%s",
-            user_id,
-            normalized_source,
-            normalized_search_keyword,
-            0,
-            0,
-            normalized_rule_id,
-        )
-        return 0
+        return {"candidate_rows": 0, "missed_count": 0, "representative_candidate": None}
+
+    def _row_to_candidate(raw_row):
+        if isinstance(raw_row, dict):
+            return {
+                "product_id": _safe_text(raw_row.get("product_id")),
+                "sort_date": _coerce_datetime(raw_row.get("sort_date")),
+                "price_krw": _safe_int(raw_row.get("price_krw")),
+                "title": _safe_text(raw_row.get("title")),
+                "url": _safe_text(raw_row.get("url")),
+                "source": _safe_text(raw_row.get("source")),
+            }
+        if isinstance(raw_row, (tuple, list)):
+            return {
+                "product_id": _safe_text(raw_row[0]) if len(raw_row) > 0 else None,
+                "sort_date": _coerce_datetime(raw_row[1]) if len(raw_row) > 1 else None,
+                "price_krw": _safe_int(raw_row[2]) if len(raw_row) > 2 else None,
+                "title": _safe_text(raw_row[3]) if len(raw_row) > 3 else None,
+                "url": _safe_text(raw_row[4]) if len(raw_row) > 4 else None,
+                "source": _safe_text(raw_row[5]) if len(raw_row) > 5 else None,
+            }
+        return None
 
     missed_count = 0
     grouped_rows = {}
+    representative_candidate = None
     for row in rows:
-        if not isinstance(row, (tuple, list)) or len(row) < 3:
+        candidate = _row_to_candidate(row)
+        if candidate is None:
             continue
-        product_id = _safe_text(row[0])
-        listing_sort_date = _coerce_datetime(row[1])
-        listing_price_krw = _safe_int(row[2])
+        product_id = candidate.get("product_id")
+        listing_sort_date = candidate.get("sort_date")
+        listing_price_krw = candidate.get("price_krw")
         if listing_sort_date is None or listing_price_krw is None:
             continue
         if listing_sort_date < previous_saved_at_dt or listing_sort_date >= current_saved_at_dt:
@@ -899,25 +931,90 @@ def _count_missed_candidates_between_saved_windows(
         else:
             dedupe_key = f"anon:{listing_sort_date.isoformat()}:{listing_price_krw}"
 
-        grouped_rows.setdefault(dedupe_key, []).append((listing_sort_date, listing_price_krw))
+        grouped_rows.setdefault(dedupe_key, []).append(candidate)
 
     for dedupe_key_rows in grouped_rows.values():
         has_missed_candidate = False
-        for _, listing_price_krw in dedupe_key_rows:
+        group_representative = None
+        for candidate in dedupe_key_rows:
+            listing_price_krw = candidate.get("price_krw")
             old_rule_match = _is_price_match_for_rule(listing_price_krw, old_rule_snapshot)
             new_rule_match = _is_price_match_for_rule(listing_price_krw, new_rule_snapshot)
             if new_rule_match and not old_rule_match:
                 has_missed_candidate = True
-                break
+                if (
+                    group_representative is None
+                    or (candidate.get("sort_date") or datetime.min) > (group_representative.get("sort_date") or datetime.min)
+                ):
+                    group_representative = candidate
+
         if has_missed_candidate:
             missed_count += 1
+            if group_representative is not None:
+                if (
+                    representative_candidate is None
+                    or (group_representative.get("sort_date") or datetime.min) > (representative_candidate.get("sort_date") or datetime.min)
+                ):
+                    representative_candidate = group_representative
+
+    return {
+        "candidate_rows": len(rows),
+        "missed_count": missed_count,
+        "representative_candidate": representative_candidate,
+        "user_id": user_id,
+        "source": normalized_source,
+        "search_keyword": normalized_search_keyword,
+        "rule_id": normalized_rule_id,
+    }
+
+
+def _count_missed_candidates_between_saved_windows(
+    cursor,
+    *,
+    user_id,
+    rule_id,
+    source,
+    search_keyword,
+    previous_saved_at,
+    current_saved_at,
+    old_rule_snapshot,
+    new_rule_snapshot,
+):
+    normalized_rule_id = _safe_int(rule_id)
+    stats = _collect_missed_candidates_between_saved_windows(
+        cursor,
+        user_id=user_id,
+        rule_id=rule_id,
+        source=source,
+        search_keyword=search_keyword,
+        previous_saved_at=previous_saved_at,
+        current_saved_at=current_saved_at,
+        old_rule_snapshot=old_rule_snapshot,
+        new_rule_snapshot=new_rule_snapshot,
+    )
+    missed_count = _safe_int(stats.get("missed_count")) or 0
+    candidate_rows = _safe_int(stats.get("candidate_rows")) or 0
+    normalized_source = (_safe_text(source) or "joongna").lower()
+    normalized_search_keyword = _normalize_optional_search_keyword(search_keyword)
+
+    if missed_count == 0:
+        logger.info(
+            "[condition_change_candidate] count_scope=keyword user_id=%s source=%s search_keyword=%s candidate_rows=%s missed_candidate_count=%s rule_id=%s",
+            user_id,
+            normalized_source,
+            normalized_search_keyword,
+            candidate_rows,
+            0,
+            normalized_rule_id,
+        )
+        return 0
 
     logger.info(
         "[condition_change_candidate] count_scope=keyword user_id=%s source=%s search_keyword=%s candidate_rows=%s missed_candidate_count=%s rule_id=%s",
         user_id,
         normalized_source,
         normalized_search_keyword,
-        len(rows),
+        candidate_rows,
         missed_count,
         normalized_rule_id,
     )
@@ -1632,6 +1729,7 @@ def upsert_user_fair_price_setting(
     previous_saved_at = None
     current_saved_at = None
     missed_candidate_count = 0
+    representative_missed_candidate = None
     rule_id = None
     old_rule_snapshot = None
     new_rule_snapshot = _build_rule_snapshot(
@@ -2127,7 +2225,7 @@ def upsert_user_fair_price_setting(
             and old_rule_snapshot is not None
             and rule_id is not None
         ):
-            missed_candidate_count = _count_missed_candidates_between_saved_windows(
+            missed_candidate_stats = _collect_missed_candidates_between_saved_windows(
                 cursor,
                 user_id=normalized_user_id,
                 rule_id=rule_id,
@@ -2137,6 +2235,17 @@ def upsert_user_fair_price_setting(
                 current_saved_at=current_saved_at,
                 old_rule_snapshot=old_rule_snapshot,
                 new_rule_snapshot=new_rule_snapshot,
+            )
+            missed_candidate_count = _safe_int(missed_candidate_stats.get("missed_count")) or 0
+            representative_missed_candidate = missed_candidate_stats.get("representative_candidate")
+            logger.info(
+                "[condition_change_candidate] count_scope=keyword user_id=%s source=%s search_keyword=%s candidate_rows=%s missed_candidate_count=%s rule_id=%s",
+                normalized_user_id,
+                "joongna",
+                resolved_search_keyword,
+                _safe_int(missed_candidate_stats.get("candidate_rows")) or 0,
+                missed_candidate_count,
+                rule_id,
             )
 
         if (
@@ -2163,6 +2272,36 @@ def upsert_user_fair_price_setting(
                     alert_price_direction=normalized_alert_price_direction,
                     missed_candidate_count=missed_candidate_count,
                     sort_date=current_saved_at,
+                    listing_product_id=(
+                        representative_missed_candidate.get("product_id")
+                        if isinstance(representative_missed_candidate, dict)
+                        else None
+                    ),
+                    listing_title=(
+                        representative_missed_candidate.get("title")
+                        if isinstance(representative_missed_candidate, dict)
+                        else None
+                    ),
+                    listing_url=(
+                        representative_missed_candidate.get("url")
+                        if isinstance(representative_missed_candidate, dict)
+                        else None
+                    ),
+                    listing_source=(
+                        representative_missed_candidate.get("source")
+                        if isinstance(representative_missed_candidate, dict)
+                        else None
+                    ),
+                    listing_price_krw=(
+                        representative_missed_candidate.get("price_krw")
+                        if isinstance(representative_missed_candidate, dict)
+                        else None
+                    ),
+                    listing_sort_date=(
+                        representative_missed_candidate.get("sort_date")
+                        if isinstance(representative_missed_candidate, dict)
+                        else None
+                    ),
                 )
             except Exception as notice_exc:
                 logger.warning(
