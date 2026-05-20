@@ -16,6 +16,22 @@ from src.joongna_polling_service import (  # noqa: E402
 
 
 class _FakeCursor:
+    def __init__(self):
+        self.executed = []
+        self._search_query_id = 1
+        self._fetchone_result = None
+
+    def execute(self, query, params=None):
+        self.executed.append((query, params))
+        normalized = " ".join((query or "").split()).lower()
+        if normalized.startswith("select id from search_queries"):
+            self._fetchone_result = (self._search_query_id,)
+        else:
+            self._fetchone_result = None
+
+    def fetchone(self):
+        return self._fetchone_result
+
     def close(self):
         return None
 
@@ -538,6 +554,84 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(stats.get("changed_count"), 1)
         self.assertEqual(stats.get("analysis_jobs_skipped_duplicate"), 1)
         self.assertEqual(stats.get("created_alert_count"), 0)
+
+    def test_poll_once_saves_search_results_per_group(self):
+        due_rules = [
+            {
+                "id": 1,
+                "user_id": "u1",
+                "search_keyword": "맥북 m2",
+                "saved_at": "2026-05-15 10:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 6001,
+            "product_id": 6001,
+            "title": "맥북에어 M2 16GB 512GB",
+            "price": 1190000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-6001",
+            "product_url": "https://web.joongna.com/product/6001",
+            "image_url": "",
+        }
+
+        with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+            with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                with patch("src.joongna_polling_service.get_connection", return_value=_FakeConnection()):
+                    with patch("src.joongna_polling_service.get_seen_product", return_value=None):
+                        with patch("src.joongna_polling_service.upsert_seen_product_observation"):
+                            with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                                mock_enqueue.return_value = {
+                                    "ok": True,
+                                    "created_jobs": [{"job_id": 1}],
+                                    "skipped_jobs": [],
+                                }
+                                stats = poll_once()
+
+        self.assertEqual(stats.get("search_results_saved"), 1)
+        self.assertEqual(stats.get("search_results_save_errors"), 0)
+        self.assertEqual(mock_enqueue.call_count, 1)
+
+    def test_poll_once_continues_when_search_cache_save_fails(self):
+        due_rules = [
+            {
+                "id": 1,
+                "user_id": "u1",
+                "search_keyword": "맥북 m3",
+                "saved_at": "2026-05-15 10:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 7001,
+            "product_id": 7001,
+            "title": "맥북에어 M3 16GB 512GB",
+            "price": 1490000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-7001",
+            "product_url": "https://web.joongna.com/product/7001",
+            "image_url": "",
+        }
+
+        with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+            with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                with patch("src.joongna_polling_service.get_connection", return_value=_FakeConnection()):
+                    with patch(
+                        "src.joongna_polling_service.save_group_search_results",
+                        side_effect=RuntimeError("cache table missing"),
+                    ):
+                        with patch("src.joongna_polling_service.get_seen_product", return_value=None):
+                            with patch("src.joongna_polling_service.upsert_seen_product_observation"):
+                                with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                                    mock_enqueue.return_value = {
+                                        "ok": True,
+                                        "created_jobs": [{"job_id": 1}],
+                                        "skipped_jobs": [],
+                                    }
+                                    stats = poll_once()
+
+        self.assertEqual(stats.get("search_results_saved"), 0)
+        self.assertEqual(stats.get("search_results_save_errors"), 1)
+        self.assertEqual(mock_enqueue.call_count, 1)
 
 
 if __name__ == "__main__":

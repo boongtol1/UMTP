@@ -78,6 +78,10 @@ def _print_summary(stats):
         f"analyzed_count={stats.get('analyzed_count', 0)}, "
         f"alert_created_count={stats.get('alert_created_count', 0)}"
     )
+    print(
+        f"search_results_saved={stats.get('search_results_saved', 0)}, "
+        f"search_results_save_errors={stats.get('search_results_save_errors', 0)}"
+    )
 
 
 def main():

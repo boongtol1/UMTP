@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 
 try:
     from src.db import get_connection
@@ -148,6 +149,8 @@ def _build_poll_stats(search_words):
         "skipped_before_saved_at": 0,
         "analysis_jobs_processed": 0,
         "analysis_jobs_process_failed": 0,
+        "search_results_saved": 0,
+        "search_results_save_errors": 0,
     }
 
 
@@ -163,6 +166,149 @@ def _build_observed_product(search_word, item):
         "image_url": item.get("image_url"),
         "sort_date": parse_sort_date(item),
         "refresh_key": item.get("refresh_key"),
+    }
+
+
+def _safe_int(value):
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_text(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
+def _safe_json_dumps(value):
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except Exception:
+        return "{}"
+
+
+def _extract_single_value_row(row):
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        if not row:
+            return None
+        return list(row.values())[0]
+    if isinstance(row, (tuple, list)):
+        if not row:
+            return None
+        return row[0]
+    return row
+
+
+def _upsert_search_query(cursor, *, source, normalized_keyword, polled_at, status):
+    cursor.execute(
+        """
+        INSERT INTO search_queries (
+            source,
+            normalized_keyword,
+            created_at,
+            last_polled_at,
+            last_status
+        )
+        VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            last_polled_at = VALUES(last_polled_at),
+            last_status = VALUES(last_status)
+        """,
+        (
+            source,
+            normalized_keyword,
+            polled_at,
+            status,
+        ),
+    )
+    cursor.execute(
+        """
+        SELECT id
+        FROM search_queries
+        WHERE source = %s
+          AND normalized_keyword = %s
+        LIMIT 1
+        """,
+        (source, normalized_keyword),
+    )
+    row = cursor.fetchone()
+    return _safe_int(_extract_single_value_row(row))
+
+
+def save_group_search_results(cursor, *, source, search_keyword, items, fetched_at=None, status="ok"):
+    normalized_source = _normalize_source(source)
+    normalized_keyword = normalize_search_keyword(search_keyword)
+    if cursor is None or not normalized_keyword:
+        return {"ok": False, "reason": "invalid_scope", "search_query_id": None, "inserted_count": 0}
+
+    normalized_fetched_at = _coerce_datetime(fetched_at) or datetime.now()
+    search_query_id = _upsert_search_query(
+        cursor,
+        source=normalized_source,
+        normalized_keyword=normalized_keyword,
+        polled_at=normalized_fetched_at,
+        status=status,
+    )
+    if search_query_id is None:
+        return {"ok": False, "reason": "search_query_upsert_failed", "search_query_id": None, "inserted_count": 0}
+
+    inserted_count = 0
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+
+        product_id = _safe_text(item.get("product_id") or item.get("seq"))
+        if product_id is None:
+            continue
+
+        title = _safe_text(item.get("title"))
+        price = _safe_int(item.get("price"))
+        sort_date = _coerce_datetime(item.get("sort_date"))
+        url = _safe_text(item.get("product_url")) or ""
+        raw_json = _safe_json_dumps(item)
+
+        cursor.execute(
+            """
+            INSERT INTO search_results (
+                search_query_id,
+                product_id,
+                title,
+                price,
+                sort_date,
+                url,
+                raw_json,
+                fetched_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                search_query_id,
+                product_id,
+                title,
+                price,
+                sort_date,
+                url,
+                raw_json,
+                normalized_fetched_at,
+            ),
+        )
+        inserted_count += 1
+
+    return {
+        "ok": True,
+        "reason": "saved",
+        "search_query_id": search_query_id,
+        "inserted_count": inserted_count,
     }
 
 
@@ -485,11 +631,13 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
     connection = None
     cursor = None
     seen_db_ready = False
+    search_cache_db_ready = False
     processed_products = {}
 
     def disable_seen_db(reason):
-        nonlocal connection, cursor, seen_db_ready
+        nonlocal connection, cursor, seen_db_ready, search_cache_db_ready
         seen_db_ready = False
+        search_cache_db_ready = False
         print(f"[polling] seen DB 비활성화: {reason}")
         if cursor is not None:
             try:
@@ -532,6 +680,7 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
             connection = get_connection()
             cursor = connection.cursor()
             seen_db_ready = True
+            search_cache_db_ready = True
         except Exception as exc:
             print(f"[polling] seen DB 연결 실패: {exc}")
 
@@ -556,7 +705,58 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                 except Exception as exc:
                     stats["search_errors"] += 1
                     print(f"[{source}/{search_word}] Search API 조회 실패: {exc}")
+                    if search_cache_db_ready and cursor is not None:
+                        try:
+                            save_group_search_results(
+                                cursor,
+                                source=source,
+                                search_keyword=search_word,
+                                items=[],
+                                fetched_at=datetime.now(),
+                                status="fetch_error",
+                            )
+                            connection.commit()
+                        except Exception as cache_exc:
+                            stats["search_results_save_errors"] += 1
+                            try:
+                                connection.rollback()
+                            except Exception:
+                                pass
+                            search_cache_db_ready = False
+                            print(
+                                f"[{source}/{search_word}] search cache 상태 저장 실패: "
+                                f"{cache_exc}"
+                            )
                     continue
+
+                if search_cache_db_ready and cursor is not None:
+                    try:
+                        save_result = save_group_search_results(
+                            cursor,
+                            source=source,
+                            search_keyword=search_word,
+                            items=items,
+                            fetched_at=datetime.now(),
+                            status="ok",
+                        )
+                        if save_result.get("ok"):
+                            connection.commit()
+                            inserted_count = int(save_result.get("inserted_count") or 0)
+                            stats["search_results_saved"] += inserted_count
+                        else:
+                            stats["search_results_save_errors"] += 1
+                            print(
+                                f"[{source}/{search_word}] search cache 저장 실패: "
+                                f"{save_result.get('reason') or 'unknown'}"
+                            )
+                    except Exception as exc:
+                        stats["search_results_save_errors"] += 1
+                        try:
+                            connection.rollback()
+                        except Exception:
+                            pass
+                        search_cache_db_ready = False
+                        print(f"[{source}/{search_word}] search cache 저장 예외: {exc}")
 
                 observed_products = []
                 for item in items:
@@ -678,6 +878,11 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
         f"unchanged_skipped_count={stats.get('unchanged_skipped_count', 0)} "
         f"analyzed_count={stats.get('analyzed_count', 0)} "
         f"alert_created_count={stats.get('alert_created_count', 0)}"
+    )
+    print(
+        "[polling] search_cache_summary "
+        f"search_results_saved={stats.get('search_results_saved', 0)} "
+        f"search_results_save_errors={stats.get('search_results_save_errors', 0)}"
     )
 
     return stats

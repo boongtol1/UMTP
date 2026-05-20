@@ -124,6 +124,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.7 polling 규칙: 검색어는 후보 수집용이며 최종 알림 대상은 스펙 파싱 결과 + 사용자 설정 공정가/알림기준으로 결정합니다.
 - 1.8 진행 현황: polling은 감지된 매물을 `analysis_jobs`에 enqueue하고, analysis worker가 pending job을 처리해 `listing_analysis_results` 및 `alert_events`를 생성합니다.
 - 1.8 polling 구조: 같은 `source + search_keyword`는 같은 polling cycle에서 외부 Search API를 1회만 호출하고, 결과를 저장한 뒤 여러 설정(`user_fair_prices`)은 저장 결과를 내부 매칭으로 공유합니다.
+- 1.8 검색 캐시 구조: 공유 polling 결과는 `search_queries`(검색어 스코프) + `search_results`(조회 결과 스냅샷) 테이블에도 저장됩니다.
 - 1.8 변경 감지 스킵 구조: `joongna_seen_products`의 이전 관측값과 현재 관측값을 비교해 `new/sort_date_changed/price_changed/title_changed/refresh_key_changed/body_maybe_changed`만 분석 큐로 보내고, `unchanged`는 분석을 스킵합니다.
 - 1.8 lazy detail fetch 구조: analysis worker는 모든 매물의 상세본문을 조회하지 않고, `new/저가 후보/제목 파싱 실패/제품명만 있고 스펙 부족` 후보에만 상세조회(fetch_html)를 수행합니다.
 - 1.8 알림 속도(priority) 구조: watch_rule(`user_fair_prices`)마다 `priority=FAST/NORMAL/LOW`를 저장하고, polling scheduler는 priority 기준 기본 주기(45/180/600초)에 ±20% jitter를 적용해 다음 조회 시점을 계산합니다.
@@ -823,6 +824,7 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_user_push_tokens.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_listing_analysis_results_pipeline.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_identity_user_product.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_joongna_sort_date_tracking.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_search_query_results_cache.sql
 # heartbeat 롤백(066b3e5 제거) 시에만 실행
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_remove_worker_heartbeats.sql
 ```
@@ -864,6 +866,7 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - 두 테이블 모두 기준값이 없으면 alert를 만들지 않고 `fair_price_missing`으로 처리합니다.
 - 설정 저장 시 `enabled=true`이면 `force_poll=true`, `last_poll_requested_at=NOW()`, `last_polled_at=NULL`이 되어 즉시 due 대상이 됩니다.
 - polling worker는 due 설정을 읽어 검색하며, 같은 검색어를 여러 사용자가 켜도 Search API는 검색어당 1회만 호출합니다.
+- polling worker는 조회한 그룹 결과를 `search_queries`/`search_results`에도 저장해 후속 집계와 디버깅에 재사용할 수 있습니다.
 - 알림 속도(priority)는 UI에 `빠름/보통/절전`으로 표시되며 내부값은 `FAST/NORMAL/LOW`를 사용합니다.
 - priority별 기본 주기는 `FAST=45초`, `NORMAL=180초`, `LOW=600초`입니다.
 - scheduler는 priority별 기본 주기에 jitter(±20%)를 적용해 실제 주기를 계산합니다. 예: `FAST 약 36~54초`, `NORMAL 약 144~216초`, `LOW 약 480~720초`.
