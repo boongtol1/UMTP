@@ -83,6 +83,12 @@ fun ReadAlertArchiveScreen(
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                 }
             },
+            onOpenImageUrl = { alert ->
+                val imageUrl = resolveReadArchiveImageUrl(alert)
+                if (!imageUrl.isNullOrBlank()) {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(imageUrl)))
+                }
+            },
         )
         return
     }
@@ -295,6 +301,7 @@ private fun ReadAlertArchiveDetailScreen(
     alert: AlertItem,
     onBack: () -> Unit,
     onOpenUrl: (AlertItem) -> Unit,
+    onOpenImageUrl: (AlertItem) -> Unit,
 ) {
     val resolvedUrl = resolveReadArchiveUrl(alert)
     val listingImageUrl = alert.listing_image_url?.takeIf { it.isNotBlank() }
@@ -343,7 +350,7 @@ private fun ReadAlertArchiveDetailScreen(
                             .fillMaxWidth()
                             .height(180.dp)
                             .clip(MaterialTheme.shapes.medium)
-                            .clickable(enabled = !resolvedUrl.isNullOrBlank()) { onOpenUrl(alert) },
+                            .clickable { onOpenImageUrl(alert) },
                         contentScale = ContentScale.Crop,
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -351,7 +358,9 @@ private fun ReadAlertArchiveDetailScreen(
             }
 
             items(buildReadArchiveDetailRows(alert, resolvedUrl)) { row ->
-                val isLinkRow = (row.first == "URL" || row.first == "대표 이미지") && !resolvedUrl.isNullOrBlank()
+                val isUrlRow = row.first == "URL" && !resolvedUrl.isNullOrBlank()
+                val isImageRow = row.first == "대표 이미지" && !listingImageUrl.isNullOrBlank()
+                val isLinkRow = isUrlRow || isImageRow
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = row.first,
@@ -361,7 +370,13 @@ private fun ReadAlertArchiveDetailScreen(
                     Text(
                         text = row.second,
                         modifier = if (isLinkRow) {
-                            Modifier.clickable { onOpenUrl(alert) }
+                            Modifier.clickable {
+                                if (isImageRow) {
+                                    onOpenImageUrl(alert)
+                                } else {
+                                    onOpenUrl(alert)
+                                }
+                            }
                         } else {
                             Modifier
                         },
@@ -388,6 +403,10 @@ private fun ReadAlertArchiveDetailScreen(
 
 private fun resolveReadArchiveUrl(alert: AlertItem): String? {
     return alert.product_url?.takeIf { it.isNotBlank() } ?: alert.url?.takeIf { it.isNotBlank() }
+}
+
+private fun resolveReadArchiveImageUrl(alert: AlertItem): String? {
+    return alert.listing_image_url?.takeIf { it.isNotBlank() }
 }
 
 private fun buildReadArchiveSpecSummary(alert: AlertItem): String {
