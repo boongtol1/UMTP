@@ -1059,9 +1059,224 @@ def _normalize_alert_id_list(alert_event_ids):
 
 def _safe_json_dumps(value):
     try:
-        return json.dumps(value, ensure_ascii=False)
+        return json.dumps(value, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
         return json.dumps(str(value), ensure_ascii=False)
+
+
+def _safe_decimal_2(value):
+    normalized = _normalize_optional_float(value)
+    if normalized is None:
+        return None
+    return round(normalized, 2)
+
+
+def _normalize_alert_detail_for_archive_log(alert_detail):
+    if not isinstance(alert_detail, dict):
+        return {}
+
+    normalized = dict(alert_detail)
+    risk_label = _resolve_risk_label_for_display(normalized)
+    risk_keywords_text = _resolve_risk_keywords_text_for_display(normalized)
+    trade_flags_text = _resolve_trade_flags_text_for_display(normalized)
+    special_notes_text = _resolve_special_notes_text_for_display(
+        normalized,
+        risk_label=risk_label,
+        risk_keywords_text=risk_keywords_text,
+        trade_flags_text=trade_flags_text,
+    )
+    condition_label = _resolve_alert_condition_label_for_display(normalized)
+    body_text = _resolve_body_text_for_display(normalized)
+    body_excerpt = _normalize_optional_text(normalized.get("body_excerpt"))
+    if body_excerpt is None:
+        body_excerpt = _build_body_excerpt(body_text)
+    listing_image_url = _normalize_optional_text(normalized.get("listing_image_url")) or _normalize_optional_text(
+        normalized.get("image_url")
+    )
+    if listing_image_url is None:
+        product_id = _resolve_alert_product_id_for_image_lookup(normalized)
+        listing_image_url = _fetch_listing_image_url_by_product_id(product_id)
+
+    payload = {
+        "trigger_reason": _normalize_optional_text(normalized.get("trigger_reason")),
+        "alert_condition_label": condition_label,
+        "source": _normalize_optional_text(normalized.get("source")),
+        "url": _normalize_optional_text(normalized.get("url")),
+        "listing_image_url": listing_image_url,
+        "title": _normalize_optional_text(normalized.get("title")),
+        "product_id": _normalize_optional_text(normalized.get("product_id")),
+        "sort_date": normalized.get("sort_date"),
+        "product_type": _normalize_optional_text(normalized.get("product_type")),
+        "chip": _normalize_optional_text(normalized.get("chip")),
+        "screen_inch": _safe_int(normalized.get("screen_inch")),
+        "ram_gb": _safe_int(normalized.get("ram_gb")),
+        "ssd_gb": _safe_int(normalized.get("ssd_gb")),
+        "price_krw": _safe_int(normalized.get("price_krw")),
+        "fair_price_krw": _safe_int(normalized.get("fair_price_krw")),
+        "target_price_krw": _safe_int(normalized.get("target_price_krw")),
+        "drop_rate_percent": _safe_decimal_2(normalized.get("drop_rate_percent")),
+        "alert_drop_rate_percent": _safe_decimal_2(normalized.get("alert_drop_rate_percent")),
+        "alert_price_direction": _normalize_optional_text(normalized.get("alert_price_direction")),
+        "risk_level": _normalize_optional_text(normalized.get("risk_level")),
+        "risk_label": risk_label,
+        "risk_score": _safe_int(normalized.get("risk_score")),
+        "risk_keywords": risk_keywords_text,
+        "trade_type": _normalize_optional_text(normalized.get("trade_type")),
+        "is_exchange_post": bool(_normalize_optional_bool(normalized.get("is_exchange_post"))),
+        "trade_flags_text": trade_flags_text,
+        "special_notes_text": special_notes_text,
+        "body_excerpt": body_excerpt,
+        "body_text": _normalize_optional_text(body_text),
+        "message": _normalize_optional_text(normalized.get("message")),
+        "status": _normalize_optional_text(normalized.get("status")),
+        "analyzed_at": normalized.get("analyzed_at"),
+        "created_at": normalized.get("created_at"),
+        "sent_at": normalized.get("sent_at"),
+        "updated_at": normalized.get("updated_at"),
+        "read_at": normalized.get("read_at"),
+    }
+    return payload
+
+
+def _fetch_alert_event_details_for_archive_log(cursor, *, user_id, alert_event_ids):
+    normalized_user_id = _normalize_optional_text(user_id)
+    normalized_ids = []
+    for value in alert_event_ids or []:
+        parsed = _safe_int(value)
+        if parsed is None or parsed <= 0:
+            continue
+        if parsed not in normalized_ids:
+            normalized_ids.append(parsed)
+
+    if normalized_user_id is None or not normalized_ids:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(normalized_ids))
+    query_params = tuple([normalized_user_id, *normalized_ids])
+
+    queries = [
+        f"""
+        SELECT
+            id,
+            trigger_reason,
+            source,
+            url,
+            title,
+            product_id,
+            sort_date,
+            product_type,
+            chip,
+            screen_inch,
+            ram_gb,
+            ssd_gb,
+            price_krw,
+            fair_price_krw,
+            target_price_krw,
+            drop_rate_percent,
+            alert_drop_rate_percent,
+            alert_price_direction,
+            risk_level,
+            risk_score,
+            risk_keywords,
+            is_exchange_post,
+            trade_type,
+            body_excerpt,
+            body_text,
+            analyzed_at,
+            message,
+            status,
+            read_at,
+            created_at,
+            sent_at,
+            updated_at
+        FROM alert_events
+        WHERE user_id = %s
+          AND id IN ({placeholders})
+        """,
+        f"""
+        SELECT
+            id,
+            trigger_reason,
+            source,
+            url,
+            title,
+            product_id,
+            sort_date,
+            price_krw,
+            fair_price_krw,
+            target_price_krw,
+            drop_rate_percent,
+            alert_drop_rate_percent,
+            alert_price_direction,
+            body_excerpt,
+            message,
+            status,
+            read_at,
+            created_at,
+            sent_at,
+            updated_at
+        FROM alert_events
+        WHERE user_id = %s
+          AND id IN ({placeholders})
+        """,
+        f"""
+        SELECT
+            id,
+            trigger_reason,
+            source,
+            url,
+            title,
+            product_id,
+            message,
+            status,
+            read_at,
+            created_at
+        FROM alert_events
+        WHERE user_id = %s
+          AND id IN ({placeholders})
+        """,
+    ]
+
+    rows = []
+    for query in queries:
+        try:
+            cursor.execute(query, query_params)
+            rows = cursor.fetchall() or []
+            break
+        except Exception as exc:
+            lowered = str(exc).lower()
+            if "unknown column" in lowered or "doesn't exist" in lowered:
+                continue
+            raise
+
+    if not rows:
+        return {}
+
+    product_ids = []
+    for row in rows:
+        product_id = _normalize_optional_text(row.get("product_id")) if isinstance(row, dict) else None
+        if product_id is None:
+            continue
+        if product_id not in product_ids:
+            product_ids.append(product_id)
+
+    image_url_map = _fetch_listing_image_urls(cursor, product_ids)
+
+    details_by_id = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        alert_id = _safe_int(row.get("id"))
+        if alert_id is None or alert_id <= 0:
+            continue
+        product_id = _normalize_optional_text(row.get("product_id"))
+        listing_image_url = _resolve_listing_image_url(product_id, image_url_map)
+        detail = dict(row)
+        if listing_image_url is not None:
+            detail["listing_image_url"] = listing_image_url
+            detail["image_url"] = listing_image_url
+        details_by_id[int(alert_id)] = detail
+    return details_by_id
 
 
 def _insert_alert_read_archive_event_log(
@@ -1076,6 +1291,7 @@ def _insert_alert_read_archive_event_log(
     not_found_ids=None,
     reason=None,
     metadata=None,
+    alert_detail=None,
 ):
     normalized_user_id = _normalize_required_text(user_id, "user_id")
     normalized_action_type = _normalize_required_text(action_type, "action_type")
@@ -1093,6 +1309,12 @@ def _insert_alert_read_archive_event_log(
 
     metadata_json = _safe_json_dumps(metadata) if metadata is not None else None
     not_found_ids_json = _safe_json_dumps(normalized_not_found_ids) if normalized_not_found_ids else None
+    normalized_alert_detail = _normalize_alert_detail_for_archive_log(alert_detail)
+    alert_payload_json = (
+        _safe_json_dumps(normalized_alert_detail)
+        if normalized_alert_detail
+        else None
+    )
 
     try:
         cursor.execute(
@@ -1107,9 +1329,52 @@ def _insert_alert_read_archive_event_log(
                 not_found_ids_json,
                 reason,
                 metadata_json,
+                alert_trigger_reason,
+                alert_condition_label,
+                alert_source,
+                alert_url,
+                alert_listing_image_url,
+                alert_title,
+                alert_product_id,
+                alert_sort_date,
+                alert_product_type,
+                alert_chip,
+                alert_screen_inch,
+                alert_ram_gb,
+                alert_ssd_gb,
+                alert_price_krw,
+                alert_fair_price_krw,
+                alert_target_price_krw,
+                alert_drop_rate_percent,
+                alert_rule_drop_rate_percent,
+                alert_price_direction,
+                alert_risk_level,
+                alert_risk_label,
+                alert_risk_score,
+                alert_risk_keywords,
+                alert_trade_type,
+                alert_is_exchange_post,
+                alert_trade_flags_text,
+                alert_special_notes_text,
+                alert_body_excerpt,
+                alert_body_text,
+                alert_message,
+                alert_status,
+                alert_analyzed_at,
+                alert_created_at,
+                alert_sent_at,
+                alert_updated_at,
+                alert_read_at,
+                alert_payload_json,
                 created_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, NOW()
+            )
             """,
             (
                 normalized_user_id,
@@ -1121,6 +1386,45 @@ def _insert_alert_read_archive_event_log(
                 not_found_ids_json,
                 _normalize_optional_text(reason),
                 metadata_json,
+                _normalize_optional_text(normalized_alert_detail.get("trigger_reason")),
+                _normalize_optional_text(normalized_alert_detail.get("alert_condition_label")),
+                _normalize_optional_text(normalized_alert_detail.get("source")),
+                _normalize_optional_text(normalized_alert_detail.get("url")),
+                _normalize_optional_text(normalized_alert_detail.get("listing_image_url")),
+                _normalize_optional_text(normalized_alert_detail.get("title")),
+                _normalize_optional_text(normalized_alert_detail.get("product_id")),
+                _coerce_datetime_for_sort(normalized_alert_detail.get("sort_date")),
+                _normalize_optional_text(normalized_alert_detail.get("product_type")),
+                _normalize_optional_text(normalized_alert_detail.get("chip")),
+                _safe_int(normalized_alert_detail.get("screen_inch")),
+                _safe_int(normalized_alert_detail.get("ram_gb")),
+                _safe_int(normalized_alert_detail.get("ssd_gb")),
+                _safe_int(normalized_alert_detail.get("price_krw")),
+                _safe_int(normalized_alert_detail.get("fair_price_krw")),
+                _safe_int(normalized_alert_detail.get("target_price_krw")),
+                _safe_decimal_2(normalized_alert_detail.get("drop_rate_percent")),
+                _safe_decimal_2(normalized_alert_detail.get("alert_drop_rate_percent")),
+                _normalize_optional_text(normalized_alert_detail.get("alert_price_direction")),
+                _normalize_optional_text(normalized_alert_detail.get("risk_level")),
+                _normalize_optional_text(normalized_alert_detail.get("risk_label")),
+                _safe_int(normalized_alert_detail.get("risk_score")),
+                _normalize_optional_text(normalized_alert_detail.get("risk_keywords")),
+                _normalize_optional_text(normalized_alert_detail.get("trade_type")),
+                bool(_normalize_optional_bool(normalized_alert_detail.get("is_exchange_post")))
+                if normalized_alert_detail.get("is_exchange_post") is not None
+                else None,
+                _normalize_optional_text(normalized_alert_detail.get("trade_flags_text")),
+                _normalize_optional_text(normalized_alert_detail.get("special_notes_text")),
+                _normalize_optional_text(normalized_alert_detail.get("body_excerpt")),
+                _normalize_optional_text(normalized_alert_detail.get("body_text")),
+                _normalize_optional_text(normalized_alert_detail.get("message")),
+                _normalize_optional_text(normalized_alert_detail.get("status")),
+                _coerce_datetime_for_sort(normalized_alert_detail.get("analyzed_at")),
+                _coerce_datetime_for_sort(normalized_alert_detail.get("created_at")),
+                _coerce_datetime_for_sort(normalized_alert_detail.get("sent_at")),
+                _coerce_datetime_for_sort(normalized_alert_detail.get("updated_at")),
+                _coerce_datetime_for_sort(normalized_alert_detail.get("read_at")),
+                alert_payload_json,
             ),
         )
         return True
@@ -2142,6 +2446,11 @@ def mark_alert_event_read_for_user(*, user_id, alert_event_id):
                     "alert_event_id": normalized_alert_id,
                 }
 
+            existing_detail = _fetch_alert_event_details_for_archive_log(
+                cursor,
+                user_id=normalized_user_id,
+                alert_event_ids=[normalized_alert_id],
+            ).get(normalized_alert_id)
             _insert_alert_read_archive_event_log(
                 cursor,
                 user_id=normalized_user_id,
@@ -2155,6 +2464,7 @@ def mark_alert_event_read_for_user(*, user_id, alert_event_id):
                     "is_read": bool(_safe_int(existing.get("is_read")) or 0),
                     "read_at": existing.get("read_at"),
                 },
+                alert_detail=existing_detail,
             )
             connection.commit()
             return {
@@ -2176,6 +2486,11 @@ def mark_alert_event_read_for_user(*, user_id, alert_event_id):
             (normalized_alert_id, normalized_user_id),
         )
         row = cursor.fetchone() or {}
+        read_detail = _fetch_alert_event_details_for_archive_log(
+            cursor,
+            user_id=normalized_user_id,
+            alert_event_ids=[normalized_alert_id],
+        ).get(normalized_alert_id)
         _insert_alert_read_archive_event_log(
             cursor,
             user_id=normalized_user_id,
@@ -2189,6 +2504,7 @@ def mark_alert_event_read_for_user(*, user_id, alert_event_id):
                 "is_read": bool(_safe_int(row.get("is_read")) or 0),
                 "read_at": row.get("read_at"),
             },
+            alert_detail=read_detail,
         )
         connection.commit()
         return {
@@ -2213,6 +2529,36 @@ def mark_all_alert_events_read_for_user(*, user_id):
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
+
+        unread_alert_ids = []
+        try:
+            cursor.execute(
+                """
+                SELECT id
+                FROM alert_events
+                WHERE user_id = %s
+                  AND COALESCE(is_read, 0) = 0
+                """,
+                (normalized_user_id,),
+            )
+            unread_rows = cursor.fetchall() or []
+            for row in unread_rows:
+                alert_id = _safe_int(row.get("id")) if isinstance(row, dict) else None
+                if alert_id is None or alert_id <= 0:
+                    continue
+                unread_alert_ids.append(alert_id)
+        except Exception as preload_exc:
+            lowered = str(preload_exc).lower()
+            if "unknown column" in lowered:
+                unread_alert_ids = []
+            else:
+                raise
+        unread_alert_details = _fetch_alert_event_details_for_archive_log(
+            cursor,
+            user_id=normalized_user_id,
+            alert_event_ids=unread_alert_ids,
+        )
+
         try:
             cursor.execute(
                 """
@@ -2244,6 +2590,18 @@ def mark_all_alert_events_read_for_user(*, user_id):
             skipped_count=None,
             reason="marked_unread_as_read",
         )
+        for affected_alert_id in unread_alert_ids:
+            _insert_alert_read_archive_event_log(
+                cursor,
+                user_id=normalized_user_id,
+                action_type="mark_read_all_item",
+                alert_event_id=affected_alert_id,
+                requested_count=1,
+                affected_count=1,
+                skipped_count=0,
+                reason="marked_unread_as_read_item",
+                alert_detail=unread_alert_details.get(affected_alert_id),
+            )
         connection.commit()
         return {
             "ok": True,
@@ -2264,6 +2622,37 @@ def clear_all_read_alert_events_for_user(*, user_id):
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
+
+        clear_target_ids = []
+        try:
+            cursor.execute(
+                """
+                SELECT id
+                FROM alert_events
+                WHERE user_id = %s
+                  AND COALESCE(is_read, 0) = 1
+                  AND COALESCE(is_read_archive_cleared, 0) = 0
+                """,
+                (normalized_user_id,),
+            )
+            target_rows = cursor.fetchall() or []
+            for row in target_rows:
+                alert_id = _safe_int(row.get("id")) if isinstance(row, dict) else None
+                if alert_id is None or alert_id <= 0:
+                    continue
+                clear_target_ids.append(alert_id)
+        except Exception as preload_exc:
+            lowered = str(preload_exc).lower()
+            if "unknown column" in lowered:
+                clear_target_ids = []
+            else:
+                raise
+        clear_target_details = _fetch_alert_event_details_for_archive_log(
+            cursor,
+            user_id=normalized_user_id,
+            alert_event_ids=clear_target_ids,
+        )
+
         try:
             cursor.execute(
                 """
@@ -2297,6 +2686,18 @@ def clear_all_read_alert_events_for_user(*, user_id):
             skipped_count=None,
             reason="cleared_read_archive",
         )
+        for cleared_alert_id in clear_target_ids:
+            _insert_alert_read_archive_event_log(
+                cursor,
+                user_id=normalized_user_id,
+                action_type="clear_read_archive_all_item",
+                alert_event_id=cleared_alert_id,
+                requested_count=1,
+                affected_count=1,
+                skipped_count=0,
+                reason="cleared_read_archive_item",
+                alert_detail=clear_target_details.get(cleared_alert_id),
+            )
         connection.commit()
         return {
             "ok": True,
@@ -2365,6 +2766,11 @@ def clear_selected_read_alert_events_for_user(*, user_id, alert_event_ids):
             if alert_id in found_ids
             and not bool(_safe_int(found_by_id[alert_id].get("is_read_archive_cleared")) or 0)
         ]
+        selected_alert_details = _fetch_alert_event_details_for_archive_log(
+            cursor,
+            user_id=normalized_user_id,
+            alert_event_ids=ids_to_clear,
+        )
 
         cleared_count = 0
         if ids_to_clear:
@@ -2396,6 +2802,18 @@ def clear_selected_read_alert_events_for_user(*, user_id, alert_event_ids):
             not_found_ids=not_found_ids,
             reason="clear_selected_completed",
         )
+        for cleared_alert_id in ids_to_clear:
+            _insert_alert_read_archive_event_log(
+                cursor,
+                user_id=normalized_user_id,
+                action_type="clear_read_archive_selected_item",
+                alert_event_id=cleared_alert_id,
+                requested_count=1,
+                affected_count=1,
+                skipped_count=0,
+                reason="clear_selected_item",
+                alert_detail=selected_alert_details.get(cleared_alert_id),
+            )
         connection.commit()
         return {
             "ok": True,

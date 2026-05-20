@@ -69,6 +69,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - `alert_events`에 읽음 상태 컬럼(`is_read`, `read_at`)을 추가했고, 기본 메인 피드는 안 읽은 알림(`is_read=0`)만 조회합니다.
 - 알림 상세를 열면 자동 읽음 처리되며, 읽음 처리된 알림은 삭제되지 않고 읽음 보관함에서 `chip -> screen_inch -> alert list` 구조로 조회할 수 있습니다.
 - 읽음/읽음보관함 동작 이력은 `alert_read_archive_events`에 액션 단위로 누적 기록합니다.
+- 읽음 상세의 카드 요소(알림유형/제목/스펙/가격/위험도/위험키워드/교환·나눔·의심/특이사항/본문/시각 등)는 `alert_read_archive_events` 상세 컬럼과 `alert_payload_json`에도 함께 저장합니다.
 - `PATCH /alert-events/{id}/read`, `PATCH /alert-events/read-all`, `GET /alert-events/read/grouped` API를 추가했습니다.
 - 0.8 서비스 계층: `analysis_service.py`에서 URL 분석과 `ok/ reason` 실패 응답을 처리합니다.
 - 0.8 알림은 `notifier.py`의 `print()` 기반 가짜 알림으로 처리합니다.
@@ -824,6 +825,7 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_analysis_jobs.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_analysis_jobs_lookup_indexes.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/create_or_alter_alert_events.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_alert_read_archive_events_log.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_alert_read_archive_events_detail_fields.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_user_push_tokens.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_listing_analysis_results_pipeline.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_identity_user_product.sql
