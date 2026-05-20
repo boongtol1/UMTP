@@ -117,6 +117,15 @@ def _build_alert_condition_label(alert_price_direction):
     return "이 가격 이하이면 알림"
 
 
+def _build_archive_condition_label(trigger_reason):
+    normalized_trigger = _normalize_optional_text(trigger_reason)
+    if normalized_trigger == "condition_change_candidate_notice":
+        return "조건 변경 사이 후보"
+    if normalized_trigger is None:
+        return None
+    return "가격 알림"
+
+
 def _build_formatted_risk_label(risk_level):
     normalized = _normalize_optional_text(risk_level)
     if normalized is None:
@@ -1064,6 +1073,15 @@ def _safe_json_dumps(value):
         return json.dumps(str(value), ensure_ascii=False)
 
 
+def _rollback_quietly(connection):
+    if connection is None:
+        return
+    try:
+        connection.rollback()
+    except Exception:
+        return
+
+
 def _safe_decimal_2(value):
     normalized = _normalize_optional_float(value)
     if normalized is None:
@@ -1073,23 +1091,30 @@ def _safe_decimal_2(value):
 
 def _normalize_alert_detail_for_archive_log(alert_detail):
     if not isinstance(alert_detail, dict):
-        return {}
+        return {"raw_alert_event": None}
 
     normalized = dict(alert_detail)
-    risk_label = _resolve_risk_label_for_display(normalized)
+    normalized_trigger_reason = _normalize_optional_text(normalized.get("trigger_reason"))
+    risk_level = _normalize_optional_text(normalized.get("risk_level"))
+    risk_label = _build_formatted_risk_label(risk_level)
+    if risk_level is None:
+        risk_label = None
+    risk_keywords_raw = _normalize_optional_text(normalized.get("risk_keywords"))
     risk_keywords_text = _resolve_risk_keywords_text_for_display(normalized)
     trade_flags_text = _resolve_trade_flags_text_for_display(normalized)
+    if trade_flags_text == "특이사항 없음":
+        trade_flags_text = None
     special_notes_text = _resolve_special_notes_text_for_display(
         normalized,
-        risk_label=risk_label,
+        risk_label=risk_label or "정보 없음",
         risk_keywords_text=risk_keywords_text,
-        trade_flags_text=trade_flags_text,
+        trade_flags_text=trade_flags_text or "특이사항 없음",
     )
-    condition_label = _resolve_alert_condition_label_for_display(normalized)
-    body_text = _resolve_body_text_for_display(normalized)
+    if special_notes_text == "특이사항 없음":
+        special_notes_text = None
+    condition_label = _build_archive_condition_label(normalized_trigger_reason)
+    body_text = _normalize_optional_text(normalized.get("body_text"))
     body_excerpt = _normalize_optional_text(normalized.get("body_excerpt"))
-    if body_excerpt is None:
-        body_excerpt = _build_body_excerpt(body_text)
     listing_image_url = _normalize_optional_text(normalized.get("listing_image_url")) or _normalize_optional_text(
         normalized.get("image_url")
     )
@@ -1098,7 +1123,8 @@ def _normalize_alert_detail_for_archive_log(alert_detail):
         listing_image_url = _fetch_listing_image_url_by_product_id(product_id)
 
     payload = {
-        "trigger_reason": _normalize_optional_text(normalized.get("trigger_reason")),
+        "raw_alert_event": dict(normalized),
+        "trigger_reason": normalized_trigger_reason,
         "alert_condition_label": condition_label,
         "source": _normalize_optional_text(normalized.get("source")),
         "url": _normalize_optional_text(normalized.get("url")),
@@ -1117,16 +1143,17 @@ def _normalize_alert_detail_for_archive_log(alert_detail):
         "drop_rate_percent": _safe_decimal_2(normalized.get("drop_rate_percent")),
         "alert_drop_rate_percent": _safe_decimal_2(normalized.get("alert_drop_rate_percent")),
         "alert_price_direction": _normalize_optional_text(normalized.get("alert_price_direction")),
-        "risk_level": _normalize_optional_text(normalized.get("risk_level")),
+        "risk_level": risk_level,
         "risk_label": risk_label,
         "risk_score": _safe_int(normalized.get("risk_score")),
-        "risk_keywords": risk_keywords_text,
+        "risk_keywords": risk_keywords_raw,
+        "risk_keywords_display_text": risk_keywords_text,
         "trade_type": _normalize_optional_text(normalized.get("trade_type")),
-        "is_exchange_post": bool(_normalize_optional_bool(normalized.get("is_exchange_post"))),
+        "is_exchange_post": _normalize_optional_bool(normalized.get("is_exchange_post")),
         "trade_flags_text": trade_flags_text,
         "special_notes_text": special_notes_text,
         "body_excerpt": body_excerpt,
-        "body_text": _normalize_optional_text(body_text),
+        "body_text": body_text,
         "message": _normalize_optional_text(normalized.get("message")),
         "status": _normalize_optional_text(normalized.get("status")),
         "analyzed_at": normalized.get("analyzed_at"),
@@ -1158,6 +1185,9 @@ def _fetch_alert_event_details_for_archive_log(cursor, *, user_id, alert_event_i
         f"""
         SELECT
             id,
+            user_id,
+            watch_rule_id,
+            analysis_job_id,
             trigger_reason,
             source,
             url,
@@ -1196,6 +1226,7 @@ def _fetch_alert_event_details_for_archive_log(cursor, *, user_id, alert_event_i
         f"""
         SELECT
             id,
+            user_id,
             trigger_reason,
             source,
             url,
@@ -1222,6 +1253,7 @@ def _fetch_alert_event_details_for_archive_log(cursor, *, user_id, alert_event_i
         f"""
         SELECT
             id,
+            user_id,
             trigger_reason,
             source,
             url,
@@ -1310,11 +1342,38 @@ def _insert_alert_read_archive_event_log(
     metadata_json = _safe_json_dumps(metadata) if metadata is not None else None
     not_found_ids_json = _safe_json_dumps(normalized_not_found_ids) if normalized_not_found_ids else None
     normalized_alert_detail = _normalize_alert_detail_for_archive_log(alert_detail)
-    alert_payload_json = (
-        _safe_json_dumps(normalized_alert_detail)
-        if normalized_alert_detail
-        else None
-    )
+    raw_alert_event = None
+    if isinstance(normalized_alert_detail, dict):
+        raw_alert_event = normalized_alert_detail.get("raw_alert_event")
+    alert_payload = None
+    if raw_alert_event is not None or normalized_alert_detail or metadata is not None:
+        alert_payload = {
+            "alert_event": raw_alert_event,
+            "display_fields": {
+                "alert_condition_label": _normalize_optional_text(normalized_alert_detail.get("alert_condition_label"))
+                if isinstance(normalized_alert_detail, dict)
+                else None,
+                "alert_risk_label": _normalize_optional_text(normalized_alert_detail.get("risk_label"))
+                if isinstance(normalized_alert_detail, dict)
+                else None,
+                "alert_trade_flags_text": _normalize_optional_text(normalized_alert_detail.get("trade_flags_text"))
+                if isinstance(normalized_alert_detail, dict)
+                else None,
+                "alert_special_notes_text": _normalize_optional_text(normalized_alert_detail.get("special_notes_text"))
+                if isinstance(normalized_alert_detail, dict)
+                else None,
+            },
+            "action_metadata": {
+                "action_type": normalized_action_type,
+                "requested_count": normalized_requested_count,
+                "affected_count": normalized_affected_count,
+                "skipped_count": normalized_skipped_count,
+                "reason": _normalize_optional_text(reason),
+                "not_found_ids": normalized_not_found_ids,
+                "metadata": metadata,
+            },
+        }
+    alert_payload_json = _safe_json_dumps(alert_payload) if alert_payload is not None else None
 
     try:
         cursor.execute(
@@ -1429,14 +1488,7 @@ def _insert_alert_read_archive_event_log(
         )
         return True
     except Exception as exc:
-        lowered = str(exc).lower()
-        if any(
-            token in lowered
-            for token in ("doesn't exist", "no such table", "unknown column")
-        ):
-            return False
-        print(f"[alert_read_archive_events] insert failed: {exc}")
-        return False
+        raise RuntimeError(f"alert_read_archive_events_insert_failed: {exc}") from exc
 
 
 def _telegram_configured():
@@ -2514,6 +2566,13 @@ def mark_alert_event_read_for_user(*, user_id, alert_event_id):
             "read_at": row.get("read_at"),
             "already_read": False,
         }
+    except Exception as exc:
+        _rollback_quietly(connection)
+        return {
+            "ok": False,
+            "reason": f"mark_read_single_failed: {exc}",
+            "alert_event_id": normalized_alert_id,
+        }
     finally:
         if cursor is not None:
             cursor.close()
@@ -2553,12 +2612,6 @@ def mark_all_alert_events_read_for_user(*, user_id):
                 unread_alert_ids = []
             else:
                 raise
-        unread_alert_details = _fetch_alert_event_details_for_archive_log(
-            cursor,
-            user_id=normalized_user_id,
-            alert_event_ids=unread_alert_ids,
-        )
-
         try:
             cursor.execute(
                 """
@@ -2581,13 +2634,22 @@ def mark_all_alert_events_read_for_user(*, user_id):
                 }
             raise
 
+        unread_alert_details = _fetch_alert_event_details_for_archive_log(
+            cursor,
+            user_id=normalized_user_id,
+            alert_event_ids=unread_alert_ids,
+        )
+        requested_count = len(unread_alert_ids)
+        affected_count = int(updated_rows)
+        skipped_count = max(0, requested_count - affected_count)
+
         _insert_alert_read_archive_event_log(
             cursor,
             user_id=normalized_user_id,
             action_type="mark_read_all",
-            requested_count=None,
-            affected_count=int(updated_rows),
-            skipped_count=None,
+            requested_count=requested_count,
+            affected_count=affected_count,
+            skipped_count=skipped_count,
             reason="marked_unread_as_read",
         )
         for affected_alert_id in unread_alert_ids:
@@ -2596,9 +2658,9 @@ def mark_all_alert_events_read_for_user(*, user_id):
                 user_id=normalized_user_id,
                 action_type="mark_read_all_item",
                 alert_event_id=affected_alert_id,
-                requested_count=1,
-                affected_count=1,
-                skipped_count=0,
+                requested_count=requested_count,
+                affected_count=affected_count,
+                skipped_count=skipped_count,
                 reason="marked_unread_as_read_item",
                 alert_detail=unread_alert_details.get(affected_alert_id),
             )
@@ -2606,6 +2668,13 @@ def mark_all_alert_events_read_for_user(*, user_id):
         return {
             "ok": True,
             "updated_count": int(updated_rows),
+        }
+    except Exception as exc:
+        _rollback_quietly(connection)
+        return {
+            "ok": False,
+            "reason": f"mark_read_all_failed: {exc}",
+            "updated_count": 0,
         }
     finally:
         if cursor is not None:
@@ -2647,12 +2716,6 @@ def clear_all_read_alert_events_for_user(*, user_id):
                 clear_target_ids = []
             else:
                 raise
-        clear_target_details = _fetch_alert_event_details_for_archive_log(
-            cursor,
-            user_id=normalized_user_id,
-            alert_event_ids=clear_target_ids,
-        )
-
         try:
             cursor.execute(
                 """
@@ -2677,13 +2740,22 @@ def clear_all_read_alert_events_for_user(*, user_id):
                 }
             raise
 
+        clear_target_details = _fetch_alert_event_details_for_archive_log(
+            cursor,
+            user_id=normalized_user_id,
+            alert_event_ids=clear_target_ids,
+        )
+        requested_count = len(clear_target_ids)
+        affected_count = int(cleared_rows)
+        skipped_count = max(0, requested_count - affected_count)
+
         _insert_alert_read_archive_event_log(
             cursor,
             user_id=normalized_user_id,
             action_type="clear_read_archive_all",
-            requested_count=None,
-            affected_count=int(cleared_rows),
-            skipped_count=None,
+            requested_count=requested_count,
+            affected_count=affected_count,
+            skipped_count=skipped_count,
             reason="cleared_read_archive",
         )
         for cleared_alert_id in clear_target_ids:
@@ -2692,9 +2764,9 @@ def clear_all_read_alert_events_for_user(*, user_id):
                 user_id=normalized_user_id,
                 action_type="clear_read_archive_all_item",
                 alert_event_id=cleared_alert_id,
-                requested_count=1,
-                affected_count=1,
-                skipped_count=0,
+                requested_count=requested_count,
+                affected_count=affected_count,
+                skipped_count=skipped_count,
                 reason="cleared_read_archive_item",
                 alert_detail=clear_target_details.get(cleared_alert_id),
             )
@@ -2702,6 +2774,13 @@ def clear_all_read_alert_events_for_user(*, user_id):
         return {
             "ok": True,
             "cleared_count": int(cleared_rows),
+        }
+    except Exception as exc:
+        _rollback_quietly(connection)
+        return {
+            "ok": False,
+            "reason": f"clear_read_archive_all_failed: {exc}",
+            "cleared_count": 0,
         }
     finally:
         if cursor is not None:
@@ -2766,12 +2845,6 @@ def clear_selected_read_alert_events_for_user(*, user_id, alert_event_ids):
             if alert_id in found_ids
             and not bool(_safe_int(found_by_id[alert_id].get("is_read_archive_cleared")) or 0)
         ]
-        selected_alert_details = _fetch_alert_event_details_for_archive_log(
-            cursor,
-            user_id=normalized_user_id,
-            alert_event_ids=ids_to_clear,
-        )
-
         cleared_count = 0
         if ids_to_clear:
             update_placeholders = ", ".join(["%s"] * len(ids_to_clear))
@@ -2790,6 +2863,11 @@ def clear_selected_read_alert_events_for_user(*, user_id, alert_event_ids):
             )
             cleared_count = int(cursor.rowcount or 0)
 
+        selected_alert_details = _fetch_alert_event_details_for_archive_log(
+            cursor,
+            user_id=normalized_user_id,
+            alert_event_ids=ids_to_clear,
+        )
         requested_count = len(normalized_ids)
         skipped_count = max(0, requested_count - cleared_count - len(not_found_ids))
         _insert_alert_read_archive_event_log(
@@ -2808,9 +2886,10 @@ def clear_selected_read_alert_events_for_user(*, user_id, alert_event_ids):
                 user_id=normalized_user_id,
                 action_type="clear_read_archive_selected_item",
                 alert_event_id=cleared_alert_id,
-                requested_count=1,
-                affected_count=1,
-                skipped_count=0,
+                requested_count=requested_count,
+                affected_count=cleared_count,
+                skipped_count=skipped_count,
+                not_found_ids=not_found_ids,
                 reason="clear_selected_item",
                 alert_detail=selected_alert_details.get(cleared_alert_id),
             )
@@ -2821,6 +2900,16 @@ def clear_selected_read_alert_events_for_user(*, user_id, alert_event_ids):
             "cleared_count": cleared_count,
             "skipped_count": skipped_count,
             "not_found_ids": not_found_ids,
+        }
+    except Exception as exc:
+        _rollback_quietly(connection)
+        return {
+            "ok": False,
+            "reason": f"clear_read_archive_selected_failed: {exc}",
+            "requested_count": len(normalized_ids),
+            "cleared_count": 0,
+            "skipped_count": len(normalized_ids),
+            "not_found_ids": list(normalized_ids),
         }
     finally:
         if cursor is not None:
