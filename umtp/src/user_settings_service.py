@@ -293,6 +293,306 @@ def _build_condition_change_candidate_notice_title(*, chip, screen_inch, ram_gb,
     return "조건 변경 사이 후보 · " + " / ".join(segments)
 
 
+def _safe_int_or_none(value):
+    try:
+        return _safe_int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_bool_or_none(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(int(value))
+
+    normalized = _safe_text(value)
+    if normalized is None:
+        return None
+    lowered = normalized.lower()
+    if lowered in {"1", "true", "y", "yes"}:
+        return True
+    if lowered in {"0", "false", "n", "no"}:
+        return False
+    return None
+
+
+def _build_body_excerpt_from_text(value, *, max_len=280):
+    normalized = _safe_text(value)
+    if normalized is None:
+        return None
+    if len(normalized) <= max_len:
+        return normalized
+    return f"{normalized[:max_len].rstrip()}..."
+
+
+def _row_to_column_map(row, columns):
+    if row is None:
+        return {}
+    if isinstance(row, dict):
+        return {column: row.get(column) for column in columns}
+    if isinstance(row, (tuple, list)):
+        mapped = {}
+        for index, column in enumerate(columns):
+            mapped[column] = row[index] if index < len(row) else None
+        return mapped
+    return {}
+
+
+def _fetch_condition_change_notice_enrichment_from_alert_events(
+    cursor,
+    *,
+    user_id,
+    product_id,
+    source=None,
+):
+    normalized_user_id = _safe_text(user_id)
+    normalized_product_id = _safe_text(product_id)
+    normalized_source = _safe_text(source)
+    if normalized_user_id is None or normalized_product_id is None:
+        return {}
+
+    source_filter_sql = ""
+    query_params = [normalized_user_id, normalized_product_id, CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON]
+    if normalized_source is not None:
+        source_filter_sql = "AND source = %s"
+        query_params.append(normalized_source)
+
+    columns = (
+        "source",
+        "url",
+        "title",
+        "price_krw",
+        "sort_date",
+        "risk_level",
+        "risk_score",
+        "risk_keywords",
+        "is_exchange_post",
+        "trade_type",
+        "body_excerpt",
+        "body_text",
+        "analyzed_at",
+        "created_at",
+    )
+    try:
+        cursor.execute(
+            f"""
+            SELECT
+                source,
+                url,
+                title,
+                price_krw,
+                sort_date,
+                risk_level,
+                risk_score,
+                risk_keywords,
+                is_exchange_post,
+                trade_type,
+                body_excerpt,
+                body_text,
+                analyzed_at,
+                created_at
+            FROM alert_events
+            WHERE user_id = %s
+              AND product_id = %s
+              AND COALESCE(trigger_reason, '') <> %s
+              {source_filter_sql}
+            ORDER BY COALESCE(analyzed_at, created_at) DESC, id DESC
+            LIMIT 1
+            """,
+            tuple(query_params),
+        )
+        return _row_to_column_map(cursor.fetchone(), columns)
+    except Exception as exc:
+        if not _is_unknown_column_error(exc):
+            raise
+
+    # Legacy fallback where detail columns may not exist.
+    fallback_columns = ("source", "url", "title", "price_krw", "sort_date", "created_at")
+    try:
+        cursor.execute(
+            f"""
+            SELECT
+                source,
+                url,
+                title,
+                price_krw,
+                sort_date,
+                created_at
+            FROM alert_events
+            WHERE user_id = %s
+              AND product_id = %s
+              {source_filter_sql}
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            tuple(([normalized_user_id, normalized_product_id] + ([normalized_source] if normalized_source is not None else []))),
+        )
+        return _row_to_column_map(cursor.fetchone(), fallback_columns)
+    except Exception as fallback_exc:
+        if _is_unknown_column_error(fallback_exc):
+            return {}
+        raise
+
+
+def _fetch_condition_change_notice_enrichment_from_url_logs(
+    cursor,
+    *,
+    user_id,
+    url,
+):
+    normalized_user_id = _safe_text(user_id)
+    normalized_url = _safe_text(url)
+    if normalized_user_id is None or normalized_url is None:
+        return {}
+
+    columns = (
+        "source",
+        "title",
+        "body_text",
+        "risk_level",
+        "risk_score",
+        "risk_keywords",
+        "is_exchange_post",
+        "trade_type",
+        "created_at",
+    )
+    try:
+        cursor.execute(
+            """
+            SELECT
+                source,
+                title,
+                body_text,
+                risk_level,
+                risk_score,
+                risk_keywords,
+                is_exchange_post,
+                trade_type,
+                created_at
+            FROM url_analysis_logs
+            WHERE user_id = %s
+              AND url = %s
+              AND status = 'success'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (normalized_user_id, normalized_url),
+        )
+        return _row_to_column_map(cursor.fetchone(), columns)
+    except Exception as exc:
+        if not _is_unknown_column_error(exc):
+            raise
+
+    fallback_columns = ("source", "title", "body_text", "created_at")
+    try:
+        cursor.execute(
+            """
+            SELECT
+                source,
+                title,
+                body_text,
+                created_at
+            FROM url_analysis_logs
+            WHERE user_id = %s
+              AND url = %s
+              AND status = 'success'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (normalized_user_id, normalized_url),
+        )
+        return _row_to_column_map(cursor.fetchone(), fallback_columns)
+    except Exception as fallback_exc:
+        if _is_unknown_column_error(fallback_exc):
+            return {}
+        raise
+
+
+def _resolve_condition_change_candidate_notice_enrichment(
+    cursor,
+    *,
+    user_id,
+    product_id,
+    source,
+    url,
+):
+    alert_detail = _fetch_condition_change_notice_enrichment_from_alert_events(
+        cursor,
+        user_id=user_id,
+        product_id=product_id,
+        source=source,
+    )
+
+    lookup_url = _safe_text(url) or _safe_text(alert_detail.get("url"))
+    log_detail = _fetch_condition_change_notice_enrichment_from_url_logs(
+        cursor,
+        user_id=user_id,
+        url=lookup_url,
+    )
+
+    risk_level = (
+        _safe_text(alert_detail.get("risk_level"))
+        or _safe_text(log_detail.get("risk_level"))
+        or "NONE"
+    )
+    risk_score = (
+        _safe_int_or_none(alert_detail.get("risk_score"))
+        if _safe_int_or_none(alert_detail.get("risk_score")) is not None
+        else _safe_int_or_none(log_detail.get("risk_score"))
+    )
+    if risk_score is None:
+        risk_score = 0
+
+    risk_keywords = (
+        _safe_text(alert_detail.get("risk_keywords"))
+        or _safe_text(log_detail.get("risk_keywords"))
+        or "[]"
+    )
+
+    is_exchange_post = _coerce_bool_or_none(alert_detail.get("is_exchange_post"))
+    if is_exchange_post is None:
+        is_exchange_post = _coerce_bool_or_none(log_detail.get("is_exchange_post"))
+    if is_exchange_post is None:
+        is_exchange_post = False
+
+    trade_type = _safe_text(alert_detail.get("trade_type")) or _safe_text(log_detail.get("trade_type"))
+    if trade_type is None:
+        trade_type = "exchange" if is_exchange_post else "sale"
+
+    body_text = (
+        _safe_text(alert_detail.get("body_text"))
+        or _safe_text(log_detail.get("body_text"))
+    )
+    body_excerpt = (
+        _safe_text(alert_detail.get("body_excerpt"))
+        or _build_body_excerpt_from_text(body_text)
+    )
+    analyzed_at = (
+        _coerce_datetime(alert_detail.get("analyzed_at"))
+        or _coerce_datetime(log_detail.get("created_at"))
+        or _coerce_datetime(alert_detail.get("created_at"))
+    )
+
+    return {
+        "source": _safe_text(alert_detail.get("source")) or _safe_text(log_detail.get("source")),
+        "url": _safe_text(alert_detail.get("url")) or lookup_url,
+        "title": _safe_text(alert_detail.get("title")) or _safe_text(log_detail.get("title")),
+        "price_krw": _safe_int_or_none(alert_detail.get("price_krw")),
+        "sort_date": _coerce_datetime(alert_detail.get("sort_date")),
+        "risk_level": risk_level,
+        "risk_score": risk_score,
+        "risk_keywords": risk_keywords,
+        "is_exchange_post": bool(is_exchange_post),
+        "trade_type": trade_type,
+        "body_excerpt": body_excerpt,
+        "body_text": body_text,
+        "analyzed_at": analyzed_at,
+    }
+
+
 def _insert_condition_change_candidate_notice_alert_event(
     cursor,
     *,
@@ -329,19 +629,65 @@ def _insert_condition_change_candidate_notice_alert_event(
     if product_id is None:
         product_id = f"cccn-{normalized_rule_id}-{int(normalized_notice_sort_date.timestamp())}"
 
-    title = _safe_text(listing_title) or _build_condition_change_candidate_notice_title(
+    normalized_listing_source = _safe_text(listing_source)
+    normalized_listing_url = _safe_text(listing_url)
+    detail_enrichment = _resolve_condition_change_candidate_notice_enrichment(
+        cursor,
+        user_id=normalized_user_id,
+        product_id=product_id,
+        source=normalized_listing_source,
+        url=normalized_listing_url,
+    )
+
+    title = _safe_text(listing_title) or _safe_text(detail_enrichment.get("title")) or _build_condition_change_candidate_notice_title(
         chip=chip,
         screen_inch=screen_inch,
         ram_gb=ram_gb,
         ssd_gb=ssd_gb,
     )
-    normalized_listing_source = _safe_text(listing_source) or CONDITION_CHANGE_CANDIDATE_NOTICE_SOURCE
-    normalized_listing_url = _safe_text(listing_url) or ""
-    normalized_listing_price_krw = _safe_int(listing_price_krw)
-    body_text = (
-        f"{normalized_message}\n"
-        "정식 알림 기준은 저장 이후 매물이며, 이 항목은 참고용 후보입니다."
+    normalized_listing_source = (
+        normalized_listing_source
+        or _safe_text(detail_enrichment.get("source"))
+        or CONDITION_CHANGE_CANDIDATE_NOTICE_SOURCE
     )
+    normalized_listing_url = (
+        normalized_listing_url
+        or _safe_text(detail_enrichment.get("url"))
+        or ""
+    )
+    normalized_listing_price_krw = _safe_int_or_none(listing_price_krw)
+    if normalized_listing_price_krw is None:
+        normalized_listing_price_krw = _safe_int_or_none(detail_enrichment.get("price_krw"))
+    normalized_sort_date = (
+        _coerce_datetime(listing_sort_date)
+        or _coerce_datetime(detail_enrichment.get("sort_date"))
+        or normalized_notice_sort_date
+    )
+
+    detail_body_text = _safe_text(detail_enrichment.get("body_text"))
+    policy_notice = "정식 알림 기준은 저장 이후 매물이며, 이 항목은 참고용 후보입니다."
+    if detail_body_text is None:
+        body_text = f"{normalized_message}\n{policy_notice}"
+    else:
+        body_text = f"{detail_body_text}\n\n[참고 알림] {normalized_message}\n{policy_notice}"
+
+    body_excerpt = (
+        _safe_text(detail_enrichment.get("body_excerpt"))
+        or _build_body_excerpt_from_text(detail_body_text)
+        or normalized_message
+    )
+    analyzed_at = _coerce_datetime(detail_enrichment.get("analyzed_at")) or normalized_notice_sort_date
+    risk_level = _safe_text(detail_enrichment.get("risk_level")) or "NONE"
+    risk_score = _safe_int_or_none(detail_enrichment.get("risk_score"))
+    if risk_score is None:
+        risk_score = 0
+    risk_keywords = _safe_text(detail_enrichment.get("risk_keywords")) or "[]"
+    is_exchange_post = _coerce_bool_or_none(detail_enrichment.get("is_exchange_post"))
+    if is_exchange_post is None:
+        is_exchange_post = False
+    trade_type = _safe_text(detail_enrichment.get("trade_type"))
+    if trade_type is None:
+        trade_type = "exchange" if is_exchange_post else "sale"
 
     try:
         cursor.execute(
@@ -366,6 +712,11 @@ def _insert_condition_change_candidate_notice_alert_event(
                 drop_rate_percent,
                 alert_drop_rate_percent,
                 alert_price_direction,
+                risk_level,
+                risk_score,
+                risk_keywords,
+                is_exchange_post,
+                trade_type,
                 body_excerpt,
                 body_text,
                 analyzed_at,
@@ -379,7 +730,7 @@ def _insert_condition_change_candidate_notice_alert_event(
             VALUES (
                 %s, %s, NULL, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, NULL, %s, %s, %s,
-                %s, %s, %s, %s, 'pending', 0, 0, NULL
+                %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 0, 0, NULL
             )
             """,
             (
@@ -400,9 +751,14 @@ def _insert_condition_change_candidate_notice_alert_event(
                 _safe_int(target_price_krw),
                 _safe_float(alert_drop_rate_percent),
                 _safe_text(alert_price_direction),
-                normalized_message,
+                risk_level,
+                risk_score,
+                risk_keywords,
+                bool(is_exchange_post),
+                trade_type,
+                body_excerpt,
                 body_text,
-                normalized_notice_sort_date,
+                analyzed_at,
                 CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON,
                 normalized_message,
             ),

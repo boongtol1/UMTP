@@ -12,21 +12,44 @@ from src.user_settings_service import _insert_condition_change_candidate_notice_
 
 
 class _NoticeInsertCursor:
-    def __init__(self, *, fail_primary=False, fail_fallback=False):
+    def __init__(
+        self,
+        *,
+        fail_primary=False,
+        fail_fallback=False,
+        alert_detail_row=None,
+        url_log_row=None,
+    ):
         self.fail_primary = fail_primary
         self.fail_fallback = fail_fallback
+        self.alert_detail_row = alert_detail_row
+        self.url_log_row = url_log_row
         self.executed = []
-        self._execute_count = 0
+        self._insert_attempt_count = 0
+        self._last_query = ""
 
     def execute(self, query, params=None):
-        self._execute_count += 1
         normalized_query = " ".join((query or "").lower().split())
         self.executed.append((normalized_query, params))
+        self._last_query = normalized_query
 
-        if self._execute_count == 1 and self.fail_primary:
-            raise RuntimeError("unknown column detail_col")
-        if self._execute_count == 2 and self.fail_fallback:
-            raise RuntimeError("unknown column fallback_col")
+        if "insert into alert_events" in normalized_query:
+            self._insert_attempt_count += 1
+            if self._insert_attempt_count == 1 and self.fail_primary:
+                raise RuntimeError("unknown column detail_col")
+            if self._insert_attempt_count == 2 and self.fail_fallback:
+                raise RuntimeError("unknown column fallback_col")
+
+    def fetchone(self):
+        if "from alert_events" in self._last_query and self.alert_detail_row is not None:
+            row = self.alert_detail_row
+            self.alert_detail_row = None
+            return row
+        if "from url_analysis_logs" in self._last_query and self.url_log_row is not None:
+            row = self.url_log_row
+            self.url_log_row = None
+            return row
+        return None
 
 
 class UserSettingsNoticeDeliveryStatusTest(unittest.TestCase):
@@ -61,7 +84,9 @@ class UserSettingsNoticeDeliveryStatusTest(unittest.TestCase):
 
         self.assertTrue(result.get("created"))
         self.assertEqual(result.get("reason"), "created")
-        primary_query = cursor.executed[0][0]
+        primary_query = [
+            query for query, _params in cursor.executed if "insert into alert_events" in query
+        ][0]
         self.assertIn("'pending'", primary_query)
         self.assertNotIn("'app_only'", primary_query)
 
@@ -72,7 +97,9 @@ class UserSettingsNoticeDeliveryStatusTest(unittest.TestCase):
 
         self.assertTrue(result.get("created"))
         self.assertEqual(result.get("reason"), "created_fallback")
-        fallback_query = cursor.executed[1][0]
+        fallback_query = [
+            query for query, _params in cursor.executed if "insert into alert_events" in query
+        ][1]
         self.assertIn("'pending'", fallback_query)
         self.assertNotIn("'app_only'", fallback_query)
 
@@ -83,9 +110,46 @@ class UserSettingsNoticeDeliveryStatusTest(unittest.TestCase):
 
         self.assertTrue(result.get("created"))
         self.assertEqual(result.get("reason"), "created_minimal")
-        minimal_query = cursor.executed[2][0]
+        minimal_query = [
+            query for query, _params in cursor.executed if "insert into alert_events" in query
+        ][2]
         self.assertIn("'pending'", minimal_query)
         self.assertNotIn("'app_only'", minimal_query)
+
+    def test_primary_insert_prefills_risk_trade_body_from_db(self):
+        cursor = _NoticeInsertCursor(
+            alert_detail_row=(
+                "joongna",
+                "https://web.joongna.com/product/228796648",
+                "맥미니 m4 기본형",
+                1380000,
+                datetime(2026, 5, 20, 19, 40, 0),
+                "HIGH",
+                88,
+                '["교환"]',
+                1,
+                "exchange",
+                "교환 제안 포함",
+                "교환 제안 포함 본문",
+                datetime(2026, 5, 20, 19, 41, 0),
+                datetime(2026, 5, 20, 19, 41, 0),
+            )
+        )
+
+        result = self._call_insert_notice(cursor)
+
+        self.assertTrue(result.get("created"))
+        insert_params = [
+            params
+            for query, params in cursor.executed
+            if "insert into alert_events" in query
+        ][0]
+        self.assertIn("HIGH", insert_params)
+        self.assertIn(88, insert_params)
+        self.assertIn('["교환"]', insert_params)
+        self.assertIn("exchange", insert_params)
+        self.assertIn("교환 제안 포함", insert_params)
+        self.assertTrue(any("[참고 알림]" in str(value) for value in insert_params))
 
 
 if __name__ == "__main__":
