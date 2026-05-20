@@ -251,7 +251,7 @@ fun ReadAlertArchiveScreen(
                                 }
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = alert.title?.ifBlank { "제목 없음" } ?: "제목 없음",
+                                        text = resolveReadArchiveTitle(alert),
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 2,
@@ -259,9 +259,16 @@ fun ReadAlertArchiveScreen(
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "가격: ${formatKrwDisplay(alert.listing_price_krw)}",
+                                        text = "가격: ${formatKrwDisplay(resolveReadArchiveListingPrice(alert))}",
                                         style = MaterialTheme.typography.bodySmall,
                                     )
+                                    if (isConditionChangeCandidateNotice(alert)) {
+                                        Text(
+                                            text = "참고용 후보",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.Gray,
+                                        )
+                                    }
                                     Text(
                                         text = "스펙: ${buildReadArchiveSpecSummary(alert)}",
                                         style = MaterialTheme.typography.bodySmall,
@@ -335,7 +342,7 @@ private fun ReadAlertArchiveDetailScreen(
         ) {
             item {
                 Text(
-                    text = alert.title?.ifBlank { "제목 없음" } ?: "제목 없음",
+                    text = resolveReadArchiveTitle(alert),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                 )
@@ -409,6 +416,30 @@ private fun resolveReadArchiveImageUrl(alert: AlertItem): String? {
     return alert.listing_image_url?.takeIf { it.isNotBlank() }
 }
 
+private fun resolveReadArchiveTitle(alert: AlertItem): String {
+    val title = alert.title?.trim()
+    if (!title.isNullOrEmpty()) {
+        return title
+    }
+    val fallbackMessage = alert.message?.trim()
+    if (!fallbackMessage.isNullOrEmpty()) {
+        return fallbackMessage
+    }
+    return "제목 없음"
+}
+
+private fun resolveReadArchiveListingPrice(alert: AlertItem): Int? {
+    return alert.listing_price_krw ?: alert.alert_target_price_krw
+}
+
+private fun resolveReadArchiveGapPercent(alert: AlertItem): Double? {
+    return alert.price_gap_percent ?: alert.diff_ratio ?: alert.alert_drop_rate_percent
+}
+
+private fun resolveReadArchiveSortDate(alert: AlertItem): String {
+    return alert.sort_date?.takeIf { it.isNotBlank() } ?: "정보 없음"
+}
+
 private fun buildReadArchiveSpecSummary(alert: AlertItem): String {
     val tokens = mutableListOf<String>()
     alert.product_type?.takeIf { it.isNotBlank() }?.let { tokens += it }
@@ -429,6 +460,7 @@ private fun buildReadArchiveDetailRows(alert: AlertItem, resolvedUrl: String?): 
     val tradeFlagsText = resolveReadArchiveTradeFlagsText(alert.trade_type_flags)
 
     return listOf(
+        "알림 유형" to if (isConditionChangeCandidateNotice(alert)) "참고 알림 (조건 변경 사이 후보)" else "정식 알림",
         "출처" to (alert.source?.takeIf { it.isNotBlank() } ?: "정보 없음"),
         "URL" to (resolvedUrl ?: "URL 정보 없음"),
         "대표 이미지" to (alert.listing_image_url?.takeIf { it.isNotBlank() } ?: "이미지 없음"),
@@ -437,16 +469,19 @@ private fun buildReadArchiveDetailRows(alert: AlertItem, resolvedUrl: String?): 
         "화면 크기" to (if ((alert.screen_inch ?: 0) > 0) "${alert.screen_inch}인치" else "정보 없음"),
         "RAM" to (if ((alert.ram_gb ?: 0) > 0) "${alert.ram_gb}GB" else "정보 없음"),
         "SSD" to (if ((alert.ssd_gb ?: 0) > 0) "${alert.ssd_gb}GB" else "정보 없음"),
-        "등록 가격" to formatKrwDisplay(alert.listing_price_krw),
+        "등록 가격" to formatKrwDisplay(resolveReadArchiveListingPrice(alert)),
         "내가 생각한 시장가" to formatKrwDisplay(alert.user_market_price_krw ?: alert.fair_price_krw),
         "알림 기준 가격" to formatKrwDisplay(alert.alert_target_price_krw),
-        "시장가와의 차이" to formatPercentDisplay(alert.price_gap_percent ?: alert.diff_ratio),
+        "시장가와의 차이" to formatPercentDisplay(resolveReadArchiveGapPercent(alert)),
+        "설정 차이율" to formatPercentDisplay(alert.alert_drop_rate_percent),
         "차이율 계산식" to "(내가 생각한 시장가 - 등록 가격) / 내가 생각한 시장가 × 100",
         "알림 조건" to resolveReadArchiveConditionLabel(alert),
         "위험도" to riskLabel,
         "위험 점수" to (alert.risk_score?.toString() ?: "정보 없음"),
         "위험 키워드" to riskKeywordsText,
         "본문 내용" to resolveReadArchiveBodyText(alert),
+        "매물 등록 시각" to resolveReadArchiveSortDate(alert),
+        "알림 생성 시각" to (alert.created_at ?: "정보 없음"),
         "분석 시각" to (alert.analyzed_at ?: alert.created_at ?: "분석 시각 정보 없음"),
         "교환/나눔/의심" to tradeFlagsText,
         "특이사항" to resolveReadArchiveSpecialNotesText(riskLabel, riskKeywordsText, tradeFlagsText),
@@ -454,6 +489,9 @@ private fun buildReadArchiveDetailRows(alert: AlertItem, resolvedUrl: String?): 
 }
 
 private fun resolveReadArchiveConditionLabel(alert: AlertItem): String {
+    if (isConditionChangeCandidateNotice(alert)) {
+        return "조건 변경 사이 후보"
+    }
     val explicit = alert.alert_condition_label?.takeIf { it.isNotBlank() }
     if (explicit != null) {
         return explicit
@@ -538,6 +576,16 @@ private fun resolveReadArchiveSpecialNotesText(
         return "특이사항 없음"
     }
     return notes.joinToString(" / ")
+}
+
+private fun isConditionChangeCandidateNotice(alert: AlertItem): Boolean {
+    if (alert.is_condition_change_candidate_notice) {
+        return true
+    }
+    if (!alert.is_alert_target) {
+        return true
+    }
+    return (alert.trigger_reason ?: "").trim().lowercase() == "condition_change_candidate_notice"
 }
 
 private fun chipSortGroupOrder(chip: String): Int {

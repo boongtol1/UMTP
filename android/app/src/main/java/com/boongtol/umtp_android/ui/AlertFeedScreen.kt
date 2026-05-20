@@ -203,6 +203,9 @@ fun AlertCard(
 ) {
     val listingImageUrl = alert.listing_image_url?.takeIf { it.isNotBlank() }
     val isReferenceNotice = isConditionChangeCandidateNotice(alert)
+    val resolvedUrl = resolveAlertUrl(alert)
+    val titleText = resolveAlertTitle(alert)
+    val bodyPreview = resolveAlertBodyPreview(alert)
 
     Card(
         modifier = Modifier
@@ -231,7 +234,7 @@ fun AlertCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = alert.title?.ifBlank { "제목 없음" } ?: "제목 없음",
+                    text = titleText,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     maxLines = 2,
@@ -264,7 +267,7 @@ fun AlertCard(
             if (isReferenceNotice) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "저장 시점 사이에 새 기준으로 맞았던 참고 후보입니다.",
+                    text = "정식 알림 기준은 저장 이후 매물이며, 이 항목은 참고용 후보입니다.",
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.Gray,
                 )
@@ -273,7 +276,7 @@ fun AlertCard(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "가격: ${formatKrwDisplay(alert.listing_price_krw)}",
+                text = "가격: ${formatKrwDisplay(resolveListingPriceForDisplay(alert))}",
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -287,9 +290,28 @@ fun AlertCard(
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
-                text = "시장가와의 차이: ${formatPercentDisplay(alert.price_gap_percent ?: alert.diff_ratio)}",
+                text = "시장가와의 차이: ${formatPercentDisplay(resolveAlertGapPercent(alert))}",
                 style = MaterialTheme.typography.bodySmall,
             )
+            Text(
+                text = "출처: ${resolveAlertSourceText(alert)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray,
+            )
+            Text(
+                text = "링크: ${if (!resolvedUrl.isNullOrBlank()) "열기 가능" else "정보 없음"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray,
+            )
+            if (!bodyPreview.isNullOrBlank()) {
+                Text(
+                    text = "본문 요약: $bodyPreview",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text(
                 text = "계산식: (내가 생각한 시장가 - 등록 가격) / 내가 생각한 시장가 × 100",
                 style = MaterialTheme.typography.labelSmall,
@@ -304,7 +326,7 @@ fun AlertCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = alert.analyzed_at ?: alert.created_at ?: "분석 시각 정보 없음",
+                    text = resolveSortDateText(alert) ?: resolveCreatedAtText(alert) ?: "시각 정보 없음",
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.Gray,
                 )
@@ -360,7 +382,7 @@ private fun AlertDetailScreen(
         ) {
             item {
                 Text(
-                    text = alert.title?.ifBlank { "제목 없음" } ?: "제목 없음",
+                    text = resolveAlertTitle(alert),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                 )
@@ -483,6 +505,58 @@ private fun resolveAlertUrl(alert: AlertItem): String? {
 
 private fun resolveAlertImageUrl(alert: AlertItem): String? {
     return alert.listing_image_url?.takeIf { it.isNotBlank() }
+}
+
+private fun resolveAlertTitle(alert: AlertItem): String {
+    val title = alert.title?.trim()
+    if (!title.isNullOrEmpty()) {
+        return title
+    }
+    val fallbackMessage = alert.message?.trim()
+    if (!fallbackMessage.isNullOrEmpty()) {
+        return fallbackMessage
+    }
+    return "제목 없음"
+}
+
+private fun resolveListingPriceForDisplay(alert: AlertItem): Int? {
+    return alert.listing_price_krw ?: alert.alert_target_price_krw
+}
+
+private fun resolveAlertGapPercent(alert: AlertItem): Double? {
+    return alert.price_gap_percent ?: alert.diff_ratio ?: alert.alert_drop_rate_percent
+}
+
+private fun resolveAlertSourceText(alert: AlertItem): String {
+    val source = alert.source?.trim().orEmpty()
+    if (source.isEmpty()) {
+        return "정보 없음"
+    }
+    return if (source == "umtp_notice") {
+        "UMTP 참고 알림"
+    } else {
+        source
+    }
+}
+
+private fun resolveAlertBodyPreview(alert: AlertItem): String? {
+    val excerpt = alert.body_excerpt?.trim()
+    if (!excerpt.isNullOrEmpty()) {
+        return excerpt
+    }
+    val fullText = alert.body_text?.trim()
+    if (!fullText.isNullOrEmpty()) {
+        return fullText
+    }
+    return null
+}
+
+private fun resolveSortDateText(alert: AlertItem): String? {
+    return alert.sort_date?.takeIf { it.isNotBlank() }
+}
+
+private fun resolveCreatedAtText(alert: AlertItem): String? {
+    return alert.created_at?.takeIf { it.isNotBlank() }
 }
 
 private fun resolveAlertConditionLabel(alert: AlertItem): String {
@@ -627,7 +701,12 @@ private fun buildAlertDetailRows(
 ): List<Pair<String, String>> {
     return listOf(
         "알림 유형" to if (isConditionChangeCandidateNotice(alert)) "참고 알림 (조건 변경 사이 후보)" else "정식 알림",
-        "출처" to (alert.source?.takeIf { it.isNotBlank() } ?: "정보 없음"),
+        "참고 안내" to if (isConditionChangeCandidateNotice(alert)) {
+            "정식 알림 기준은 저장 이후 매물이며, 이 항목은 참고용 후보입니다."
+        } else {
+            "-"
+        },
+        "출처" to resolveAlertSourceText(alert),
         "URL" to (resolvedUrl ?: "URL 정보 없음"),
         "대표 이미지" to (listingImageUrl ?: "이미지 없음"),
         "제품 분류" to resolveProductTypeText(alert),
@@ -635,16 +714,19 @@ private fun buildAlertDetailRows(
         "화면 크기" to resolveScreenInchText(alert),
         "RAM" to resolveRamText(alert),
         "SSD" to resolveSsdText(alert),
-        "등록 가격" to formatKrwDisplay(alert.listing_price_krw),
+        "등록 가격" to formatKrwDisplay(resolveListingPriceForDisplay(alert)),
         "내가 생각한 시장가" to formatKrwDisplay(alert.user_market_price_krw ?: alert.fair_price_krw),
         "알림 기준 가격" to formatKrwDisplay(alert.alert_target_price_krw),
-        "시장가와의 차이" to formatPercentDisplay(alert.price_gap_percent ?: alert.diff_ratio),
+        "시장가와의 차이" to formatPercentDisplay(resolveAlertGapPercent(alert)),
+        "설정 차이율" to formatPercentDisplay(alert.alert_drop_rate_percent),
         "차이율 계산식" to "(내가 생각한 시장가 - 등록 가격) / 내가 생각한 시장가 × 100",
         "알림 조건" to resolveAlertConditionLabel(alert),
         "위험도" to resolveRiskLabel(alert),
         "위험 점수" to (alert.risk_score?.toString() ?: "정보 없음"),
         "위험 키워드" to resolveRiskKeywordsText(alert),
         "본문 내용" to resolveBodyText(alert),
+        "매물 등록 시각" to (resolveSortDateText(alert) ?: "정보 없음"),
+        "알림 생성 시각" to (resolveCreatedAtText(alert) ?: "정보 없음"),
         "분석 시각" to (alert.analyzed_at ?: alert.created_at ?: "분석 시각 정보 없음"),
         "교환/나눔/의심" to resolveTradeFlagsText(alert.trade_type_flags),
         "특이사항" to resolveSpecialNotesText(alert),
