@@ -48,6 +48,15 @@ class SpecParserBaseModelFallbackTest(unittest.TestCase):
         self.assertEqual(parsed["ram_gb"], 16)
         self.assertEqual(parsed["ssd_gb"], 256)
 
+    def test_macbook_air_without_explicit_ram_ssd_uses_base_fallback(self):
+        parsed = parse_listing_title("맥북에어 m4")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["product_type"], "MacBook Air")
+        self.assertEqual(parsed["chip"], "M4")
+        self.assertEqual(parsed["screen_inch"], 13)
+        self.assertEqual(parsed["ram_gb"], 16)
+        self.assertEqual(parsed["ssd_gb"], 256)
+
     def test_partial_override_keeps_explicit_ram(self):
         parsed = parse_listing_title("맥북에어 m2 깡통 16GB")
         self.assertTrue(parsed["parse_success"])

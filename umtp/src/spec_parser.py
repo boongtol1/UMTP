@@ -754,20 +754,20 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
     should_apply_base_fallback = (
         product_type in (MACBOOK_AIR_PRODUCT_TYPE, MAC_MINI_PRODUCT_TYPE)
         and chip is not None
-        and has_base_model_keyword
         and (ram_gb is None or ssd_gb is None)
     )
     if should_apply_base_fallback:
         base_spec = get_product_base_spec(product_type, chip, screen_inch)
         if isinstance(base_spec, dict):
+            fallback_source = "기본형/깡통" if has_base_model_keyword else "missing_ram_or_ssd"
             if ram_gb is None:
                 ram_gb = base_spec.get("ram_gb")
                 if ram_gb is not None:
-                    _record_pattern(detected_patterns, "ram_gb", ram_gb, "fallback_base_model", "기본형/깡통")
+                    _record_pattern(detected_patterns, "ram_gb", ram_gb, "fallback_base_model", fallback_source)
             if ssd_gb is None:
                 ssd_gb = base_spec.get("ssd_gb")
                 if ssd_gb is not None:
-                    _record_pattern(detected_patterns, "ssd_gb", ssd_gb, "fallback_base_model", "기본형/깡통")
+                    _record_pattern(detected_patterns, "ssd_gb", ssd_gb, "fallback_base_model", fallback_source)
 
     parsed_fields = {"product_type": product_type, "chip": chip, "ram_gb": ram_gb, "ssd_gb": ssd_gb}
     missing_fields = [field for field in REQUIRED_FIELDS if parsed_fields.get(field) is None]
