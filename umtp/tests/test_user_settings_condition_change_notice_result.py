@@ -80,6 +80,18 @@ class UserSettingsConditionChangeNoticeResultTest(unittest.TestCase):
                 return_value={
                     "missed_count": missed_count,
                     "candidate_rows": missed_count,
+                    "missed_candidates": [
+                        {
+                            "product_id": "101",
+                            "title": "m1 맥북에어",
+                            "url": "https://web.joongna.com/product/101",
+                            "source": "joongna",
+                            "price_krw": 700000,
+                            "sort_date": datetime(2026, 5, 20, 19, 10, 0),
+                        }
+                    ]
+                    if missed_count > 0
+                    else [],
                     "representative_candidate": {
                         "product_id": "101",
                         "title": "m1 맥북에어",
@@ -178,6 +190,83 @@ class UserSettingsConditionChangeNoticeResultTest(unittest.TestCase):
         )
         self.assertFalse(result.get("condition_change_notice_created"))
         self.assertEqual(result.get("condition_change_notice_error"), "duplicate_notice")
+
+    def test_missed_candidates_create_multiple_notice_alert_events(self):
+        fake_connection = _UpsertFakeConnection()
+
+        with patch("src.user_settings_service.get_connection", return_value=fake_connection):
+            with patch("src.user_settings_service.is_valid_silicon_unit", return_value=True):
+                with patch("src.user_settings_service._resolve_setting_search_keyword", return_value="m1 맥북에어"):
+                    with patch(
+                        "src.user_settings_service._fetch_existing_user_fair_price_rule_state",
+                        return_value=self._base_existing_state(),
+                    ):
+                        with patch(
+                            "src.user_settings_service._insert_user_fair_price_history_if_changed",
+                            return_value={"created": False, "reason": "no_meaningful_change"},
+                        ):
+                            with patch(
+                                "src.user_settings_service._collect_missed_candidates_between_saved_windows",
+                                return_value={
+                                    "missed_count": 2,
+                                    "candidate_rows": 2,
+                                    "missed_candidates": [
+                                        {
+                                            "product_id": "101",
+                                            "title": "m1 맥북에어 1",
+                                            "url": "https://web.joongna.com/product/101",
+                                            "source": "joongna",
+                                            "price_krw": 700000,
+                                            "sort_date": datetime(2026, 5, 20, 19, 10, 0),
+                                        },
+                                        {
+                                            "product_id": "102",
+                                            "title": "m1 맥북에어 2",
+                                            "url": "https://web.joongna.com/product/102",
+                                            "source": "joongna",
+                                            "price_krw": 690000,
+                                            "sort_date": datetime(2026, 5, 20, 19, 20, 0),
+                                        },
+                                    ],
+                                    "representative_candidate": {
+                                        "product_id": "102",
+                                        "title": "m1 맥북에어 2",
+                                        "url": "https://web.joongna.com/product/102",
+                                        "source": "joongna",
+                                        "price_krw": 690000,
+                                        "sort_date": datetime(2026, 5, 20, 19, 20, 0),
+                                    },
+                                },
+                            ):
+                                with patch(
+                                    "src.user_settings_service._insert_condition_change_candidate_notice_alert_event",
+                                    return_value={"created": True, "reason": "created"},
+                                ) as mock_notice_insert:
+                                    result = upsert_user_fair_price_setting(
+                                        user_id="boongtol",
+                                        product_type="MacBook Air",
+                                        chip="M1",
+                                        screen_inch=13,
+                                        ram_gb=8,
+                                        ssd_gb=256,
+                                        fair_price_krw=1000000,
+                                        alert_drop_rate_percent=20.0,
+                                        enabled=True,
+                                        search_keyword="m1 맥북에어",
+                                        poll_interval_seconds=60,
+                                        priority="NORMAL",
+                                        condition_change_candidate_notice_enabled=True,
+                                    )
+
+        self.assertTrue(result.get("ok"))
+        self.assertTrue(result.get("condition_change_notice_created"))
+        self.assertEqual(result.get("message"), "조건 변경 사이에 새 기준에 맞는 매물이 2개 있었어요.")
+        self.assertEqual(mock_notice_insert.call_count, 2)
+
+        first_call_kwargs = mock_notice_insert.call_args_list[0].kwargs
+        second_call_kwargs = mock_notice_insert.call_args_list[1].kwargs
+        self.assertEqual(first_call_kwargs.get("listing_product_id"), "101")
+        self.assertEqual(second_call_kwargs.get("listing_product_id"), "102")
 
 
 if __name__ == "__main__":

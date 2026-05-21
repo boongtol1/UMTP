@@ -1361,16 +1361,36 @@ def _collect_missed_candidates_between_saved_windows(
     normalized_source = (_safe_text(source) or "joongna").lower()
     normalized_search_keyword = _normalize_optional_search_keyword(search_keyword)
     if normalized_search_keyword is None:
-        return {"candidate_rows": 0, "missed_count": 0, "representative_candidate": None}
+        return {
+            "candidate_rows": 0,
+            "missed_count": 0,
+            "representative_candidate": None,
+            "missed_candidates": [],
+        }
 
     previous_saved_at_dt = _coerce_datetime(previous_saved_at)
     current_saved_at_dt = _coerce_datetime(current_saved_at)
     if previous_saved_at_dt is None or current_saved_at_dt is None:
-        return {"candidate_rows": 0, "missed_count": 0, "representative_candidate": None}
+        return {
+            "candidate_rows": 0,
+            "missed_count": 0,
+            "representative_candidate": None,
+            "missed_candidates": [],
+        }
     if previous_saved_at_dt >= current_saved_at_dt:
-        return {"candidate_rows": 0, "missed_count": 0, "representative_candidate": None}
+        return {
+            "candidate_rows": 0,
+            "missed_count": 0,
+            "representative_candidate": None,
+            "missed_candidates": [],
+        }
     if not _safe_bool(new_rule_snapshot.get("enabled"), default=True):
-        return {"candidate_rows": 0, "missed_count": 0, "representative_candidate": None}
+        return {
+            "candidate_rows": 0,
+            "missed_count": 0,
+            "representative_candidate": None,
+            "missed_candidates": [],
+        }
 
     try:
         cursor.execute(
@@ -1396,12 +1416,22 @@ def _collect_missed_candidates_between_saved_windows(
         )
     except Exception as exc:
         if _is_unknown_column_error(exc):
-            return {"candidate_rows": 0, "missed_count": 0, "representative_candidate": None}
+            return {
+                "candidate_rows": 0,
+                "missed_count": 0,
+                "representative_candidate": None,
+                "missed_candidates": [],
+            }
         raise
 
     rows = cursor.fetchall() or []
     if not rows:
-        return {"candidate_rows": 0, "missed_count": 0, "representative_candidate": None}
+        return {
+            "candidate_rows": 0,
+            "missed_count": 0,
+            "representative_candidate": None,
+            "missed_candidates": [],
+        }
 
     def _row_to_candidate(raw_row):
         if isinstance(raw_row, dict):
@@ -1427,6 +1457,7 @@ def _collect_missed_candidates_between_saved_windows(
     missed_count = 0
     grouped_rows = {}
     representative_candidate = None
+    missed_candidates = []
     for row in rows:
         candidate = _row_to_candidate(row)
         if candidate is None:
@@ -1464,16 +1495,25 @@ def _collect_missed_candidates_between_saved_windows(
         if has_missed_candidate:
             missed_count += 1
             if group_representative is not None:
+                missed_candidates.append(group_representative)
                 if (
                     representative_candidate is None
                     or (group_representative.get("sort_date") or datetime.min) > (representative_candidate.get("sort_date") or datetime.min)
                 ):
                     representative_candidate = group_representative
 
+    missed_candidates.sort(
+        key=lambda candidate: (
+            candidate.get("sort_date") or datetime.min,
+            _safe_text(candidate.get("product_id")) or "",
+        )
+    )
+
     return {
         "candidate_rows": len(rows),
         "missed_count": missed_count,
         "representative_candidate": representative_candidate,
+        "missed_candidates": missed_candidates,
         "user_id": user_id,
         "source": normalized_source,
         "search_keyword": normalized_search_keyword,
@@ -2263,6 +2303,7 @@ def upsert_user_fair_price_setting(
     current_saved_at = None
     missed_candidate_count = 0
     representative_missed_candidate = None
+    missed_candidates = []
     condition_change_notice_created = False
     condition_change_notice_error = None
     rule_id = None
@@ -2809,6 +2850,11 @@ def upsert_user_fair_price_setting(
             )
             missed_candidate_count = _safe_int(missed_candidate_stats.get("missed_count")) or 0
             representative_missed_candidate = missed_candidate_stats.get("representative_candidate")
+            missed_candidates = (
+                missed_candidate_stats.get("missed_candidates")
+                if isinstance(missed_candidate_stats.get("missed_candidates"), list)
+                else []
+            )
             logger.info(
                 "[condition_change_candidate] count_scope=keyword user_id=%s source=%s search_keyword=%s candidate_rows=%s missed_candidate_count=%s rule_id=%s",
                 normalized_user_id,
@@ -2824,71 +2870,84 @@ def upsert_user_fair_price_setting(
             and condition_change_candidate_notice_enabled
             and rule_id is not None
         ):
+            candidate_notice_targets = []
+            for candidate in missed_candidates:
+                if isinstance(candidate, dict):
+                    candidate_notice_targets.append(candidate)
+
+            if not candidate_notice_targets and isinstance(representative_missed_candidate, dict):
+                candidate_notice_targets.append(representative_missed_candidate)
+
+            if not candidate_notice_targets:
+                candidate_notice_targets.append({})
+
+            created_notice_count = 0
+            failed_notice_count = 0
+            first_notice_error = None
+
             try:
-                notice_insert_result = _insert_condition_change_candidate_notice_alert_event(
-                    cursor,
-                    user_id=normalized_user_id,
-                    watch_rule_id=rule_id,
-                    product_type=normalized_product_type,
-                    chip=normalized_chip,
-                    screen_inch=normalized_screen_inch,
-                    ram_gb=normalized_ram_gb,
-                    ssd_gb=normalized_ssd_gb,
-                    fair_price_krw=normalized_fair_price_krw,
-                    target_price_krw=compute_target_buy_price_krw(
-                        normalized_fair_price_krw,
-                        normalized_alert_drop_rate_percent,
-                    ),
-                    alert_drop_rate_percent=normalized_alert_drop_rate_percent,
-                    alert_price_direction=normalized_alert_price_direction,
-                    missed_candidate_count=missed_candidate_count,
-                    sort_date=current_saved_at,
-                    listing_product_id=(
-                        representative_missed_candidate.get("product_id")
-                        if isinstance(representative_missed_candidate, dict)
-                        else None
-                    ),
-                    listing_title=(
-                        representative_missed_candidate.get("title")
-                        if isinstance(representative_missed_candidate, dict)
-                        else None
-                    ),
-                    listing_url=(
-                        representative_missed_candidate.get("url")
-                        if isinstance(representative_missed_candidate, dict)
-                        else None
-                    ),
-                    listing_source=(
-                        representative_missed_candidate.get("source")
-                        if isinstance(representative_missed_candidate, dict)
-                        else None
-                    ),
-                    listing_price_krw=(
-                        representative_missed_candidate.get("price_krw")
-                        if isinstance(representative_missed_candidate, dict)
-                        else None
-                    ),
-                    listing_sort_date=(
-                        representative_missed_candidate.get("sort_date")
-                        if isinstance(representative_missed_candidate, dict)
-                        else None
-                    ),
-                )
-                condition_change_notice_created = bool(
-                    isinstance(notice_insert_result, dict)
-                    and notice_insert_result.get("created") is True
-                )
-                if not condition_change_notice_created:
-                    if isinstance(notice_insert_result, dict):
-                        condition_change_notice_error = _safe_text(notice_insert_result.get("reason"))
-                    if condition_change_notice_error is None:
-                        condition_change_notice_error = "notice_not_created"
+                for candidate in candidate_notice_targets:
+                    notice_insert_result = _insert_condition_change_candidate_notice_alert_event(
+                        cursor,
+                        user_id=normalized_user_id,
+                        watch_rule_id=rule_id,
+                        product_type=normalized_product_type,
+                        chip=normalized_chip,
+                        screen_inch=normalized_screen_inch,
+                        ram_gb=normalized_ram_gb,
+                        ssd_gb=normalized_ssd_gb,
+                        fair_price_krw=normalized_fair_price_krw,
+                        target_price_krw=compute_target_buy_price_krw(
+                            normalized_fair_price_krw,
+                            normalized_alert_drop_rate_percent,
+                        ),
+                        alert_drop_rate_percent=normalized_alert_drop_rate_percent,
+                        alert_price_direction=normalized_alert_price_direction,
+                        missed_candidate_count=missed_candidate_count,
+                        sort_date=current_saved_at,
+                        listing_product_id=candidate.get("product_id") if isinstance(candidate, dict) else None,
+                        listing_title=candidate.get("title") if isinstance(candidate, dict) else None,
+                        listing_url=candidate.get("url") if isinstance(candidate, dict) else None,
+                        listing_source=candidate.get("source") if isinstance(candidate, dict) else None,
+                        listing_price_krw=candidate.get("price_krw") if isinstance(candidate, dict) else None,
+                        listing_sort_date=candidate.get("sort_date") if isinstance(candidate, dict) else None,
+                    )
+
+                    if isinstance(notice_insert_result, dict) and notice_insert_result.get("created") is True:
+                        created_notice_count += 1
+                        continue
+
+                    failed_notice_count += 1
+                    notice_reason = _safe_text(
+                        notice_insert_result.get("reason") if isinstance(notice_insert_result, dict) else None
+                    )
+                    if first_notice_error is None:
+                        first_notice_error = notice_reason or "notice_not_created"
                     logger.warning(
-                        "condition-change candidate notice not created user_id=%s rule_id=%s result=%s",
+                        "condition-change candidate notice not created user_id=%s rule_id=%s product_id=%s result=%s",
                         normalized_user_id,
                         rule_id,
+                        candidate.get("product_id") if isinstance(candidate, dict) else None,
                         notice_insert_result,
                     )
+
+                condition_change_notice_created = (
+                    created_notice_count > 0 and failed_notice_count == 0
+                )
+
+                if failed_notice_count > 0:
+                    condition_change_notice_error = first_notice_error or "notice_not_created"
+                    logger.warning(
+                        "condition-change candidate notice partial failure user_id=%s rule_id=%s created=%s failed=%s total=%s",
+                        normalized_user_id,
+                        rule_id,
+                        created_notice_count,
+                        failed_notice_count,
+                        len(candidate_notice_targets),
+                    )
+
+                if created_notice_count == 0 and condition_change_notice_error is None:
+                    condition_change_notice_error = "notice_not_created"
             except Exception as notice_exc:
                 condition_change_notice_created = False
                 condition_change_notice_error = _safe_text(str(notice_exc)) or "notice_insert_failed"

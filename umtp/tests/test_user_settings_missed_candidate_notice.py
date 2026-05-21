@@ -10,6 +10,7 @@ if PROJECT_ROOT not in sys.path:
 
 from src.user_settings_service import (  # noqa: E402
     _build_rule_snapshot,
+    _collect_missed_candidates_between_saved_windows,
     _count_missed_candidates_between_saved_windows,
 )
 
@@ -237,6 +238,46 @@ class UserSettingsMissedCandidateNoticeTest(unittest.TestCase):
             cursor.executed[0][1],
             ("boongtol", "joongna", "m4 맥미니", self.previous_saved_at, self.current_saved_at),
         )
+
+    def test_collects_all_missed_candidates_as_notice_targets(self):
+        cursor = _FakeCursor(
+            rows=[
+                ("p-1", datetime(2026, 5, 18, 15, 10, 0), 520000, "first", "https://web.joongna.com/product/1", "joongna"),
+                ("p-1", datetime(2026, 5, 18, 15, 20, 0), 530000, "first-update", "https://web.joongna.com/product/1", "joongna"),
+                ("p-2", datetime(2026, 5, 18, 15, 30, 0), 540000, "second", "https://web.joongna.com/product/2", "joongna"),
+            ]
+        )
+        old_rule = _build_rule_snapshot(
+            fair_price_krw=500000,
+            alert_drop_rate_percent=0,
+            alert_price_direction="BELOW_OR_EQUAL",
+            enabled=True,
+        )
+        new_rule = _build_rule_snapshot(
+            fair_price_krw=550000,
+            alert_drop_rate_percent=0,
+            alert_price_direction="BELOW_OR_EQUAL",
+            enabled=True,
+        )
+
+        stats = _collect_missed_candidates_between_saved_windows(
+            cursor,
+            user_id="boongtol",
+            rule_id=7,
+            source="joongna",
+            search_keyword="m4 맥미니",
+            previous_saved_at=self.previous_saved_at,
+            current_saved_at=self.current_saved_at,
+            old_rule_snapshot=old_rule,
+            new_rule_snapshot=new_rule,
+        )
+
+        self.assertEqual(stats.get("missed_count"), 2)
+        missed_candidates = stats.get("missed_candidates") or []
+        self.assertEqual(len(missed_candidates), 2)
+        self.assertEqual(missed_candidates[0].get("product_id"), "p-1")
+        self.assertEqual(missed_candidates[1].get("product_id"), "p-2")
+        self.assertEqual(missed_candidates[0].get("title"), "first-update")
 
 
 if __name__ == "__main__":
