@@ -5,9 +5,7 @@ struct UMTPApp: App {
     @StateObject private var appState: AppState
 
     init() {
-        let sessionService = UserSessionService.shared
-        let initialUserId = sessionService.loadUserId()
-        _appState = StateObject(wrappedValue: AppState(userId: initialUserId))
+        _appState = StateObject(wrappedValue: AppState(sessionService: .shared))
     }
 
     var body: some Scene {
