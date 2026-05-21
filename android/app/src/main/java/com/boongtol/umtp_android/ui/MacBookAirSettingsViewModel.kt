@@ -565,15 +565,41 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
     }
 
-    fun bulkSetAlertsEnabled(enabled: Boolean, productType: String? = null) {
+    fun bulkSetAlertsEnabled(
+        enabled: Boolean,
+        productType: String? = null,
+        chip: String? = null,
+        screenInch: Int? = null,
+    ) {
         val uid = _userId.value ?: return
         if (_isApplyingBulkSettings.value) {
             return
         }
+        val normalizedChip = chip?.trim()?.takeIf { it.isNotEmpty() }
+        val hasNarrowScope = normalizedChip != null || screenInch != null
 
         viewModelScope.launch {
             _isApplyingBulkSettings.value = true
             try {
+                if (hasNarrowScope) {
+                    applyBulkUpsertFallback(
+                        uid = uid,
+                        productType = productType,
+                        chip = normalizedChip,
+                        screenInch = screenInch,
+                        enabledOverride = enabled,
+                    )
+                    _toastMessage.value = if (enabled) {
+                        "전체 알림이 켜졌습니다."
+                    } else {
+                        "전체 알림이 꺼졌습니다."
+                    }
+                    refreshUserSettingsInternal(uid)
+                    fetchAlerts(uid, showFeedback = false)
+                    fetchReadGroupedAlerts(uid, showFeedback = false)
+                    return@launch
+                }
+
                 val response = UmtpApiClient.apiService.bulkSetUserWatchRulesEnabled(
                     UserWatchRulesBulkEnabledRequest(
                         user_id = uid,
@@ -603,6 +629,8 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                         applyBulkUpsertFallback(
                             uid = uid,
                             productType = productType,
+                            chip = normalizedChip,
+                            screenInch = screenInch,
                             enabledOverride = enabled,
                         )
                         _toastMessage.value = if (enabled) {
@@ -625,15 +653,35 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
     }
 
-    fun bulkSetDropRatePercent(dropRatePercent: Double, productType: String? = null) {
+    fun bulkSetDropRatePercent(
+        dropRatePercent: Double,
+        productType: String? = null,
+        chip: String? = null,
+        screenInch: Int? = null,
+    ) {
         val uid = _userId.value ?: return
         if (_isApplyingBulkSettings.value) {
             return
         }
+        val normalizedChip = chip?.trim()?.takeIf { it.isNotEmpty() }
+        val hasNarrowScope = normalizedChip != null || screenInch != null
 
         viewModelScope.launch {
             _isApplyingBulkSettings.value = true
             try {
+                if (hasNarrowScope) {
+                    applyBulkUpsertFallback(
+                        uid = uid,
+                        productType = productType,
+                        chip = normalizedChip,
+                        screenInch = screenInch,
+                        dropRatePercentOverride = dropRatePercent,
+                    )
+                    _toastMessage.value = "전체 차이 %가 변경되었습니다."
+                    refreshUserSettingsInternal(uid)
+                    return@launch
+                }
+
                 val response = UmtpApiClient.apiService.bulkSetUserFairPricesDropRate(
                     UserFairPricesBulkDropRateRequest(
                         user_id = uid,
@@ -657,6 +705,8 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                         applyBulkUpsertFallback(
                             uid = uid,
                             productType = productType,
+                            chip = normalizedChip,
+                            screenInch = screenInch,
                             dropRatePercentOverride = dropRatePercent,
                         )
                         _toastMessage.value = "전체 차이 %가 변경되었습니다."
@@ -673,15 +723,34 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
     }
 
-    fun resetFairPricesToSystem(productType: String? = null) {
+    fun resetFairPricesToSystem(
+        productType: String? = null,
+        chip: String? = null,
+        screenInch: Int? = null,
+    ) {
         val uid = _userId.value ?: return
         if (_isApplyingBulkSettings.value) {
             return
         }
+        val normalizedChip = chip?.trim()?.takeIf { it.isNotEmpty() }
+        val hasNarrowScope = normalizedChip != null || screenInch != null
 
         viewModelScope.launch {
             _isApplyingBulkSettings.value = true
             try {
+                if (hasNarrowScope) {
+                    applyBulkUpsertFallback(
+                        uid = uid,
+                        productType = productType,
+                        chip = normalizedChip,
+                        screenInch = screenInch,
+                        useSystemFairPrice = true,
+                    )
+                    _toastMessage.value = "시스템 기준 시장가로 업데이트했습니다."
+                    refreshUserSettingsInternal(uid)
+                    return@launch
+                }
+
                 val response = UmtpApiClient.apiService.resetUserFairPricesToSystemMarketPrices(
                     UserFairPricesResetToSystemRequest(
                         user_id = uid,
@@ -704,6 +773,8 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                         applyBulkUpsertFallback(
                             uid = uid,
                             productType = productType,
+                            chip = normalizedChip,
+                            screenInch = screenInch,
                             useSystemFairPrice = true,
                         )
                         _toastMessage.value = "시스템 기준 시장가로 업데이트했습니다."
@@ -787,12 +858,19 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private suspend fun applyBulkUpsertFallback(
         uid: String,
         productType: String?,
+        chip: String? = null,
+        screenInch: Int? = null,
         enabledOverride: Boolean? = null,
         dropRatePercentOverride: Double? = null,
         useSystemFairPrice: Boolean = false,
     ) {
         val scopedSettings = _userSettings.value.filter { item ->
-            productType.isNullOrBlank() || item.product_type == productType
+            matchesBulkScope(
+                item = item,
+                productType = productType,
+                chip = chip,
+                screenInch = screenInch,
+            )
         }
 
         if (scopedSettings.isEmpty()) {
@@ -852,6 +930,24 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             setting.user_fair_price_krw ?: setting.effective_fair_price_krw ?: setting.system_fair_price_krw
         }
         return preferred?.takeIf { it > 0 }
+    }
+
+    private fun matchesBulkScope(
+        item: UserFairPriceItem,
+        productType: String?,
+        chip: String?,
+        screenInch: Int?,
+    ): Boolean {
+        if (!productType.isNullOrBlank() && item.product_type != productType) {
+            return false
+        }
+        if (!chip.isNullOrBlank() && item.chip != chip) {
+            return false
+        }
+        if (screenInch != null && item.screen_inch != screenInch) {
+            return false
+        }
+        return true
     }
 
     private fun formatRefreshTimeLabel(epochMillis: Long): String {

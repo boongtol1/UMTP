@@ -261,17 +261,28 @@ fun MainTabScreen(
                     onRefreshRule = { ruleId ->
                         viewModel.refreshSingleRuleSavedAt(userId, ruleId)
                     },
-                    onBulkSetAlertsEnabled = { enabled, productType ->
-                        viewModel.bulkSetAlertsEnabled(enabled = enabled, productType = productType)
+                    onBulkSetAlertsEnabled = { enabled, productType, chip, screenInch ->
+                        viewModel.bulkSetAlertsEnabled(
+                            enabled = enabled,
+                            productType = productType,
+                            chip = chip,
+                            screenInch = screenInch,
+                        )
                     },
-                    onBulkSetDropRate = { dropRatePercent, productType ->
+                    onBulkSetDropRate = { dropRatePercent, productType, chip, screenInch ->
                         viewModel.bulkSetDropRatePercent(
                             dropRatePercent = dropRatePercent,
                             productType = productType,
+                            chip = chip,
+                            screenInch = screenInch,
                         )
                     },
-                    onResetFairPricesToSystem = { productType ->
-                        viewModel.resetFairPricesToSystem(productType = productType)
+                    onResetFairPricesToSystem = { productType, chip, screenInch ->
+                        viewModel.resetFairPricesToSystem(
+                            productType = productType,
+                            chip = chip,
+                            screenInch = screenInch,
+                        )
                     },
                 )
             }
@@ -295,9 +306,9 @@ fun SettingsNavigator(
     ruleLastRefreshLabels: Map<Long, String>,
     onUpsert: (com.boongtol.umtp_android.network.MacBookAirUnit, Int, Int, String, Boolean, Boolean, String?, String, Int?) -> Unit,
     onRefreshRule: (Long) -> Unit,
-    onBulkSetAlertsEnabled: (Boolean, String?) -> Unit,
-    onBulkSetDropRate: (Double, String?) -> Unit,
-    onResetFairPricesToSystem: (String?) -> Unit,
+    onBulkSetAlertsEnabled: (Boolean, String?, String?, Int?) -> Unit,
+    onBulkSetDropRate: (Double, String?, String?, Int?) -> Unit,
+    onResetFairPricesToSystem: (String?, String?, Int?) -> Unit,
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.ProductTypeList) }
 
@@ -378,6 +389,7 @@ fun SettingsNavigator(
             )
         }
         is Screen.RamSsdSettings -> {
+            val screenScopeInch = if (screen.productType == "Mac mini") null else screen.screenSize
             val filteredUnits = units.filter {
                 it.product_type == screen.productType &&
                 it.chip == screen.chip &&
@@ -401,17 +413,22 @@ fun SettingsNavigator(
                 ruleLastRefreshLabels = ruleLastRefreshLabels,
                 bulkEnabled = userSettings
                     .asSequence()
-                    .filter { it.product_type == screen.productType && it.has_user_override }
+                    .filter {
+                        it.product_type == screen.productType &&
+                            it.chip == screen.chip &&
+                            (screenScopeInch == null || it.screen_inch == screenScopeInch) &&
+                            it.has_user_override
+                    }
                     .toList()
                     .let { scoped -> scoped.isNotEmpty() && scoped.all { it.enabled } },
                 onBulkEnabledChange = { enabled ->
-                    onBulkSetAlertsEnabled(enabled, screen.productType)
+                    onBulkSetAlertsEnabled(enabled, screen.productType, screen.chip, screenScopeInch)
                 },
                 onBulkDropRateApply = { dropRatePercent ->
-                    onBulkSetDropRate(dropRatePercent, screen.productType)
+                    onBulkSetDropRate(dropRatePercent, screen.productType, screen.chip, screenScopeInch)
                 },
                 onResetToSystemMarketPrices = {
-                    onResetFairPricesToSystem(screen.productType)
+                    onResetFairPricesToSystem(screen.productType, screen.chip, screenScopeInch)
                 },
                 onSave = onUpsert,
                 onRefreshRule = onRefreshRule,
