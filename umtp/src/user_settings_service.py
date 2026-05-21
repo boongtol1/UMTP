@@ -1365,17 +1365,20 @@ def _collect_missed_candidates_between_saved_windows(
     current_saved_at,
     old_rule_snapshot,
     new_rule_snapshot,
+    product_type=None,
+    chip=None,
+    screen_inch=None,
+    ram_gb=None,
+    ssd_gb=None,
 ):
     normalized_rule_id = _safe_int(rule_id)
     normalized_source = (_safe_text(source) or "joongna").lower()
     normalized_search_keyword = _normalize_optional_search_keyword(search_keyword)
-    if normalized_search_keyword is None:
-        return {
-            "candidate_rows": 0,
-            "missed_count": 0,
-            "representative_candidate": None,
-            "missed_candidates": [],
-        }
+    expected_product_type = _safe_text(product_type)
+    expected_chip = _safe_text(chip)
+    expected_screen_inch = _safe_int(screen_inch)
+    expected_ram_gb = _safe_int(ram_gb)
+    expected_ssd_gb = _safe_int(ssd_gb)
 
     previous_saved_at_dt = _coerce_datetime(previous_saved_at)
     current_saved_at_dt = _coerce_datetime(current_saved_at)
@@ -1401,28 +1404,59 @@ def _collect_missed_candidates_between_saved_windows(
             "missed_candidates": [],
         }
 
+    query = """
+        SELECT
+            aj.product_id,
+            aj.sort_date,
+            COALESCE(lar.listing_price_krw, aj.price_krw) AS listing_price_krw,
+            aj.price_krw,
+            aj.title,
+            aj.url,
+            aj.source,
+            lar.product_type,
+            lar.chip,
+            lar.screen_inch,
+            lar.ram_gb,
+            lar.ssd_gb
+        FROM analysis_jobs aj
+        INNER JOIN listing_analysis_results lar
+            ON lar.analysis_job_id = aj.id
+        WHERE aj.user_id = %s
+          AND aj.source = %s
+          AND aj.sort_date IS NOT NULL
+          AND aj.sort_date >= %s
+          AND aj.sort_date < %s
+          AND (lar.listing_price_krw IS NOT NULL OR aj.price_krw IS NOT NULL)
+    """
+    query_params = [
+        user_id,
+        normalized_source,
+        previous_saved_at_dt,
+        current_saved_at_dt,
+    ]
+
+    if normalized_rule_id is not None:
+        query += " AND aj.watch_rule_id = %s"
+        query_params.append(normalized_rule_id)
+    if expected_product_type is not None:
+        query += " AND LOWER(TRIM(lar.product_type)) = LOWER(TRIM(%s))"
+        query_params.append(expected_product_type)
+    if expected_chip is not None:
+        query += " AND UPPER(TRIM(lar.chip)) = UPPER(TRIM(%s))"
+        query_params.append(expected_chip)
+    if expected_screen_inch is not None:
+        query += " AND lar.screen_inch = %s"
+        query_params.append(expected_screen_inch)
+    if expected_ram_gb is not None:
+        query += " AND lar.ram_gb = %s"
+        query_params.append(expected_ram_gb)
+    if expected_ssd_gb is not None:
+        query += " AND lar.ssd_gb = %s"
+        query_params.append(expected_ssd_gb)
+    query += " ORDER BY aj.sort_date ASC, aj.id ASC, lar.id DESC"
+
     try:
-        cursor.execute(
-            """
-            SELECT product_id, sort_date, price_krw, title, url, source
-            FROM analysis_jobs
-            WHERE user_id = %s
-              AND source = %s
-              AND LOWER(TRIM(search_keyword)) = LOWER(TRIM(%s))
-              AND sort_date IS NOT NULL
-              AND sort_date >= %s
-              AND sort_date < %s
-              AND price_krw IS NOT NULL
-            ORDER BY sort_date ASC
-            """,
-            (
-                user_id,
-                normalized_source,
-                normalized_search_keyword,
-                previous_saved_at_dt,
-                current_saved_at_dt,
-            ),
-        )
+        cursor.execute(query, tuple(query_params))
     except Exception as exc:
         if _is_unknown_column_error(exc):
             return {
@@ -1447,21 +1481,52 @@ def _collect_missed_candidates_between_saved_windows(
             return {
                 "product_id": _safe_text(raw_row.get("product_id")),
                 "sort_date": _coerce_datetime(raw_row.get("sort_date")),
+                "listing_price_krw": _safe_int(raw_row.get("listing_price_krw")),
                 "price_krw": _safe_int(raw_row.get("price_krw")),
                 "title": _safe_text(raw_row.get("title")),
                 "url": _safe_text(raw_row.get("url")),
                 "source": _safe_text(raw_row.get("source")),
+                "product_type": _safe_text(raw_row.get("product_type")),
+                "chip": _safe_text(raw_row.get("chip")),
+                "screen_inch": _safe_int(raw_row.get("screen_inch")),
+                "ram_gb": _safe_int(raw_row.get("ram_gb")),
+                "ssd_gb": _safe_int(raw_row.get("ssd_gb")),
             }
         if isinstance(raw_row, (tuple, list)):
             return {
                 "product_id": _safe_text(raw_row[0]) if len(raw_row) > 0 else None,
                 "sort_date": _coerce_datetime(raw_row[1]) if len(raw_row) > 1 else None,
-                "price_krw": _safe_int(raw_row[2]) if len(raw_row) > 2 else None,
-                "title": _safe_text(raw_row[3]) if len(raw_row) > 3 else None,
-                "url": _safe_text(raw_row[4]) if len(raw_row) > 4 else None,
-                "source": _safe_text(raw_row[5]) if len(raw_row) > 5 else None,
+                "listing_price_krw": _safe_int(raw_row[2]) if len(raw_row) > 2 else None,
+                "price_krw": _safe_int(raw_row[3]) if len(raw_row) > 3 else None,
+                "title": _safe_text(raw_row[4]) if len(raw_row) > 4 else None,
+                "url": _safe_text(raw_row[5]) if len(raw_row) > 5 else None,
+                "source": _safe_text(raw_row[6]) if len(raw_row) > 6 else None,
+                "product_type": _safe_text(raw_row[7]) if len(raw_row) > 7 else None,
+                "chip": _safe_text(raw_row[8]) if len(raw_row) > 8 else None,
+                "screen_inch": _safe_int(raw_row[9]) if len(raw_row) > 9 else None,
+                "ram_gb": _safe_int(raw_row[10]) if len(raw_row) > 10 else None,
+                "ssd_gb": _safe_int(raw_row[11]) if len(raw_row) > 11 else None,
             }
         return None
+
+    def _is_candidate_spec_match(candidate):
+        if not isinstance(candidate, dict):
+            return False
+        if expected_product_type is not None:
+            candidate_product_type = _safe_text(candidate.get("product_type"))
+            if candidate_product_type is None or candidate_product_type.lower() != expected_product_type.lower():
+                return False
+        if expected_chip is not None:
+            candidate_chip = _safe_text(candidate.get("chip"))
+            if candidate_chip is None or candidate_chip.upper() != expected_chip.upper():
+                return False
+        if expected_screen_inch is not None and _safe_int(candidate.get("screen_inch")) != expected_screen_inch:
+            return False
+        if expected_ram_gb is not None and _safe_int(candidate.get("ram_gb")) != expected_ram_gb:
+            return False
+        if expected_ssd_gb is not None and _safe_int(candidate.get("ssd_gb")) != expected_ssd_gb:
+            return False
+        return True
 
     missed_count = 0
     grouped_rows = {}
@@ -1471,9 +1536,13 @@ def _collect_missed_candidates_between_saved_windows(
         candidate = _row_to_candidate(row)
         if candidate is None:
             continue
+        if not _is_candidate_spec_match(candidate):
+            continue
         product_id = candidate.get("product_id")
         listing_sort_date = candidate.get("sort_date")
-        listing_price_krw = candidate.get("price_krw")
+        listing_price_krw = _safe_int(candidate.get("listing_price_krw"))
+        if listing_price_krw is None:
+            listing_price_krw = _safe_int(candidate.get("price_krw"))
         if listing_sort_date is None or listing_price_krw is None:
             continue
         if listing_sort_date < previous_saved_at_dt or listing_sort_date >= current_saved_at_dt:
@@ -1490,7 +1559,9 @@ def _collect_missed_candidates_between_saved_windows(
         has_missed_candidate = False
         group_representative = None
         for candidate in dedupe_key_rows:
-            listing_price_krw = candidate.get("price_krw")
+            listing_price_krw = _safe_int(candidate.get("listing_price_krw"))
+            if listing_price_krw is None:
+                listing_price_krw = _safe_int(candidate.get("price_krw"))
             old_rule_match = _is_price_match_for_rule(listing_price_krw, old_rule_snapshot)
             new_rule_match = _is_price_match_for_rule(listing_price_krw, new_rule_snapshot)
             if new_rule_match and not old_rule_match:
@@ -1541,6 +1612,11 @@ def _count_missed_candidates_between_saved_windows(
     current_saved_at,
     old_rule_snapshot,
     new_rule_snapshot,
+    product_type=None,
+    chip=None,
+    screen_inch=None,
+    ram_gb=None,
+    ssd_gb=None,
 ):
     normalized_rule_id = _safe_int(rule_id)
     stats = _collect_missed_candidates_between_saved_windows(
@@ -1553,6 +1629,11 @@ def _count_missed_candidates_between_saved_windows(
         current_saved_at=current_saved_at,
         old_rule_snapshot=old_rule_snapshot,
         new_rule_snapshot=new_rule_snapshot,
+        product_type=product_type,
+        chip=chip,
+        screen_inch=screen_inch,
+        ram_gb=ram_gb,
+        ssd_gb=ssd_gb,
     )
     missed_count = _safe_int(stats.get("missed_count")) or 0
     candidate_rows = _safe_int(stats.get("candidate_rows")) or 0
@@ -1561,7 +1642,7 @@ def _count_missed_candidates_between_saved_windows(
 
     if missed_count == 0:
         logger.info(
-            "[condition_change_candidate] count_scope=keyword user_id=%s source=%s search_keyword=%s candidate_rows=%s missed_candidate_count=%s rule_id=%s",
+            "[condition_change_candidate] count_scope=spec user_id=%s source=%s search_keyword=%s candidate_rows=%s missed_candidate_count=%s rule_id=%s",
             user_id,
             normalized_source,
             normalized_search_keyword,
@@ -1572,7 +1653,7 @@ def _count_missed_candidates_between_saved_windows(
         return 0
 
     logger.info(
-        "[condition_change_candidate] count_scope=keyword user_id=%s source=%s search_keyword=%s candidate_rows=%s missed_candidate_count=%s rule_id=%s",
+        "[condition_change_candidate] count_scope=spec user_id=%s source=%s search_keyword=%s candidate_rows=%s missed_candidate_count=%s rule_id=%s",
         user_id,
         normalized_source,
         normalized_search_keyword,
@@ -2856,6 +2937,11 @@ def upsert_user_fair_price_setting(
                 current_saved_at=current_saved_at,
                 old_rule_snapshot=old_rule_snapshot,
                 new_rule_snapshot=new_rule_snapshot,
+                product_type=normalized_product_type,
+                chip=normalized_chip,
+                screen_inch=normalized_screen_inch,
+                ram_gb=normalized_ram_gb,
+                ssd_gb=normalized_ssd_gb,
             )
             missed_candidate_count = _safe_int(missed_candidate_stats.get("missed_count")) or 0
             representative_missed_candidate = missed_candidate_stats.get("representative_candidate")
@@ -2865,7 +2951,7 @@ def upsert_user_fair_price_setting(
                 else []
             )
             logger.info(
-                "[condition_change_candidate] count_scope=keyword user_id=%s source=%s search_keyword=%s candidate_rows=%s missed_candidate_count=%s rule_id=%s",
+                "[condition_change_candidate] count_scope=spec user_id=%s source=%s search_keyword=%s candidate_rows=%s missed_candidate_count=%s rule_id=%s",
                 normalized_user_id,
                 "joongna",
                 resolved_search_keyword,
