@@ -4,7 +4,7 @@ import requests
 
 
 SEARCH_API_URL = "https://search-api.joongna.com/v3/search/all"
-STORE_PROFILE_API_URL_TEMPLATE = "https://main-api.joongna.com/v2/my-store/{store_seq}"
+STORE_PROFILE_API_URL = "https://main-api.joongna.com/user/info/product-detail"
 REQUEST_TIMEOUT_SECONDS = 10
 STORE_PROFILE_REQUEST_TIMEOUT_SECONDS = 10
 DEFAULT_HEADERS = {
@@ -323,7 +323,7 @@ def search_joongna_products(search_word, page=0, quantity=50):
     return normalized_items
 
 
-def fetch_joongna_store_profile(store_seq, *, store_profile_cache=None):
+def fetch_joongna_store_profile(store_seq, *, store_profile_cache=None, raise_on_error=False):
     normalized_store_seq = _normalize_store_seq(store_seq)
     if normalized_store_seq is None:
         return None
@@ -331,11 +331,11 @@ def fetch_joongna_store_profile(store_seq, *, store_profile_cache=None):
     if isinstance(store_profile_cache, dict) and normalized_store_seq in store_profile_cache:
         return store_profile_cache.get(normalized_store_seq)
 
-    url = STORE_PROFILE_API_URL_TEMPLATE.format(store_seq=normalized_store_seq)
     try:
         response = requests.get(
-            url,
+            STORE_PROFILE_API_URL,
             headers=STORE_PROFILE_HEADERS,
+            params={"storeSeq": normalized_store_seq},
             timeout=STORE_PROFILE_REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
@@ -355,15 +355,17 @@ def fetch_joongna_store_profile(store_seq, *, store_profile_cache=None):
 
         profile = {
             "store_seq": _normalize_store_seq(data.get("storeSeq")) or normalized_store_seq,
-            "store_name": _coerce_nullable_text(data.get("storeName")) or _coerce_nullable_text(data.get("nickName")),
+            "store_name": _coerce_nullable_text(data.get("nickName")) or _coerce_nullable_text(data.get("storeName")),
             "profile_image_url": _coerce_nullable_text(data.get("profileImageUrl")),
             "store_level": _coerce_nullable_text(data.get("storeLevel")),
             "trust_score": _coerce_int(data.get("trustScore")),
             "review_count": _coerce_int(data.get("reviewCount")),
         }
     except Exception as exc:
+        if raise_on_error:
+            raise RuntimeError(str(exc)) from exc
         print(
-            "[joongna_search_client] warning: my-store API 조회 실패 "
+            "[joongna_search_client] warning: product-detail API 조회 실패 "
             f"(storeSeq={normalized_store_seq}): {exc}"
         )
         if isinstance(store_profile_cache, dict):

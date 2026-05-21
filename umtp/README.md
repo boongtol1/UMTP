@@ -128,8 +128,9 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.8 polling 구조: 같은 `source + search_keyword`는 같은 polling cycle에서 외부 Search API를 1회만 호출하고, 결과를 저장한 뒤 여러 설정(`user_fair_prices`)은 저장 결과를 내부 매칭으로 공유합니다.
 - 1.8 검색 캐시 구조: 공유 polling 결과는 `search_queries`(검색어 스코프) + `search_results`(조회 결과 스냅샷) 테이블에도 저장됩니다.
 - 1.8 중고나라 판매자명 구조: Search API 응답에는 판매자 닉네임 필드가 직접 없고 `storeSeq`만 내려올 수 있습니다.
-- 1.8 판매자 프로필 조회: `storeSeq`가 있으면 `GET https://main-api.joongna.com/v2/my-store/{storeSeq}`를 추가 호출해 `storeName`을 판매자 표시 이름으로 저장합니다.
-- 1.8 장애 허용 정책: `my-store` 조회 실패는 전체 polling/analysis 실패로 처리하지 않고 seller 컬럼은 `NULL`로 저장하며 warning 로그만 남깁니다.
+- 1.8 판매자 프로필 조회: `storeSeq`가 있으면 `GET https://main-api.joongna.com/user/info/product-detail?storeSeq={storeSeq}`를 추가 호출해 `nickName(storeName)`을 판매자 표시 이름으로 저장합니다.
+- 1.8 판매자 캐시 정책: `joongna_store_profiles` 테이블에 `storeSeq -> store_name`을 장기 캐시하고, 캐시 hit 시 외부 API 재호출 없이 DB 값을 재사용합니다.
+- 1.8 장애 허용 정책: 닉네임 조회 실패는 전체 polling/analysis 실패로 처리하지 않고 seller 컬럼은 `NULL`(또는 stale 캐시)로 저장하며 warning 로그만 남깁니다.
 - 1.8 변경 감지 스킵 구조: `joongna_seen_products`의 이전 관측값과 현재 관측값을 비교해 `new/sort_date_changed/price_changed/title_changed/refresh_key_changed/body_maybe_changed`만 분석 큐로 보내고, `unchanged`는 분석을 스킵합니다.
 - 1.8 lazy detail fetch 구조: analysis worker는 모든 매물의 상세본문을 조회하지 않고, `new/저가 후보/제목 파싱 실패/제품명만 있고 스펙 부족` 후보에만 상세조회(fetch_html)를 수행합니다.
 - 1.8 알림 속도(priority) 구조: watch_rule(`user_fair_prices`)마다 `priority=FAST/NORMAL/LOW`를 저장하고, polling scheduler는 priority 기준 기본 주기(45/180/600초)에 ±20% jitter를 적용해 다음 조회 시점을 계산합니다.

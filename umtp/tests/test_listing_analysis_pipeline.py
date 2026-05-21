@@ -30,6 +30,27 @@ class _FakeCursor:
         return None
 
 
+class _SellerSnapshotCursor(_FakeCursor):
+    def __init__(self):
+        super().__init__()
+        self._fetchone_result = None
+
+    def execute(self, query, params=None):
+        self.executed.append((query, params))
+        normalized = " ".join((query or "").split()).lower()
+        if "from search_results" in normalized:
+            self._fetchone_result = {
+                "seller_store_seq": 703755,
+                "seller_store_name": "벨텁수동",
+                "raw_json": "{}",
+            }
+            return
+        self._fetchone_result = None
+
+    def fetchone(self):
+        return self._fetchone_result
+
+
 class _FakeConnection:
     def __init__(self, cursor):
         self._cursor = cursor
@@ -393,6 +414,58 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
         self.assertEqual(parsed_spec.get("chip"), "M2")
         self.assertEqual(parsed_spec.get("ram_gb"), 8)
         self.assertEqual(parsed_spec.get("ssd_gb"), 256)
+
+    def test_alert_event_copies_seller_store_name_from_search_results(self):
+        fake_cursor = _SellerSnapshotCursor()
+        fake_connection = _FakeConnection(fake_cursor)
+
+        with patch("src.listing_analysis_pipeline.fetch_html", return_value="<html></html>"):
+            with patch(
+                "src.listing_analysis_pipeline.parse_joongna_listing_page",
+                return_value={
+                    "title": "맥북에어 M1 8GB 256GB",
+                    "description": "테스트",
+                    "listing_price_krw": 600000,
+                    "self_check_fields": {},
+                },
+            ):
+                with self._mock_parsing():
+                    with patch(
+                        "src.listing_analysis_pipeline.is_user_fair_price_target_enabled",
+                        return_value=True,
+                    ):
+                        with patch(
+                            "src.listing_analysis_pipeline.resolve_fair_price_for_user",
+                            return_value={
+                                "fair_price_krw": 800000,
+                                "alert_drop_rate_percent": 20.0,
+                                "source": "user_fair_prices",
+                            },
+                        ):
+                            with patch(
+                                "src.listing_analysis_pipeline._evaluate_watch_rule_saved_window",
+                                return_value=(True, None),
+                            ):
+                                with patch(
+                                    "src.listing_analysis_pipeline.get_connection",
+                                    return_value=fake_connection,
+                                ):
+                                    with patch(
+                                        "src.listing_analysis_pipeline.save_listing_analysis_result",
+                                        return_value={"analysis_result_id": 2, "diff_ratio": 25.0},
+                                    ):
+                                        with patch("src.listing_analysis_pipeline.save_success_log"):
+                                            with patch(
+                                                "src.listing_analysis_pipeline.maybe_create_alert_event",
+                                                return_value={"created": True, "alert_id": 9},
+                                            ) as mock_create_alert:
+                                                result = analyze_product_for_watch_rule(self._build_job())
+
+        self.assertTrue(result.get("ok"))
+        self.assertTrue(result.get("alert_created"))
+        self.assertEqual(mock_create_alert.call_count, 1)
+        self.assertEqual(mock_create_alert.call_args.kwargs.get("seller_store_seq"), 703755)
+        self.assertEqual(mock_create_alert.call_args.kwargs.get("seller_store_name"), "벨텁수동")
 
     def test_below_or_equal_alert_when_listing_is_lower_than_target(self):
         result, create_alert_call_count = self._run_pipeline_for_price_rule(

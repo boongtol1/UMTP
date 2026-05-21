@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 
 try:
@@ -35,6 +35,10 @@ except ModuleNotFoundError:
         get_due_user_fair_price_polling_targets as get_due_watch_rules,
         mark_user_fair_price_polled as mark_watch_rule_polled,
     )
+
+
+STORE_PROFILE_RETRY_MINUTES = 30
+
 
 def _normalize_search_words(search_words):
     if not search_words:
@@ -218,6 +222,191 @@ def _extract_single_value_row(row):
     return row
 
 
+def _is_schema_missing_error(exc):
+    lowered = str(exc).lower()
+    return "unknown column" in lowered or "unknown table" in lowered or "doesn't exist" in lowered
+
+
+def _fetch_store_profile_cache_row(cursor, store_seq):
+    if cursor is None:
+        return None
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                store_seq,
+                store_name,
+                fetch_status,
+                error_message,
+                last_fetched_at,
+                next_retry_at
+            FROM joongna_store_profiles
+            WHERE store_seq = %s
+            LIMIT 1
+            """,
+            (store_seq,),
+        )
+        row = cursor.fetchone()
+    except Exception as exc:
+        if _is_schema_missing_error(exc):
+            return None
+        raise
+
+    if row is None:
+        return None
+
+    if isinstance(row, dict):
+        return {
+            "store_seq": _safe_int(row.get("store_seq")),
+            "store_name": _safe_text(row.get("store_name")),
+            "fetch_status": _safe_text(row.get("fetch_status")),
+            "error_message": _safe_text(row.get("error_message")),
+            "last_fetched_at": _coerce_datetime(row.get("last_fetched_at")),
+            "next_retry_at": _coerce_datetime(row.get("next_retry_at")),
+        }
+
+    if isinstance(row, (tuple, list)):
+        return {
+            "store_seq": _safe_int(row[0]) if len(row) > 0 else None,
+            "store_name": _safe_text(row[1]) if len(row) > 1 else None,
+            "fetch_status": _safe_text(row[2]) if len(row) > 2 else None,
+            "error_message": _safe_text(row[3]) if len(row) > 3 else None,
+            "last_fetched_at": _coerce_datetime(row[4]) if len(row) > 4 else None,
+            "next_retry_at": _coerce_datetime(row[5]) if len(row) > 5 else None,
+        }
+
+    return None
+
+
+def _upsert_store_profile_cache_success(cursor, *, store_seq, store_name):
+    if cursor is None:
+        return
+    try:
+        cursor.execute(
+            """
+            INSERT INTO joongna_store_profiles (
+                store_seq,
+                store_name,
+                fetch_status,
+                error_message,
+                last_fetched_at,
+                next_retry_at
+            )
+            VALUES (%s, %s, 'success', NULL, CURRENT_TIMESTAMP, NULL)
+            ON DUPLICATE KEY UPDATE
+                store_name = VALUES(store_name),
+                fetch_status = 'success',
+                error_message = NULL,
+                last_fetched_at = CURRENT_TIMESTAMP,
+                next_retry_at = NULL
+            """,
+            (store_seq, store_name),
+        )
+    except Exception as exc:
+        if _is_schema_missing_error(exc):
+            return
+        raise
+
+
+def _upsert_store_profile_cache_failure(cursor, *, store_seq, error_message):
+    if cursor is None:
+        return
+    retry_at = datetime.now() + timedelta(minutes=STORE_PROFILE_RETRY_MINUTES)
+    try:
+        cursor.execute(
+            """
+            INSERT INTO joongna_store_profiles (
+                store_seq,
+                store_name,
+                fetch_status,
+                error_message,
+                last_fetched_at,
+                next_retry_at
+            )
+            VALUES (%s, NULL, 'failed', %s, CURRENT_TIMESTAMP, %s)
+            ON DUPLICATE KEY UPDATE
+                fetch_status = 'failed',
+                error_message = VALUES(error_message),
+                last_fetched_at = CURRENT_TIMESTAMP,
+                next_retry_at = VALUES(next_retry_at)
+            """,
+            (store_seq, _safe_text(error_message), retry_at),
+        )
+    except Exception as exc:
+        if _is_schema_missing_error(exc):
+            return
+        raise
+
+
+def resolve_store_profile_for_store_seq(cursor, store_seq, *, store_profile_cache=None):
+    normalized_store_seq = _safe_int(store_seq)
+    if normalized_store_seq is None or normalized_store_seq <= 0:
+        return None
+
+    if isinstance(store_profile_cache, dict) and normalized_store_seq in store_profile_cache:
+        return store_profile_cache.get(normalized_store_seq)
+
+    cached_row = _fetch_store_profile_cache_row(cursor, normalized_store_seq)
+    stale_store_name = None
+    if isinstance(cached_row, dict):
+        stale_store_name = _safe_text(cached_row.get("store_name"))
+        next_retry_at = _coerce_datetime(cached_row.get("next_retry_at"))
+        if stale_store_name is not None:
+            result = {
+                "store_seq": normalized_store_seq,
+                "store_name": stale_store_name,
+            }
+            if isinstance(store_profile_cache, dict):
+                store_profile_cache[normalized_store_seq] = result
+            return result
+
+        if next_retry_at is not None and next_retry_at > datetime.now():
+            result = {
+                "store_seq": normalized_store_seq,
+                "store_name": stale_store_name,
+            }
+            if isinstance(store_profile_cache, dict):
+                store_profile_cache[normalized_store_seq] = result
+            return result
+
+    try:
+        fetched = fetch_joongna_store_profile(normalized_store_seq, raise_on_error=True)
+        fetched_store_name = _safe_text((fetched or {}).get("store_name"))
+        _upsert_store_profile_cache_success(
+            cursor,
+            store_seq=normalized_store_seq,
+            store_name=fetched_store_name,
+        )
+        result = {
+            "store_seq": normalized_store_seq,
+            "store_name": fetched_store_name,
+            "profile_image_url": _safe_text((fetched or {}).get("profile_image_url")),
+            "store_level": _safe_text((fetched or {}).get("store_level")),
+            "trust_score": _safe_int((fetched or {}).get("trust_score")),
+            "review_count": _safe_int((fetched or {}).get("review_count")),
+        }
+    except Exception as exc:
+        warning_message = _safe_text(str(exc)) or "store_profile_fetch_failed"
+        print(
+            "[polling] warning: seller profile 조회 실패 "
+            f"(storeSeq={normalized_store_seq}): {warning_message}"
+        )
+        _upsert_store_profile_cache_failure(
+            cursor,
+            store_seq=normalized_store_seq,
+            error_message=warning_message,
+        )
+        result = {
+            "store_seq": normalized_store_seq,
+            "store_name": stale_store_name,
+        }
+
+    if isinstance(store_profile_cache, dict):
+        store_profile_cache[normalized_store_seq] = result
+    return result
+
+
 def _upsert_search_query(cursor, *, source, normalized_keyword, polled_at, status):
     cursor.execute(
         """
@@ -299,8 +488,9 @@ def save_group_search_results(
         seller_review_count = _safe_int(item.get("seller_review_count"))
 
         if seller_store_seq is not None:
-            # search API 자체에는 판매자 닉네임이 없어서 my-store API를 추가 조회한다.
-            store_profile = fetch_joongna_store_profile(
+            # search API에는 판매자 닉네임이 없어서 storeSeq 기준 캐시 조회 후 필요 시 상세 API를 호출한다.
+            store_profile = resolve_store_profile_for_store_seq(
+                cursor,
                 seller_store_seq,
                 store_profile_cache=store_profile_cache,
             )
