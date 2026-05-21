@@ -390,6 +390,19 @@ fun SettingsNavigator(
         }
         is Screen.RamSsdSettings -> {
             val screenScopeInch = if (screen.productType == "Mac mini") null else screen.screenSize
+            val scopedUserSettings = userSettings
+                .asSequence()
+                .filter {
+                    it.product_type == screen.productType &&
+                        it.chip == screen.chip &&
+                        (screenScopeInch == null || it.screen_inch == screenScopeInch) &&
+                        it.has_user_override
+                }
+                .toList()
+            val productScopedUserSettings = userSettings
+                .asSequence()
+                .filter { it.product_type == screen.productType && it.has_user_override }
+                .toList()
             val filteredUnits = units.filter {
                 it.product_type == screen.productType &&
                 it.chip == screen.chip &&
@@ -411,24 +424,28 @@ fun SettingsNavigator(
                 refreshingRuleIds = refreshingRuleIds,
                 ruleRefreshStatusMessages = ruleRefreshStatusMessages,
                 ruleLastRefreshLabels = ruleLastRefreshLabels,
-                bulkEnabled = userSettings
-                    .asSequence()
-                    .filter {
-                        it.product_type == screen.productType &&
-                            it.chip == screen.chip &&
-                            (screenScopeInch == null || it.screen_inch == screenScopeInch) &&
-                            it.has_user_override
+                bulkEnabledForCurrentScope = scopedUserSettings.isNotEmpty() && scopedUserSettings.all { it.enabled },
+                bulkEnabledForProductType = productScopedUserSettings.isNotEmpty() && productScopedUserSettings.all { it.enabled },
+                onBulkEnabledChange = { enabled, applyToProductType ->
+                    if (applyToProductType) {
+                        onBulkSetAlertsEnabled(enabled, screen.productType, null, null)
+                    } else {
+                        onBulkSetAlertsEnabled(enabled, screen.productType, screen.chip, screenScopeInch)
                     }
-                    .toList()
-                    .let { scoped -> scoped.isNotEmpty() && scoped.all { it.enabled } },
-                onBulkEnabledChange = { enabled ->
-                    onBulkSetAlertsEnabled(enabled, screen.productType, screen.chip, screenScopeInch)
                 },
-                onBulkDropRateApply = { dropRatePercent ->
-                    onBulkSetDropRate(dropRatePercent, screen.productType, screen.chip, screenScopeInch)
+                onBulkDropRateApply = { dropRatePercent, applyToProductType ->
+                    if (applyToProductType) {
+                        onBulkSetDropRate(dropRatePercent, screen.productType, null, null)
+                    } else {
+                        onBulkSetDropRate(dropRatePercent, screen.productType, screen.chip, screenScopeInch)
+                    }
                 },
-                onResetToSystemMarketPrices = {
-                    onResetFairPricesToSystem(screen.productType, screen.chip, screenScopeInch)
+                onResetToSystemMarketPrices = { applyToProductType ->
+                    if (applyToProductType) {
+                        onResetFairPricesToSystem(screen.productType, null, null)
+                    } else {
+                        onResetFairPricesToSystem(screen.productType, screen.chip, screenScopeInch)
+                    }
                 },
                 onSave = onUpsert,
                 onRefreshRule = onRefreshRule,

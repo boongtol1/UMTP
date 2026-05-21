@@ -40,21 +40,30 @@ fun RamSsdSettingsScreen(
     refreshingRuleIds: Set<Long>,
     ruleRefreshStatusMessages: Map<Long, String>,
     ruleLastRefreshLabels: Map<Long, String>,
-    bulkEnabled: Boolean,
-    onBulkEnabledChange: (Boolean) -> Unit,
-    onBulkDropRateApply: (Double) -> Unit,
-    onResetToSystemMarketPrices: () -> Unit,
+    bulkEnabledForCurrentScope: Boolean,
+    bulkEnabledForProductType: Boolean,
+    onBulkEnabledChange: (Boolean, Boolean) -> Unit,
+    onBulkDropRateApply: (Double, Boolean) -> Unit,
+    onResetToSystemMarketPrices: (Boolean) -> Unit,
     onSave: (MacBookAirUnit, Int, Int, String, Boolean, Boolean, String?, String, Int?) -> Unit,
     onRefreshRule: (Long) -> Unit,
     onBack: () -> Unit
 ) {
     var showEnableConfirmDialog by remember { mutableStateOf(false) }
-    var pendingEnabledValue by remember { mutableStateOf(bulkEnabled) }
+    var applyToProductType by remember(productType, chip, screenSize) { mutableStateOf(false) }
+    val effectiveBulkEnabled = if (applyToProductType) bulkEnabledForProductType else bulkEnabledForCurrentScope
+    var pendingEnabledValue by remember { mutableStateOf(effectiveBulkEnabled) }
     var showDropRateConfirmDialog by remember { mutableStateOf(false) }
     var pendingDropRatePercent by remember { mutableStateOf(0.0) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
     var bulkDropRateInput by remember { mutableStateOf("") }
     var bulkDropRateInputError by remember { mutableStateOf<String?>(null) }
+    val bulkScopeLabel = buildBulkScopeLabel(
+        productType = productType,
+        chip = chip,
+        screenSize = screenSize,
+        applyToProductType = applyToProductType,
+    )
 
     Scaffold(
         topBar = {
@@ -142,6 +151,39 @@ fun RamSsdSettingsScreen(
                             modifier = Modifier.padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
+                            Text(
+                                text = "적용 범위",
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                FilterChip(
+                                    selected = !applyToProductType,
+                                    onClick = { applyToProductType = false },
+                                    label = {
+                                        Text(
+                                            if (productType == "Mac mini") {
+                                                "현재 칩"
+                                            } else {
+                                                "현재 칩/인치"
+                                            }
+                                        )
+                                    },
+                                    enabled = !isApplyingBulkSettings,
+                                )
+                                FilterChip(
+                                    selected = applyToProductType,
+                                    onClick = { applyToProductType = true },
+                                    label = { Text("제품 전체") },
+                                    enabled = !isApplyingBulkSettings,
+                                )
+                            }
+                            Text(
+                                text = "$bulkScopeLabel 범위에 적용됩니다.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray,
+                            )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -152,7 +194,7 @@ fun RamSsdSettingsScreen(
                                     style = MaterialTheme.typography.titleSmall,
                                 )
                                 Switch(
-                                    checked = bulkEnabled,
+                                    checked = effectiveBulkEnabled,
                                     onCheckedChange = { checked ->
                                         pendingEnabledValue = checked
                                         showEnableConfirmDialog = true
@@ -281,9 +323,9 @@ fun RamSsdSettingsScreen(
             text = {
                 Text(
                     if (pendingEnabledValue) {
-                        "모든 알림을 켜시겠습니까?"
+                        "$bulkScopeLabel 알림을 모두 켜시겠습니까?"
                     } else {
-                        "모든 알림을 끄시겠습니까?"
+                        "$bulkScopeLabel 알림을 모두 끄시겠습니까?"
                     }
                 )
             },
@@ -291,7 +333,7 @@ fun RamSsdSettingsScreen(
                 TextButton(
                     onClick = {
                         showEnableConfirmDialog = false
-                        onBulkEnabledChange(pendingEnabledValue)
+                        onBulkEnabledChange(pendingEnabledValue, applyToProductType)
                     }
                 ) {
                     Text("확인")
@@ -310,13 +352,13 @@ fun RamSsdSettingsScreen(
             onDismissRequest = { showDropRateConfirmDialog = false },
             title = { Text("전체 차이 % 변경") },
             text = {
-                Text("모든 시장가 차이 기준을 ${pendingDropRatePercent}%로 변경할까요?")
+                Text("$bulkScopeLabel 시장가 차이 기준을 ${pendingDropRatePercent}%로 변경할까요?")
             },
             confirmButton = {
                 TextButton(
                     onClick = {
                         showDropRateConfirmDialog = false
-                        onBulkDropRateApply(pendingDropRatePercent)
+                        onBulkDropRateApply(pendingDropRatePercent, applyToProductType)
                     }
                 ) {
                     Text("확인")
@@ -335,13 +377,13 @@ fun RamSsdSettingsScreen(
             onDismissRequest = { showResetConfirmDialog = false },
             title = { Text("시장가 초기화") },
             text = {
-                Text("사용자가 생각한 시장가를 시스템 기준 시장가로 모두 바꿀까요? 기존 알림 방향과 차이 % 설정은 유지됩니다.")
+                Text("$bulkScopeLabel 사용자가 생각한 시장가를 시스템 기준 시장가로 모두 바꿀까요? 기존 알림 방향과 차이 % 설정은 유지됩니다.")
             },
             confirmButton = {
                 TextButton(
                     onClick = {
                         showResetConfirmDialog = false
-                        onResetToSystemMarketPrices()
+                        onResetToSystemMarketPrices(applyToProductType)
                     }
                 ) {
                     Text("확인")
@@ -354,4 +396,19 @@ fun RamSsdSettingsScreen(
             },
         )
     }
+}
+
+private fun buildBulkScopeLabel(
+    productType: String,
+    chip: String,
+    screenSize: Int,
+    applyToProductType: Boolean,
+): String {
+    if (applyToProductType) {
+        return productType
+    }
+    if (productType == "Mac mini") {
+        return "$chip $productType"
+    }
+    return "$chip $productType ${screenSize}인치"
 }
