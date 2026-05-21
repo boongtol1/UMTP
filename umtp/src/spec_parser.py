@@ -48,7 +48,7 @@ TB_TO_GB_MAP = {
     "8테라": 8192,
 }
 
-BASE_MODEL_KEYWORD_PATTERN = re.compile(r"(기본형|깡통)")
+BASE_MODEL_KEYWORD_PATTERN = re.compile(r"(기본형|기본사양|깡통)")
 
 NOISE_CONTEXT_KEYWORDS = {
     "date": ["월", "일", "년", "년식"],
@@ -757,7 +757,7 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
     if should_apply_base_fallback:
         base_spec = get_product_base_spec(product_type, chip, screen_inch)
         if isinstance(base_spec, dict):
-            fallback_source = "기본형/깡통" if has_base_model_keyword else "missing_ram_or_ssd"
+            fallback_source = "기본형/기본사양/깡통" if has_base_model_keyword else "missing_ram_or_ssd"
             if ram_gb is None:
                 ram_gb = base_spec.get("ram_gb")
                 if ram_gb is not None:

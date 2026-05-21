@@ -14,6 +14,7 @@ from src.spec_parser import contains_base_model_keyword, parse_listing_text, par
 class SpecParserBaseModelFallbackTest(unittest.TestCase):
     def test_contains_base_model_keyword_matches_supported_tokens_only(self):
         self.assertTrue(contains_base_model_keyword("맥북에어 m2 기본형"))
+        self.assertTrue(contains_base_model_keyword("맥북에어 m2 기본사양"))
         self.assertTrue(contains_base_model_keyword("맥북에어(m2)깡통"))
         self.assertTrue(contains_base_model_keyword("맥북에어 m5 기본형입니다"))
         self.assertTrue(contains_base_model_keyword("맥북에어 m5 깡통이에요"))
@@ -35,6 +36,15 @@ class SpecParserBaseModelFallbackTest(unittest.TestCase):
         self.assertTrue(parsed["parse_success"])
         self.assertEqual(parsed["product_type"], "MacBook Air")
         self.assertEqual(parsed["chip"], "M1")
+        self.assertEqual(parsed["screen_inch"], 13)
+        self.assertEqual(parsed["ram_gb"], 8)
+        self.assertEqual(parsed["ssd_gb"], 256)
+
+    def test_macbook_air_m2_basic_spec_parses_with_fallback(self):
+        parsed = parse_listing_title("맥북에어 m2 기본사양")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["product_type"], "MacBook Air")
+        self.assertEqual(parsed["chip"], "M2")
         self.assertEqual(parsed["screen_inch"], 13)
         self.assertEqual(parsed["ram_gb"], 8)
         self.assertEqual(parsed["ssd_gb"], 256)

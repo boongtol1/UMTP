@@ -20,6 +20,15 @@ class SpecParserMacMiniTest(unittest.TestCase):
         self.assertEqual(parsed["ram_gb"], 8)
         self.assertEqual(parsed["ssd_gb"], 256)
 
+    def test_parse_mac_mini_m2_basic_spec_fallback(self):
+        parsed = parse_listing_title("맥미니 M2 기본사양")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["product_type"], "Mac mini")
+        self.assertEqual(parsed["chip"], "M2")
+        self.assertEqual(parsed["screen_inch"], 0)
+        self.assertEqual(parsed["ram_gb"], 8)
+        self.assertEqual(parsed["ssd_gb"], 256)
+
     def test_parse_mac_mini_m2_pro_kkangtong_fallback(self):
         parsed = parse_listing_title("맥미니 m2pro 깡통")
         self.assertTrue(parsed["parse_success"])
