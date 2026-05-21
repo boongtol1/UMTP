@@ -135,6 +135,8 @@ def _build_poll_stats(search_words):
         "new_count": 0,
         "changed_count": 0,
         "unchanged_skipped_count": 0,
+        "unchanged_backfill_match_count": 0,
+        "unchanged_backfill_target_count": 0,
         "analyzed_count": 0,
         "alert_created_count": 0,
         "fetched_items": 0,
@@ -220,6 +222,85 @@ def _extract_single_value_row(row):
             return None
         return row[0]
     return row
+
+
+def _normalize_setting_id(value):
+    normalized = _safe_int(value)
+    if normalized is None or normalized <= 0:
+        return None
+    return normalized
+
+
+def _target_setting_id(target):
+    if not isinstance(target, dict):
+        return None
+    return _normalize_setting_id(target.get("setting_id") or target.get("rule_id"))
+
+
+def _has_analysis_job_for_target(cursor, target, product_id):
+    if cursor is None or not isinstance(target, dict):
+        return False
+
+    user_id = _normalize_optional_user_id(target.get("user_id"))
+    setting_id = _target_setting_id(target)
+    normalized_product_id = _safe_text(product_id)
+    if user_id is None or setting_id is None or normalized_product_id is None:
+        return False
+
+    try:
+        cursor.execute(
+            """
+            SELECT id
+            FROM analysis_jobs
+            WHERE user_id = %s
+              AND product_id = %s
+              AND watch_rule_id = %s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (user_id, normalized_product_id, setting_id),
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            return True
+    except Exception as exc:
+        lowered = str(exc).lower()
+        if "unknown column" not in lowered:
+            return False
+        try:
+            cursor.execute(
+                """
+                SELECT id
+                FROM analysis_jobs
+                WHERE user_id = %s
+                  AND product_id = %s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (user_id, normalized_product_id),
+            )
+            row = cursor.fetchone()
+            return row is not None
+        except Exception:
+            return False
+
+    return False
+
+
+def _filter_unchanged_targets_needing_backfill(cursor, observed_product, eligible_targets):
+    product_id = _safe_text(
+        (observed_product or {}).get("product_id")
+        or (observed_product or {}).get("seq")
+    )
+    if product_id is None:
+        return []
+
+    backfill_targets = []
+    for target in eligible_targets or []:
+        if _has_analysis_job_for_target(cursor, target, product_id):
+            continue
+        backfill_targets.append(target)
+    return backfill_targets
 
 
 def _is_schema_missing_error(exc):
@@ -800,13 +881,44 @@ def upsert_seen_product_and_detect_change(
     }
 
 
-def analyze_only_changed_listings(matches):
-    changed_matches = []
+def select_matches_for_analysis(matches, *, cursor=None, stats=None):
+    selected_matches = []
     for match in matches or []:
-        change_reason = match.get("change_reason")
+        change_reason = _safe_text((match or {}).get("change_reason"))
         if should_analyze_listing(change_reason):
-            changed_matches.append(match)
-    return changed_matches
+            selected_matches.append(match)
+            continue
+
+        if change_reason != "unchanged":
+            continue
+
+        observed_product = (match or {}).get("observed_product") or {}
+        eligible_targets = (match or {}).get("eligible_targets") or []
+        backfill_targets = _filter_unchanged_targets_needing_backfill(
+            cursor,
+            observed_product,
+            eligible_targets,
+        )
+        if not backfill_targets:
+            continue
+
+        if isinstance(stats, dict):
+            stats["unchanged_backfill_match_count"] = (
+                int(stats.get("unchanged_backfill_match_count") or 0) + 1
+            )
+            stats["unchanged_backfill_target_count"] = (
+                int(stats.get("unchanged_backfill_target_count") or 0) + len(backfill_targets)
+            )
+
+        selected_matches.append(
+            {
+                "observed_product": observed_product,
+                "eligible_targets": backfill_targets,
+                "change_reason": "unchanged_backfill",
+            }
+        )
+
+    return selected_matches
 
 
 def _build_keyword_targets_from_user_fair_prices(watch_rules):
@@ -1127,8 +1239,8 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                     targets_for_word,
                     stats=stats,
                 )
-                changed_only_matches = analyze_only_changed_listings(matches)
-                create_alerts_for_matches(changed_only_matches, stats=stats)
+                selected_matches = select_matches_for_analysis(matches, cursor=cursor, stats=stats)
+                create_alerts_for_matches(selected_matches, stats=stats)
             finally:
                 if search_completed_for_word:
                     mark_related_rules_polled(targets_for_word)
@@ -1159,6 +1271,8 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
         f"new_count={stats.get('new_count', 0)} "
         f"changed_count={stats.get('changed_count', 0)} "
         f"unchanged_skipped_count={stats.get('unchanged_skipped_count', 0)} "
+        f"unchanged_backfill_match_count={stats.get('unchanged_backfill_match_count', 0)} "
+        f"unchanged_backfill_target_count={stats.get('unchanged_backfill_target_count', 0)} "
         f"analyzed_count={stats.get('analyzed_count', 0)} "
         f"alert_created_count={stats.get('alert_created_count', 0)}"
     )

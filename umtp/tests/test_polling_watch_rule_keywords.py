@@ -267,7 +267,7 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(enqueue_args[2], "sort_date_changed")
         self.assertEqual(stats.get("new_items"), 1)
 
-    def test_poll_once_does_not_enqueue_jobs_for_unchanged_sort_date(self):
+    def test_poll_once_backfills_jobs_for_unchanged_when_rule_not_analyzed_yet(self):
         due_rules = [
             {
                 "id": 1,
@@ -300,12 +300,63 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
                     with patch("src.joongna_polling_service.get_seen_product", return_value=existing_seen):
                         with patch("src.joongna_polling_service.upsert_seen_product_observation"):
                             with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                                mock_enqueue.return_value = {
+                                    "ok": True,
+                                    "created_jobs": [{"job_id": 1}],
+                                    "skipped_jobs": [],
+                                }
                                 stats = poll_once()
 
-        self.assertEqual(mock_enqueue.call_count, 0)
+        self.assertEqual(mock_enqueue.call_count, 1)
+        enqueue_args = mock_enqueue.call_args.args
+        self.assertEqual(enqueue_args[2], "unchanged_backfill")
         self.assertEqual(stats.get("unchanged_skipped_count"), 1)
-        self.assertEqual(stats.get("alert_created_count"), 0)
+        self.assertEqual(stats.get("unchanged_backfill_target_count"), 1)
+        self.assertEqual(stats.get("alert_created_count"), 1)
         self.assertEqual(stats.get("skipped_seen"), 1)
+
+    def test_poll_once_keeps_skipping_unchanged_when_rule_already_analyzed(self):
+        due_rules = [
+            {
+                "id": 1,
+                "user_id": "boongtol",
+                "search_keyword": "m3맥북에어",
+                "saved_at": "2026-05-15 10:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 1001,
+            "product_id": 1001,
+            "title": "맥북에어 M3 8GB 256GB",
+            "price": 1200000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-1",
+            "product_url": "https://web.joongna.com/product/1001",
+            "image_url": "",
+        }
+        existing_seen = {
+            "seq": 1001,
+            "last_title": "맥북에어 M3 8GB 256GB",
+            "last_price_krw": 1200000,
+            "last_refresh_key": "rk-1",
+            "last_sort_date": "2026-05-15 12:28:52",
+        }
+
+        with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+            with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                with patch("src.joongna_polling_service.get_connection", return_value=_FakeConnection()):
+                    with patch("src.joongna_polling_service.get_seen_product", return_value=existing_seen):
+                        with patch("src.joongna_polling_service.upsert_seen_product_observation"):
+                            with patch(
+                                "src.joongna_polling_service._has_analysis_job_for_target",
+                                return_value=True,
+                            ):
+                                with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                                    stats = poll_once()
+
+        self.assertEqual(mock_enqueue.call_count, 0)
+        self.assertEqual(stats.get("unchanged_backfill_target_count"), 0)
+        self.assertEqual(stats.get("unchanged_skipped_count"), 1)
 
     def test_poll_once_excludes_listings_before_saved_at(self):
         due_rules = [
