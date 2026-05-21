@@ -21,12 +21,15 @@ from src.notification_worker import (
 )
 from src.push_token_service import upsert_user_push_token
 from src.user_settings_service import (
+    bulk_set_user_watch_rules_enabled,
+    bulk_update_user_fair_price_drop_rate,
     get_all_macbook_air_units_sorted,
     get_recommended_setting_keywords,
     get_user_fair_price_settings,
     refresh_user_fair_price_saved_at_for_active_rules,
     refresh_user_fair_price_saved_at_for_single_rule,
     register_user,
+    reset_user_fair_prices_to_system_market_prices,
     upsert_user_fair_price_setting,
 )
 
@@ -118,6 +121,27 @@ class PushTokenRequest(BaseModel):
 
 class ClearSelectedReadArchiveRequest(BaseModel):
     alert_event_ids: list[int] = Field(default_factory=list)
+
+
+class UserWatchRulesBulkEnabledRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=100)
+    enabled: bool
+    product_type: Optional[str] = Field(default=None, min_length=1, max_length=100)
+
+
+class UserFairPricesBulkDropRateRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=100)
+    alert_drop_rate_percent: float = Field(
+        ...,
+        ge=MIN_ALERT_DROP_RATE_PERCENT,
+        le=MAX_ALERT_DROP_RATE_PERCENT,
+    )
+    product_type: Optional[str] = Field(default=None, min_length=1, max_length=100)
+
+
+class UserFairPricesResetToSystemRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=100)
+    product_type: Optional[str] = Field(default=None, min_length=1, max_length=100)
 
 
 @app.get("/health")
@@ -286,6 +310,59 @@ def user_fair_prices_upsert(request: UserFairPriceUpsertRequest):
         return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
     except Exception as exc:
         return {"ok": False, "reason": f"사용자 공정가 설정 저장 실패: {exc}"}
+
+
+@app.patch("/user-watch-rules/bulk-enabled")
+def user_watch_rules_bulk_enabled(request: UserWatchRulesBulkEnabledRequest):
+    try:
+        resolved_user_id = _ensure_user_registered(request.user_id, source="api/user-watch-rules/bulk-enabled")
+        return bulk_set_user_watch_rules_enabled(
+            user_id=resolved_user_id,
+            enabled=request.enabled,
+            product_type=request.product_type,
+        )
+    except ValueError:
+        return {"ok": False, "reason": "invalid_user_id"}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"일괄 알림 ON/OFF 적용 실패: {exc}"}
+
+
+@app.patch("/user-fair-prices/bulk-drop-rate")
+def user_fair_prices_bulk_drop_rate(request: UserFairPricesBulkDropRateRequest):
+    try:
+        resolved_user_id = _ensure_user_registered(request.user_id, source="api/user-fair-prices/bulk-drop-rate")
+        return bulk_update_user_fair_price_drop_rate(
+            user_id=resolved_user_id,
+            alert_drop_rate_percent=request.alert_drop_rate_percent,
+            product_type=request.product_type,
+        )
+    except ValueError:
+        return {"ok": False, "reason": "invalid_user_id"}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"시장가와의 차이 % 일괄 적용 실패: {exc}"}
+
+
+@app.post("/user-fair-prices/reset-to-system-market-prices")
+def user_fair_prices_reset_to_system_market_prices(request: UserFairPricesResetToSystemRequest):
+    try:
+        resolved_user_id = _ensure_user_registered(
+            request.user_id,
+            source="api/user-fair-prices/reset-to-system-market-prices",
+        )
+        return reset_user_fair_prices_to_system_market_prices(
+            user_id=resolved_user_id,
+            product_type=request.product_type,
+        )
+    except ValueError:
+        return {"ok": False, "reason": "invalid_user_id"}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"시스템 기준 시장가 초기화 실패: {exc}"}
 
 
 @app.post("/users/{user_id}/rules/refresh")

@@ -152,6 +152,9 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.9 자동 계산: 앱이 할인 정도를 읽기 전용 설명으로 표시하고, 최종 기준은 서버 응답 `alert_drop_rate_percent`를 사용합니다.
 - 1.9 검색어 UX: 검색어를 직접 입력하거나 추천 검색어를 불러와 선택할 수 있습니다.
 - 1.9 저장 동작: 저장 시 `user_fair_prices`에 반영되고 즉시 검색 요청(`force_poll`)이 걸리며, 설정 토글 자체가 감시 on/off 역할을 합니다.
+- 일괄 제어 API: `PATCH /user-watch-rules/bulk-enabled`, `PATCH /user-fair-prices/bulk-drop-rate`, `POST /user-fair-prices/reset-to-system-market-prices`를 추가해 제품군 단위로 알림 ON/OFF, `alert_drop_rate_percent` 일괄 변경, `mac_fair_prices` 기준 시장가 일괄 초기화를 지원합니다.
+- 일괄 초기화 규칙: `reset-to-system-market-prices`는 `fair_price_krw`만 시스템 기준으로 덮어쓰고, 기존 사용자 설정(`enabled`, 알림 방향, 차이 %, 가격 경계, 검색어 등)은 유지합니다.
+- UI 용어: 앱에서는 `공정가` 대신 `사용자가 생각한 시장가`, `시스템 기준 시장가`, `시장가와의 차이 %` 문구를 우선 사용합니다.
 
 ## 빠른 시작
 

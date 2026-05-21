@@ -155,6 +155,7 @@ fun MainTabScreen(
     val readArchiveRefreshStatusMessage by viewModel.readArchiveRefreshStatusMessage.collectAsState()
     val lastAlertsRefreshLabel by viewModel.lastAlertsRefreshLabel.collectAsState()
     val isRefreshingSettings by viewModel.isRefreshingSettings.collectAsState()
+    val isApplyingBulkSettings by viewModel.isApplyingBulkSettings.collectAsState()
     val settingsRefreshStatusMessage by viewModel.settingsRefreshStatusMessage.collectAsState()
     val lastSettingsRefreshLabel by viewModel.lastSettingsRefreshLabel.collectAsState()
     val refreshingRuleIds by viewModel.refreshingRuleIds.collectAsState()
@@ -237,6 +238,7 @@ fun MainTabScreen(
                     userSettings = userSettings,
                     savingItemKey = savingItemKey,
                     isRefreshing = isRefreshingSettings,
+                    isApplyingBulkSettings = isApplyingBulkSettings,
                     refreshStatusMessage = settingsRefreshStatusMessage,
                     lastRefreshAtText = lastSettingsRefreshLabel,
                     onRefresh = { viewModel.refreshSettings(userId, showFeedback = true) },
@@ -259,6 +261,18 @@ fun MainTabScreen(
                     onRefreshRule = { ruleId ->
                         viewModel.refreshSingleRuleSavedAt(userId, ruleId)
                     },
+                    onBulkSetAlertsEnabled = { enabled, productType ->
+                        viewModel.bulkSetAlertsEnabled(enabled = enabled, productType = productType)
+                    },
+                    onBulkSetDropRate = { dropRatePercent, productType ->
+                        viewModel.bulkSetDropRatePercent(
+                            dropRatePercent = dropRatePercent,
+                            productType = productType,
+                        )
+                    },
+                    onResetFairPricesToSystem = { productType ->
+                        viewModel.resetFairPricesToSystem(productType = productType)
+                    },
                 )
             }
         }
@@ -272,6 +286,7 @@ fun SettingsNavigator(
     userSettings: List<com.boongtol.umtp_android.network.UserFairPriceItem>,
     savingItemKey: String?,
     isRefreshing: Boolean,
+    isApplyingBulkSettings: Boolean,
     refreshStatusMessage: String?,
     lastRefreshAtText: String?,
     onRefresh: () -> Unit,
@@ -280,6 +295,9 @@ fun SettingsNavigator(
     ruleLastRefreshLabels: Map<Long, String>,
     onUpsert: (com.boongtol.umtp_android.network.MacBookAirUnit, Int, Int, String, Boolean, Boolean, String?, String, Int?) -> Unit,
     onRefreshRule: (Long) -> Unit,
+    onBulkSetAlertsEnabled: (Boolean, String?) -> Unit,
+    onBulkSetDropRate: (Double, String?) -> Unit,
+    onResetFairPricesToSystem: (String?) -> Unit,
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.ProductTypeList) }
 
@@ -374,12 +392,27 @@ fun SettingsNavigator(
                 userSettings = userSettings,
                 savingItemKey = savingItemKey,
                 isRefreshing = isRefreshing,
+                isApplyingBulkSettings = isApplyingBulkSettings,
                 refreshStatusMessage = refreshStatusMessage,
                 lastRefreshAtText = lastRefreshAtText,
                 onRefresh = onRefresh,
                 refreshingRuleIds = refreshingRuleIds,
                 ruleRefreshStatusMessages = ruleRefreshStatusMessages,
                 ruleLastRefreshLabels = ruleLastRefreshLabels,
+                bulkEnabled = userSettings
+                    .asSequence()
+                    .filter { it.product_type == screen.productType && it.has_user_override }
+                    .toList()
+                    .let { scoped -> scoped.isNotEmpty() && scoped.all { it.enabled } },
+                onBulkEnabledChange = { enabled ->
+                    onBulkSetAlertsEnabled(enabled, screen.productType)
+                },
+                onBulkDropRateApply = { dropRatePercent ->
+                    onBulkSetDropRate(dropRatePercent, screen.productType)
+                },
+                onResetToSystemMarketPrices = {
+                    onResetFairPricesToSystem(screen.productType)
+                },
                 onSave = onUpsert,
                 onRefreshRule = onRefreshRule,
                 onBack = {

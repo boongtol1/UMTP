@@ -166,6 +166,87 @@ class ApiServerUserRegistrationTest(unittest.TestCase):
         mock_upsert_setting.assert_called_once()
         self.assertEqual(mock_upsert_setting.call_args.kwargs.get("chip"), "M2 Pro")
 
+    @patch(
+        "src.api_server.bulk_set_user_watch_rules_enabled",
+        return_value={"ok": True, "affected_count": 12},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_bulk_enabled_endpoint_registers_user_and_forwards_filter(
+        self,
+        mock_register_user,
+        mock_bulk_enabled,
+    ):
+        request = api_server.UserWatchRulesBulkEnabledRequest(
+            user_id="boongtol",
+            enabled=True,
+            product_type="MacBook Air",
+        )
+
+        response = api_server.user_watch_rules_bulk_enabled(request)
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("affected_count"), 12)
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_bulk_enabled.assert_called_once_with(
+            user_id="boongtol",
+            enabled=True,
+            product_type="MacBook Air",
+        )
+
+    @patch(
+        "src.api_server.bulk_update_user_fair_price_drop_rate",
+        return_value={"ok": True, "affected_count": 9},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_bulk_drop_rate_endpoint_registers_user_before_apply(
+        self,
+        mock_register_user,
+        mock_bulk_drop_rate,
+    ):
+        request = api_server.UserFairPricesBulkDropRateRequest(
+            user_id="boongtol",
+            alert_drop_rate_percent=20.0,
+            product_type="Mac mini",
+        )
+
+        response = api_server.user_fair_prices_bulk_drop_rate(request)
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("affected_count"), 9)
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_bulk_drop_rate.assert_called_once_with(
+            user_id="boongtol",
+            alert_drop_rate_percent=20.0,
+            product_type="Mac mini",
+        )
+
+    @patch(
+        "src.api_server.reset_user_fair_prices_to_system_market_prices",
+        return_value={"ok": True, "inserted_count": 3, "updated_count": 5, "affected_count": 8},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_reset_to_system_prices_endpoint_registers_user_before_reset(
+        self,
+        mock_register_user,
+        mock_reset_to_system,
+    ):
+        request = api_server.UserFairPricesResetToSystemRequest(
+            user_id="boongtol",
+            product_type="MacBook Air",
+        )
+
+        response = api_server.user_fair_prices_reset_to_system_market_prices(request)
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("inserted_count"), 3)
+        self.assertEqual(response.get("updated_count"), 5)
+        self.assertEqual(response.get("affected_count"), 8)
+        mock_register_user.assert_called_once_with(user_id="boongtol")
+        mock_reset_to_system.assert_called_once_with(
+            user_id="boongtol",
+            product_type="MacBook Air",
+        )
+
     @patch("src.api_server.register_user", return_value={"ok": False, "reason": "duplicate_device_conflict"})
     def test_user_fair_prices_returns_registration_failure(self, mock_register_user):
         response = api_server.user_fair_prices("boongtol")

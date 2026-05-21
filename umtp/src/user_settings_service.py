@@ -329,6 +329,15 @@ def _normalize_rule_id(rule_id):
     return normalized
 
 
+def _normalize_optional_product_type_filter(product_type):
+    normalized = _safe_text(product_type)
+    if normalized is None:
+        return None
+    if not is_supported_product_type(normalized):
+        raise ValueError("invalid_product_type")
+    return normalized
+
+
 def _normalize_optional_price_bound(value, *, field_name):
     if value is None:
         return None
@@ -3561,6 +3570,477 @@ def refresh_user_fair_price_saved_at_for_single_rule(user_id, rule_id):
         lowered_exc = str(exc).lower()
         if "unknown column" in lowered_exc and "saved_at" in lowered_exc:
             return {"ok": False, "reason": "missing_saved_at_column"}
+        raise
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def bulk_set_user_watch_rules_enabled(user_id, enabled, product_type=None):
+    if not isinstance(user_id, str) or not user_id.strip():
+        return {"ok": False, "reason": "invalid_user_id"}
+    if not isinstance(enabled, bool):
+        return {"ok": False, "reason": "invalid_enabled"}
+
+    normalized_user_id = user_id.strip()
+    try:
+        normalized_product_type = _normalize_optional_product_type_filter(product_type)
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc)}
+
+    connection = None
+    cursor = None
+    watch_rules_affected_count = 0
+    fair_prices_affected_count = 0
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        where_clause = "WHERE user_id = %s"
+        where_params = [normalized_user_id]
+        if normalized_product_type is not None:
+            where_clause += " AND product_type = %s"
+            where_params.append(normalized_product_type)
+        where_params_tuple = tuple(where_params)
+
+        try:
+            cursor.execute(
+                f"""
+                UPDATE user_watch_rules
+                SET
+                    enabled = %s,
+                    force_poll = CASE
+                        WHEN %s = TRUE THEN TRUE
+                        ELSE FALSE
+                    END,
+                    last_poll_requested_at = CASE
+                        WHEN %s = TRUE THEN CURRENT_TIMESTAMP
+                        ELSE last_poll_requested_at
+                    END,
+                    last_polled_at = CASE
+                        WHEN %s = TRUE THEN NULL
+                        ELSE last_polled_at
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+                {where_clause}
+                """,
+                (enabled, enabled, enabled, enabled, *where_params_tuple),
+            )
+            watch_rules_affected_count = cursor.rowcount
+        except Exception as watch_exc:
+            lowered_watch_exc = str(watch_exc).lower()
+            if "doesn't exist" in lowered_watch_exc and "user_watch_rules" in lowered_watch_exc:
+                watch_rules_affected_count = 0
+            elif "unknown column" in lowered_watch_exc:
+                try:
+                    cursor.execute(
+                        f"""
+                        UPDATE user_watch_rules
+                        SET
+                            enabled = %s,
+                            updated_at = CURRENT_TIMESTAMP
+                        {where_clause}
+                        """,
+                        (enabled, *where_params_tuple),
+                    )
+                    watch_rules_affected_count = cursor.rowcount
+                except Exception as watch_fallback_exc:
+                    lowered_watch_fallback_exc = str(watch_fallback_exc).lower()
+                    if "unknown column" not in lowered_watch_fallback_exc:
+                        raise
+                    cursor.execute(
+                        f"""
+                        UPDATE user_watch_rules
+                        SET enabled = %s
+                        {where_clause}
+                        """,
+                        (enabled, *where_params_tuple),
+                    )
+                    watch_rules_affected_count = cursor.rowcount
+            else:
+                raise
+
+        try:
+            cursor.execute(
+                f"""
+                UPDATE user_fair_prices
+                SET
+                    enabled = %s,
+                    force_poll = CASE
+                        WHEN %s = TRUE THEN TRUE
+                        ELSE FALSE
+                    END,
+                    last_poll_requested_at = CASE
+                        WHEN %s = TRUE THEN CURRENT_TIMESTAMP
+                        ELSE last_poll_requested_at
+                    END,
+                    last_polled_at = CASE
+                        WHEN %s = TRUE THEN NULL
+                        ELSE last_polled_at
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+                {where_clause}
+                """,
+                (enabled, enabled, enabled, enabled, *where_params_tuple),
+            )
+            fair_prices_affected_count = cursor.rowcount
+        except Exception as fair_exc:
+            lowered_fair_exc = str(fair_exc).lower()
+            if "unknown column" not in lowered_fair_exc:
+                raise
+            try:
+                cursor.execute(
+                    f"""
+                    UPDATE user_fair_prices
+                    SET
+                        enabled = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    {where_clause}
+                    """,
+                    (enabled, *where_params_tuple),
+                )
+                fair_prices_affected_count = cursor.rowcount
+            except Exception as fair_fallback_exc:
+                lowered_fair_fallback_exc = str(fair_fallback_exc).lower()
+                if "unknown column" not in lowered_fair_fallback_exc:
+                    raise
+                cursor.execute(
+                    f"""
+                    UPDATE user_fair_prices
+                    SET enabled = %s
+                    {where_clause}
+                    """,
+                    (enabled, *where_params_tuple),
+                )
+                fair_prices_affected_count = cursor.rowcount
+
+        connection.commit()
+        affected_count = fair_prices_affected_count
+        if affected_count <= 0:
+            affected_count = watch_rules_affected_count
+        return {
+            "ok": True,
+            "user_id": normalized_user_id,
+            "product_type": normalized_product_type,
+            "enabled": enabled,
+            "affected_count": affected_count,
+            "watch_rules_affected_count": watch_rules_affected_count,
+            "user_fair_prices_affected_count": fair_prices_affected_count,
+            "message": "일괄 알림 ON/OFF 적용 완료",
+        }
+    except Exception:
+        if connection is not None and connection.is_connected():
+            connection.rollback()
+        raise
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def bulk_update_user_fair_price_drop_rate(user_id, alert_drop_rate_percent, product_type=None):
+    if not isinstance(user_id, str) or not user_id.strip():
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    normalized_user_id = user_id.strip()
+    try:
+        normalized_alert_drop_rate_percent = float(alert_drop_rate_percent)
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "invalid_alert_drop_rate_percent"}
+
+    if not is_valid_alert_drop_rate_percent(normalized_alert_drop_rate_percent):
+        return {"ok": False, "reason": "invalid_alert_drop_rate_percent"}
+
+    try:
+        normalized_product_type = _normalize_optional_product_type_filter(product_type)
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc)}
+
+    connection = None
+    cursor = None
+    fair_prices_affected_count = 0
+    watch_rules_affected_count = 0
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        where_clause = "WHERE user_id = %s"
+        where_params = [normalized_user_id]
+        if normalized_product_type is not None:
+            where_clause += " AND product_type = %s"
+            where_params.append(normalized_product_type)
+        where_params_tuple = tuple(where_params)
+
+        try:
+            cursor.execute(
+                f"""
+                UPDATE user_fair_prices
+                SET
+                    alert_drop_rate_percent = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                {where_clause}
+                """,
+                (normalized_alert_drop_rate_percent, *where_params_tuple),
+            )
+            fair_prices_affected_count = cursor.rowcount
+        except Exception as fair_exc:
+            lowered_fair_exc = str(fair_exc).lower()
+            if "unknown column" not in lowered_fair_exc:
+                raise
+            cursor.execute(
+                f"""
+                UPDATE user_fair_prices
+                SET alert_drop_rate_percent = %s
+                {where_clause}
+                """,
+                (normalized_alert_drop_rate_percent, *where_params_tuple),
+            )
+            fair_prices_affected_count = cursor.rowcount
+
+        try:
+            cursor.execute(
+                f"""
+                UPDATE user_watch_rules
+                SET
+                    alert_drop_rate_percent = %s,
+                    target_price_krw = CASE
+                        WHEN fair_price_krw IS NULL THEN target_price_krw
+                        ELSE ROUND(fair_price_krw * (1 - (%s / 100)))
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+                {where_clause}
+                """,
+                (
+                    normalized_alert_drop_rate_percent,
+                    normalized_alert_drop_rate_percent,
+                    *where_params_tuple,
+                ),
+            )
+            watch_rules_affected_count = cursor.rowcount
+        except Exception as watch_exc:
+            lowered_watch_exc = str(watch_exc).lower()
+            if "doesn't exist" in lowered_watch_exc and "user_watch_rules" in lowered_watch_exc:
+                watch_rules_affected_count = 0
+            elif "unknown column" in lowered_watch_exc:
+                try:
+                    cursor.execute(
+                        f"""
+                        UPDATE user_watch_rules
+                        SET
+                            alert_drop_rate_percent = %s,
+                            updated_at = CURRENT_TIMESTAMP
+                        {where_clause}
+                        """,
+                        (normalized_alert_drop_rate_percent, *where_params_tuple),
+                    )
+                    watch_rules_affected_count = cursor.rowcount
+                except Exception as watch_fallback_exc:
+                    lowered_watch_fallback_exc = str(watch_fallback_exc).lower()
+                    if "unknown column" not in lowered_watch_fallback_exc:
+                        raise
+                    cursor.execute(
+                        f"""
+                        UPDATE user_watch_rules
+                        SET alert_drop_rate_percent = %s
+                        {where_clause}
+                        """,
+                        (normalized_alert_drop_rate_percent, *where_params_tuple),
+                    )
+                    watch_rules_affected_count = cursor.rowcount
+            else:
+                raise
+
+        connection.commit()
+        affected_count = fair_prices_affected_count
+        if affected_count <= 0:
+            affected_count = watch_rules_affected_count
+        return {
+            "ok": True,
+            "user_id": normalized_user_id,
+            "product_type": normalized_product_type,
+            "alert_drop_rate_percent": normalized_alert_drop_rate_percent,
+            "affected_count": affected_count,
+            "user_fair_prices_affected_count": fair_prices_affected_count,
+            "watch_rules_affected_count": watch_rules_affected_count,
+            "message": "시장가와의 차이 % 일괄 적용 완료",
+        }
+    except Exception:
+        if connection is not None and connection.is_connected():
+            connection.rollback()
+        raise
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def reset_user_fair_prices_to_system_market_prices(user_id, product_type=None):
+    if not isinstance(user_id, str) or not user_id.strip():
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    normalized_user_id = user_id.strip()
+    try:
+        normalized_product_type = _normalize_optional_product_type_filter(product_type)
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc)}
+
+    connection = None
+    cursor = None
+    inserted_count = 0
+    updated_count = 0
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        system_map = _fetch_system_defaults_map(cursor)
+        user_map = _fetch_user_overrides_map(cursor, normalized_user_id)
+        db_now = _resolve_db_current_timestamp(cursor) or datetime.now()
+
+        for unit in get_all_macbook_air_units_sorted():
+            if normalized_product_type is not None and unit["product_type"] != normalized_product_type:
+                continue
+
+            key = _unit_key(
+                unit["product_type"],
+                unit["chip"],
+                unit["screen_inch"],
+                unit["ram_gb"],
+                unit["ssd_gb"],
+            )
+            system_item = system_map.get(key)
+            if not isinstance(system_item, dict):
+                continue
+
+            system_fair_price_krw = _safe_int_or_none(system_item.get("fair_price_krw"))
+            if system_fair_price_krw is None:
+                continue
+
+            has_existing = key in user_map
+            user_item = user_map.get(key) or {}
+
+            alert_drop_rate_percent = _safe_float(user_item.get("alert_drop_rate_percent"))
+            if alert_drop_rate_percent is None:
+                alert_drop_rate_percent = DEFAULT_SYSTEM_ALERT_DROP_RATE_PERCENT
+
+            alert_price_direction = normalize_alert_price_direction(user_item.get("alert_price_direction"))
+            min_price_krw = _safe_int_or_none(user_item.get("min_price_krw"))
+            max_price_krw = _safe_int_or_none(user_item.get("max_price_krw"))
+            enabled = _safe_bool(user_item.get("enabled"), default=False) if has_existing else False
+            condition_change_candidate_notice_enabled = (
+                _safe_bool(
+                    user_item.get("condition_change_candidate_notice_enabled"),
+                    default=DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED,
+                )
+                if has_existing
+                else DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED
+            )
+            custom_search_keyword = _normalize_optional_search_keyword(user_item.get("search_keyword"))
+            resolved_search_keyword = custom_search_keyword or _build_recommended_search_keyword(
+                unit["product_type"],
+                unit["chip"],
+                screen_inch=unit["screen_inch"],
+                ram_gb=unit["ram_gb"],
+                ssd_gb=unit["ssd_gb"],
+            )
+            poll_interval_seconds = (
+                _safe_int(user_item.get("poll_interval_seconds")) if has_existing else None
+            ) or DEFAULT_POLL_INTERVAL_SECONDS
+            priority = normalize_watch_priority(user_item.get("priority")) if has_existing else DEFAULT_WATCH_PRIORITY
+            force_poll = _safe_bool(user_item.get("force_poll"), default=False) if has_existing else False
+            last_poll_requested_at = user_item.get("last_poll_requested_at") if has_existing else None
+            last_polled_at = user_item.get("last_polled_at") if has_existing else None
+            saved_at = user_item.get("saved_at") if has_existing else db_now
+            if saved_at is None:
+                saved_at = db_now
+
+            cursor.execute(
+                """
+                INSERT INTO user_fair_prices (
+                    user_id,
+                    product_type,
+                    chip,
+                    screen_inch,
+                    ram_gb,
+                    ssd_gb,
+                    fair_price_krw,
+                    alert_drop_rate_percent,
+                    alert_price_direction,
+                    min_price_krw,
+                    max_price_krw,
+                    enabled,
+                    condition_change_candidate_notice_enabled,
+                    search_keyword,
+                    poll_interval_seconds,
+                    priority,
+                    force_poll,
+                    last_poll_requested_at,
+                    last_polled_at,
+                    saved_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                )
+                ON DUPLICATE KEY UPDATE
+                    fair_price_krw = VALUES(fair_price_krw),
+                    alert_drop_rate_percent = VALUES(alert_drop_rate_percent),
+                    alert_price_direction = VALUES(alert_price_direction),
+                    min_price_krw = VALUES(min_price_krw),
+                    max_price_krw = VALUES(max_price_krw),
+                    enabled = VALUES(enabled),
+                    condition_change_candidate_notice_enabled = VALUES(condition_change_candidate_notice_enabled),
+                    search_keyword = VALUES(search_keyword),
+                    poll_interval_seconds = VALUES(poll_interval_seconds),
+                    priority = VALUES(priority),
+                    force_poll = VALUES(force_poll),
+                    last_poll_requested_at = VALUES(last_poll_requested_at),
+                    last_polled_at = VALUES(last_polled_at),
+                    saved_at = VALUES(saved_at),
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    normalized_user_id,
+                    unit["product_type"],
+                    unit["chip"],
+                    unit["screen_inch"],
+                    unit["ram_gb"],
+                    unit["ssd_gb"],
+                    system_fair_price_krw,
+                    alert_drop_rate_percent,
+                    alert_price_direction,
+                    min_price_krw,
+                    max_price_krw,
+                    enabled,
+                    condition_change_candidate_notice_enabled,
+                    resolved_search_keyword,
+                    poll_interval_seconds,
+                    priority,
+                    force_poll,
+                    last_poll_requested_at,
+                    last_polled_at,
+                    saved_at,
+                ),
+            )
+
+            if has_existing:
+                updated_count += 1
+            else:
+                inserted_count += 1
+
+        connection.commit()
+        affected_count = inserted_count + updated_count
+        return {
+            "ok": True,
+            "user_id": normalized_user_id,
+            "product_type": normalized_product_type,
+            "inserted_count": inserted_count,
+            "updated_count": updated_count,
+            "affected_count": affected_count,
+            "message": "시스템 기준 시장가로 일괄 초기화 완료",
+        }
+    except Exception:
+        if connection is not None and connection.is_connected():
+            connection.rollback()
         raise
     finally:
         if cursor is not None:

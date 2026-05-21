@@ -54,6 +54,9 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _savingItemKey = MutableStateFlow<String?>(null)
     val savingItemKey: StateFlow<String?> = _savingItemKey.asStateFlow()
 
+    private val _isApplyingBulkSettings = MutableStateFlow(false)
+    val isApplyingBulkSettings: StateFlow<Boolean> = _isApplyingBulkSettings.asStateFlow()
+
     private val _isRefreshingAlerts = MutableStateFlow(false)
     val isRefreshingAlerts: StateFlow<Boolean> = _isRefreshingAlerts.asStateFlow()
 
@@ -528,6 +531,101 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 _toastMessage.value = buildNetworkErrorMessage("저장 실패", e)
             } finally {
                 _savingItemKey.value = null
+            }
+        }
+    }
+
+    fun bulkSetAlertsEnabled(enabled: Boolean, productType: String? = null) {
+        val uid = _userId.value ?: return
+        if (_isApplyingBulkSettings.value) {
+            return
+        }
+
+        viewModelScope.launch {
+            _isApplyingBulkSettings.value = true
+            try {
+                val response = UmtpApiClient.apiService.bulkSetUserWatchRulesEnabled(
+                    UserWatchRulesBulkEnabledRequest(
+                        user_id = uid,
+                        enabled = enabled,
+                        product_type = productType,
+                    )
+                )
+                if (response.ok) {
+                    _toastMessage.value = if (enabled) {
+                        "전체 알림이 켜졌습니다."
+                    } else {
+                        "전체 알림이 꺼졌습니다."
+                    }
+                    refreshUserSettingsInternal(uid)
+                    fetchAlerts(uid, showFeedback = false)
+                    fetchReadGroupedAlerts(uid, showFeedback = false)
+                } else {
+                    _toastMessage.value = "일괄 알림 변경 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = buildNetworkErrorMessage("일괄 알림 변경 실패", e)
+            } finally {
+                _isApplyingBulkSettings.value = false
+            }
+        }
+    }
+
+    fun bulkSetDropRatePercent(dropRatePercent: Double, productType: String? = null) {
+        val uid = _userId.value ?: return
+        if (_isApplyingBulkSettings.value) {
+            return
+        }
+
+        viewModelScope.launch {
+            _isApplyingBulkSettings.value = true
+            try {
+                val response = UmtpApiClient.apiService.bulkSetUserFairPricesDropRate(
+                    UserFairPricesBulkDropRateRequest(
+                        user_id = uid,
+                        alert_drop_rate_percent = dropRatePercent,
+                        product_type = productType,
+                    )
+                )
+                if (response.ok) {
+                    _toastMessage.value = "전체 차이 %가 변경되었습니다."
+                    refreshUserSettingsInternal(uid)
+                } else {
+                    _toastMessage.value = "전체 차이 % 변경 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = buildNetworkErrorMessage("전체 차이 % 변경 실패", e)
+            } finally {
+                _isApplyingBulkSettings.value = false
+            }
+        }
+    }
+
+    fun resetFairPricesToSystem(productType: String? = null) {
+        val uid = _userId.value ?: return
+        if (_isApplyingBulkSettings.value) {
+            return
+        }
+
+        viewModelScope.launch {
+            _isApplyingBulkSettings.value = true
+            try {
+                val response = UmtpApiClient.apiService.resetUserFairPricesToSystemMarketPrices(
+                    UserFairPricesResetToSystemRequest(
+                        user_id = uid,
+                        product_type = productType,
+                    )
+                )
+                if (response.ok) {
+                    _toastMessage.value = "시스템 기준 시장가로 업데이트했습니다."
+                    refreshUserSettingsInternal(uid)
+                } else {
+                    _toastMessage.value = "시스템 기준 시장가 초기화 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = buildNetworkErrorMessage("시스템 기준 시장가 초기화 실패", e)
+            } finally {
+                _isApplyingBulkSettings.value = false
             }
         }
     }

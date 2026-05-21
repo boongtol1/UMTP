@@ -26,6 +26,21 @@ interface UmtpApiService {
         @Body request: UserFairPriceUpsertRequest
     ): UserFairPriceUpsertResponse
 
+    @PATCH("user-watch-rules/bulk-enabled")
+    suspend fun bulkSetUserWatchRulesEnabled(
+        @Body request: UserWatchRulesBulkEnabledRequest
+    ): BulkOperationResponse
+
+    @PATCH("user-fair-prices/bulk-drop-rate")
+    suspend fun bulkSetUserFairPricesDropRate(
+        @Body request: UserFairPricesBulkDropRateRequest
+    ): BulkOperationResponse
+
+    @POST("user-fair-prices/reset-to-system-market-prices")
+    suspend fun resetUserFairPricesToSystemMarketPrices(
+        @Body request: UserFairPricesResetToSystemRequest
+    ): BulkOperationResponse
+
     @POST("users/{user_id}/rules/refresh")
     suspend fun refreshUserRulesSavedAt(
         @Path("user_id") userId: String

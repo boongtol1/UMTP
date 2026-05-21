@@ -120,3 +120,29 @@ data class UserRuleRefreshResponse(
     val message: String? = null,
     val reason: String? = null
 )
+
+data class UserWatchRulesBulkEnabledRequest(
+    val user_id: String,
+    val enabled: Boolean,
+    val product_type: String? = null,
+)
+
+data class UserFairPricesBulkDropRateRequest(
+    val user_id: String,
+    val alert_drop_rate_percent: Double,
+    val product_type: String? = null,
+)
+
+data class UserFairPricesResetToSystemRequest(
+    val user_id: String,
+    val product_type: String? = null,
+)
+
+data class BulkOperationResponse(
+    val ok: Boolean,
+    val message: String? = null,
+    val reason: String? = null,
+    val affected_count: Int? = null,
+    val inserted_count: Int? = null,
+    val updated_count: Int? = null,
+)
