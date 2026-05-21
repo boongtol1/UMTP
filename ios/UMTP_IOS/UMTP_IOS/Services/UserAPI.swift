@@ -106,6 +106,8 @@ enum UserAPIError: Error {
 
     static func fromAPIClientError(_ error: APIClientError) -> UserAPIError {
         switch error {
+        case .invalidBaseURL:
+            return .unknown
         case .network(let urlError):
             return urlError.code == .timedOut ? .timeout : .network
         case .httpStatus:
@@ -130,4 +132,3 @@ private struct RegisterUserResponseDTO: Decodable {
     let message: String?
     let reason: String?
 }
-

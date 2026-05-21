@@ -3,7 +3,7 @@ import Foundation
 final class APIClient {
     static let shared = APIClient()
 
-    private let baseURL: URL
+    private let baseURL: URL?
     private let session: URLSession
 
     init(
@@ -11,7 +11,7 @@ final class APIClient {
         timeout: TimeInterval = AppConfig.requestTimeout,
         session: URLSession? = nil
     ) {
-        self.baseURL = URL(string: baseURLString) ?? URL(string: "http://localhost")!
+        self.baseURL = URL(string: baseURLString)
         if let session {
             self.session = session
         } else {
@@ -27,7 +27,7 @@ final class APIClient {
         body: RequestBody,
         responseType: ResponseBody.Type
     ) async throws -> ResponseBody {
-        let url = buildURL(path: path)
+        let url = try buildURL(path: path)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -57,7 +57,10 @@ final class APIClient {
         }
     }
 
-    private func buildURL(path: String) -> URL {
+    private func buildURL(path: String) throws -> URL {
+        guard let baseURL else {
+            throw APIClientError.invalidBaseURL
+        }
         let trimmedPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if trimmedPath.isEmpty {
             return baseURL
@@ -67,6 +70,7 @@ final class APIClient {
 }
 
 enum APIClientError: Error {
+    case invalidBaseURL
     case invalidResponse
     case httpStatus(Int)
     case decodingFailed
