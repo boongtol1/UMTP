@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -597,7 +598,27 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     )
                 }
             } catch (e: Exception) {
-                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+                if (isMissingBulkEndpointError(e)) {
+                    try {
+                        applyBulkUpsertFallback(
+                            uid = uid,
+                            productType = productType,
+                            enabledOverride = enabled,
+                        )
+                        _toastMessage.value = if (enabled) {
+                            "전체 알림이 켜졌습니다."
+                        } else {
+                            "전체 알림이 꺼졌습니다."
+                        }
+                        refreshUserSettingsInternal(uid)
+                        fetchAlerts(uid, showFeedback = false)
+                        fetchReadGroupedAlerts(uid, showFeedback = false)
+                    } catch (_: Exception) {
+                        _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+                    }
+                } else {
+                    _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+                }
             } finally {
                 _isApplyingBulkSettings.value = false
             }
@@ -631,7 +652,21 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     )
                 }
             } catch (e: Exception) {
-                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+                if (isMissingBulkEndpointError(e)) {
+                    try {
+                        applyBulkUpsertFallback(
+                            uid = uid,
+                            productType = productType,
+                            dropRatePercentOverride = dropRatePercent,
+                        )
+                        _toastMessage.value = "전체 차이 %가 변경되었습니다."
+                        refreshUserSettingsInternal(uid)
+                    } catch (_: Exception) {
+                        _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+                    }
+                } else {
+                    _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+                }
             } finally {
                 _isApplyingBulkSettings.value = false
             }
@@ -664,7 +699,21 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     )
                 }
             } catch (e: Exception) {
-                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+                if (isMissingBulkEndpointError(e)) {
+                    try {
+                        applyBulkUpsertFallback(
+                            uid = uid,
+                            productType = productType,
+                            useSystemFairPrice = true,
+                        )
+                        _toastMessage.value = "시스템 기준 시장가로 업데이트했습니다."
+                        refreshUserSettingsInternal(uid)
+                    } catch (_: Exception) {
+                        _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+                    }
+                } else {
+                    _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+                }
             } finally {
                 _isApplyingBulkSettings.value = false
             }
@@ -727,6 +776,82 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         } catch (e: Exception) {
             e.toSafeUserMessage(ErrorContext.NETWORK)
         }
+    }
+
+    private fun isMissingBulkEndpointError(error: Throwable): Boolean {
+        return (error as? HttpException)?.let { httpException ->
+            httpException.code() == 404 || httpException.code() == 405
+        } ?: false
+    }
+
+    private suspend fun applyBulkUpsertFallback(
+        uid: String,
+        productType: String?,
+        enabledOverride: Boolean? = null,
+        dropRatePercentOverride: Double? = null,
+        useSystemFairPrice: Boolean = false,
+    ) {
+        val scopedSettings = _userSettings.value.filter { item ->
+            productType.isNullOrBlank() || item.product_type == productType
+        }
+
+        if (scopedSettings.isEmpty()) {
+            return
+        }
+
+        scopedSettings.forEach { setting ->
+            val fairPrice = resolveFallbackFairPrice(setting, useSystemFairPrice) ?: return@forEach
+            val dropRatePercent = dropRatePercentOverride
+                ?: setting.user_alert_drop_rate_percent
+                ?: setting.effective_alert_drop_rate_percent
+                ?: setting.system_alert_drop_rate_percent
+                ?: 20.0
+            val direction = normalizeAlertDirection(
+                setting.user_alert_price_direction
+                    ?: setting.effective_alert_price_direction
+                    ?: setting.system_alert_price_direction
+            )
+            val boundPrice = if (direction == ABOVE_OR_EQUAL_DIRECTION) {
+                setting.user_max_price_krw ?: setting.effective_max_price_krw
+            } else {
+                setting.user_min_price_krw ?: setting.effective_min_price_krw
+            }
+            val boundsRequest = buildAlertBoundsRequest(
+                alertPriceDirection = direction,
+                boundPriceKrw = boundPrice,
+            )
+            val request = UserFairPriceUpsertRequest(
+                user_id = uid,
+                product_type = setting.product_type,
+                chip = setting.chip,
+                screen_inch = setting.screen_inch,
+                ram_gb = setting.ram_gb,
+                ssd_gb = setting.ssd_gb,
+                fair_price_krw = fairPrice,
+                alert_drop_rate_percent = dropRatePercent,
+                alert_price_direction = direction,
+                min_price_krw = boundsRequest.min_price_krw,
+                max_price_krw = boundsRequest.max_price_krw,
+                enabled = enabledOverride ?: setting.enabled,
+                condition_change_candidate_notice_enabled = setting.condition_change_candidate_notice_enabled,
+                search_keyword = setting.custom_search_keyword?.trim()?.ifEmpty { null },
+                poll_interval_seconds = setting.poll_interval_seconds ?: 60,
+                priority = normalizeWatchPriority(setting.priority),
+            )
+            val response = UmtpApiClient.apiService.upsertUserFairPrice(request)
+            if (!response.ok) {
+                throw IllegalStateException("bulk_fallback_upsert_failed")
+            }
+        }
+    }
+
+    private fun resolveFallbackFairPrice(setting: UserFairPriceItem, useSystemFairPrice: Boolean): Int? {
+        val preferred = if (useSystemFairPrice) {
+            setting.system_fair_price_krw
+        } else {
+            setting.user_fair_price_krw ?: setting.effective_fair_price_krw ?: setting.system_fair_price_krw
+        }
+        return preferred?.takeIf { it > 0 }
     }
 
     private fun formatRefreshTimeLabel(epochMillis: Long): String {
