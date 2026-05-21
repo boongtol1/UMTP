@@ -312,22 +312,17 @@ fun MacBookAirSettingCard(
                 style = MaterialTheme.typography.bodySmall
             )
             Text(
-                text = "계산식: (내가 생각한 시장가 - 알림 기준 가격) / 내가 생각한 시장가 × 100",
+                text = "시장가 설정 안내: 이 제품이 보통 이 정도 가격이라고 생각하는 금액을 입력하세요.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.Gray,
             )
             Text(
-                text = "시장가보다 몇 % 낮거나 높은 가격에서 알림을 받을지 자동 계산합니다.",
+                text = "계산식: ($marketPriceLabel - 알림 기준 가격) / $marketPriceLabel × 100",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.Gray,
             )
             Text(
-                text = "차이가 매우 크면 100%를 넘어갈 수 있어요.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray,
-            )
-            Text(
-                text = "알림 기준 가격은 시장가와 차이를 바탕으로 자동 계산됩니다.",
+                text = "시장가보다 몇 % 낮거나 높은 가격에서 알림을 받도록 설정할 수 있습니다.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.Gray,
             )
@@ -401,13 +396,6 @@ fun MacBookAirSettingCard(
                 } else {
                     "이 가격 이상인 매물만 알림을 받습니다."
                 },
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray,
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "시장가 설정 안내: 이 제품이 보통 이 정도 가격이라고 생각하는 금액을 입력하세요.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.Gray,
             )

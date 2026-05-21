@@ -474,7 +474,6 @@ private fun buildReadArchiveDetailRows(alert: AlertItem, resolvedUrl: String?): 
         "알림 기준 가격" to formatKrwDisplay(alert.alert_target_price_krw),
         "시장가와의 차이" to formatPercentDisplay(resolveReadArchiveGapPercent(alert)),
         "설정 차이율" to formatPercentDisplay(alert.alert_drop_rate_percent),
-        "차이율 계산식" to "(내가 생각한 시장가 - 등록 가격) / 내가 생각한 시장가 × 100",
         "알림 조건" to resolveReadArchiveConditionLabel(alert),
         "위험도" to riskLabel,
         "위험 점수" to (alert.risk_score?.toString() ?: "정보 없음"),

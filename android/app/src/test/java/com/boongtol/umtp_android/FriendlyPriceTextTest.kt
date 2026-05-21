@@ -12,13 +12,13 @@ import org.junit.Test
 class FriendlyPriceTextTest {
     @Test
     fun buildMarketPriceLabel_usesFallbackWhenUserIdMissing() {
-        assertEquals("내가 생각한 시장가", buildMarketPriceLabel(null))
-        assertEquals("내가 생각한 시장가", buildMarketPriceLabel("   "))
+        assertEquals("사용자가 생각한 시장가", buildMarketPriceLabel(null))
+        assertEquals("사용자가 생각한 시장가", buildMarketPriceLabel("   "))
     }
 
     @Test
     fun buildMarketPriceLabel_usesUserIdWhenPresent() {
-        assertEquals("boongtol이 생각한 시장가", buildMarketPriceLabel("boongtol"))
+        assertEquals("boongtol님이 생각한 시장가", buildMarketPriceLabel("boongtol"))
     }
 
     @Test

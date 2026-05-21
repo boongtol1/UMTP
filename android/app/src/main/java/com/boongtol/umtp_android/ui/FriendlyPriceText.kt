@@ -5,7 +5,7 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.Locale
 
-private const val DEFAULT_MARKET_PRICE_LABEL = "내가 생각한 시장가"
+private const val DEFAULT_MARKET_PRICE_LABEL = "사용자가 생각한 시장가"
 private const val MAX_USER_ID_LABEL_LENGTH = 12
 
 fun buildMarketPriceLabel(userId: String?): String {
@@ -14,7 +14,7 @@ fun buildMarketPriceLabel(userId: String?): String {
         return DEFAULT_MARKET_PRICE_LABEL
     }
     val displayUserId = ellipsizeUserId(normalized, MAX_USER_ID_LABEL_LENGTH)
-    return "${displayUserId}이 생각한 시장가"
+    return "${displayUserId}님이 생각한 시장가"
 }
 
 fun ellipsizeUserId(userId: String, maxLength: Int = MAX_USER_ID_LABEL_LENGTH): String {
