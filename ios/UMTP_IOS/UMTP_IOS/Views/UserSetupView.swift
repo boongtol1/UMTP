@@ -5,27 +5,43 @@ struct UserSetupView: View {
     @StateObject private var viewModel = UserSetupViewModel(sessionService: .shared)
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("사용자 설정")
+        VStack(spacing: 20) {
+            Text("UMTP 시작하기")
                 .font(.title2)
                 .bold()
 
-            TextField("user_id 입력", text: $viewModel.userIdInput)
+            Text("사용자 ID를 입력해 주세요")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            TextField("예: boongtol", text: $viewModel.userIdInput)
                 .textFieldStyle(.roundedBorder)
                 .textInputAutocapitalization(.never)
                 .disableAutocorrection(true)
 
-            Button("저장") {
-                viewModel.save(appState: appState)
+            if let errorMessage = viewModel.errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Button {
+                Task {
+                    await viewModel.register(appState: appState)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    if viewModel.isSubmitting {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(viewModel.isSubmitting ? "등록 중..." : "등록")
+                }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!viewModel.canSave)
+            .disabled(!viewModel.canSubmit)
         }
         .padding()
-        .onAppear {
-            if viewModel.userIdInput.isEmpty {
-                viewModel.userIdInput = appState.userId ?? ""
-            }
-        }
     }
 }
