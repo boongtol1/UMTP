@@ -3,7 +3,7 @@ import json
 
 try:
     from src.db import get_connection
-    from src.joongna_search_client import search_joongna_products
+    from src.joongna_search_client import fetch_joongna_store_profile, search_joongna_products
     from src.joongna_seen_products import (
         detect_listing_change,
         get_seen_product,
@@ -20,7 +20,7 @@ try:
     )
 except ModuleNotFoundError:
     from db import get_connection
-    from joongna_search_client import search_joongna_products
+    from joongna_search_client import fetch_joongna_store_profile, search_joongna_products
     from joongna_seen_products import (
         detect_listing_change,
         get_seen_product,
@@ -155,6 +155,9 @@ def _build_poll_stats(search_words):
 
 
 def _build_observed_product(search_word, item):
+    seller_store_seq = _safe_int(
+        item.get("seller_store_seq") or item.get("store_seq") or item.get("storeSeq")
+    )
     return {
         "product_id": item.get("product_id") or item.get("seq"),
         "seq": item.get("seq"),
@@ -166,6 +169,12 @@ def _build_observed_product(search_word, item):
         "image_url": item.get("image_url"),
         "sort_date": parse_sort_date(item),
         "refresh_key": item.get("refresh_key"),
+        "seller_store_seq": seller_store_seq,
+        "seller_store_name": _safe_text(item.get("seller_store_name")),
+        "seller_profile_image_url": _safe_text(item.get("seller_profile_image_url")),
+        "seller_store_level": _safe_text(item.get("seller_store_level")),
+        "seller_trust_score": _safe_int(item.get("seller_trust_score")),
+        "seller_review_count": _safe_int(item.get("seller_review_count")),
     }
 
 
@@ -245,7 +254,16 @@ def _upsert_search_query(cursor, *, source, normalized_keyword, polled_at, statu
     return _safe_int(_extract_single_value_row(row))
 
 
-def save_group_search_results(cursor, *, source, search_keyword, items, fetched_at=None, status="ok"):
+def save_group_search_results(
+    cursor,
+    *,
+    source,
+    search_keyword,
+    items,
+    fetched_at=None,
+    status="ok",
+    store_profile_cache=None,
+):
     normalized_source = _normalize_source(source)
     normalized_keyword = normalize_search_keyword(search_keyword)
     if cursor is None or not normalized_keyword:
@@ -271,37 +289,109 @@ def save_group_search_results(cursor, *, source, search_keyword, items, fetched_
         if product_id is None:
             continue
 
+        seller_store_seq = _safe_int(
+            item.get("seller_store_seq") or item.get("store_seq") or item.get("storeSeq")
+        )
+        seller_store_name = _safe_text(item.get("seller_store_name"))
+        seller_profile_image_url = _safe_text(item.get("seller_profile_image_url"))
+        seller_store_level = _safe_text(item.get("seller_store_level"))
+        seller_trust_score = _safe_int(item.get("seller_trust_score"))
+        seller_review_count = _safe_int(item.get("seller_review_count"))
+
+        if seller_store_seq is not None:
+            # search API 자체에는 판매자 닉네임이 없어서 my-store API를 추가 조회한다.
+            store_profile = fetch_joongna_store_profile(
+                seller_store_seq,
+                store_profile_cache=store_profile_cache,
+            )
+            if isinstance(store_profile, dict):
+                seller_store_name = _safe_text(store_profile.get("store_name")) or seller_store_name
+                seller_profile_image_url = (
+                    _safe_text(store_profile.get("profile_image_url")) or seller_profile_image_url
+                )
+                seller_store_level = _safe_text(store_profile.get("store_level")) or seller_store_level
+                seller_trust_score = _safe_int(store_profile.get("trust_score"))
+                seller_review_count = _safe_int(store_profile.get("review_count"))
+
+        item["seller_store_seq"] = seller_store_seq
+        item["seller_store_name"] = seller_store_name
+        item["seller_profile_image_url"] = seller_profile_image_url
+        item["seller_store_level"] = seller_store_level
+        item["seller_trust_score"] = seller_trust_score
+        item["seller_review_count"] = seller_review_count
+
         title = _safe_text(item.get("title"))
         price = _safe_int(item.get("price"))
         sort_date = _coerce_datetime(item.get("sort_date"))
         url = _safe_text(item.get("product_url")) or ""
         raw_json = _safe_json_dumps(item)
 
-        cursor.execute(
-            """
-            INSERT INTO search_results (
-                search_query_id,
-                product_id,
-                title,
-                price,
-                sort_date,
-                url,
-                raw_json,
-                fetched_at
+        try:
+            cursor.execute(
+                """
+                INSERT INTO search_results (
+                    search_query_id,
+                    product_id,
+                    title,
+                    price,
+                    sort_date,
+                    url,
+                    seller_store_seq,
+                    seller_store_name,
+                    seller_profile_image_url,
+                    seller_store_level,
+                    seller_trust_score,
+                    seller_review_count,
+                    raw_json,
+                    fetched_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    search_query_id,
+                    product_id,
+                    title,
+                    price,
+                    sort_date,
+                    url,
+                    seller_store_seq,
+                    seller_store_name,
+                    seller_profile_image_url,
+                    seller_store_level,
+                    seller_trust_score,
+                    seller_review_count,
+                    raw_json,
+                    normalized_fetched_at,
+                ),
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (
-                search_query_id,
-                product_id,
-                title,
-                price,
-                sort_date,
-                url,
-                raw_json,
-                normalized_fetched_at,
-            ),
-        )
+        except Exception as exc:
+            if "unknown column" not in str(exc).lower():
+                raise
+            cursor.execute(
+                """
+                INSERT INTO search_results (
+                    search_query_id,
+                    product_id,
+                    title,
+                    price,
+                    sort_date,
+                    url,
+                    raw_json,
+                    fetched_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    search_query_id,
+                    product_id,
+                    title,
+                    price,
+                    sort_date,
+                    url,
+                    raw_json,
+                    normalized_fetched_at,
+                ),
+            )
         inserted_count += 1
 
     return {
@@ -633,6 +723,7 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
     seen_db_ready = False
     search_cache_db_ready = False
     processed_products = {}
+    store_profile_cache = {}
 
     def disable_seen_db(reason):
         nonlocal connection, cursor, seen_db_ready, search_cache_db_ready
@@ -714,6 +805,7 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                                 items=[],
                                 fetched_at=datetime.now(),
                                 status="fetch_error",
+                                store_profile_cache=store_profile_cache,
                             )
                             connection.commit()
                         except Exception as cache_exc:
@@ -738,6 +830,7 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                             items=items,
                             fetched_at=datetime.now(),
                             status="ok",
+                            store_profile_cache=store_profile_cache,
                         )
                         if save_result.get("ok"):
                             connection.commit()

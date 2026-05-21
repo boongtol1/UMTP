@@ -4,10 +4,17 @@ import requests
 
 
 SEARCH_API_URL = "https://search-api.joongna.com/v3/search/all"
+STORE_PROFILE_API_URL_TEMPLATE = "https://main-api.joongna.com/v2/my-store/{store_seq}"
 REQUEST_TIMEOUT_SECONDS = 10
+STORE_PROFILE_REQUEST_TIMEOUT_SECONDS = 10
 DEFAULT_HEADERS = {
     "accept": "application/json, text/plain, */*",
     "content-type": "application/json",
+    "origin": "https://web.joongna.com",
+    "os-type": "2",
+}
+STORE_PROFILE_HEADERS = {
+    "accept": "application/json, text/plain, */*",
     "origin": "https://web.joongna.com",
     "os-type": "2",
 }
@@ -77,6 +84,13 @@ def _coerce_text(value):
     return str(value).strip()
 
 
+def _coerce_nullable_text(value):
+    normalized = _coerce_text(value)
+    if not normalized:
+        return None
+    return normalized
+
+
 def _extract_item_seq(item):
     for key in ("seq", "productSeq", "id", "productId"):
         seq = _coerce_int(item.get(key))
@@ -122,6 +136,34 @@ def _extract_refresh_key(item):
         value = _coerce_text(item.get(key))
         if value:
             return value
+
+    return None
+
+
+def _normalize_store_seq(value):
+    normalized = _coerce_int(value)
+    if normalized is None or normalized <= 0:
+        return None
+    return normalized
+
+
+def _extract_store_seq(item):
+    if not isinstance(item, dict):
+        return None
+
+    for key in ("storeSeq", "store_seq", "sellerStoreSeq", "seller_store_seq"):
+        store_seq = _normalize_store_seq(item.get(key))
+        if store_seq is not None:
+            return store_seq
+
+    for nested_key in ("store", "seller", "member", "profile"):
+        nested = item.get(nested_key)
+        if not isinstance(nested, dict):
+            continue
+        for key in ("seq", "storeSeq", "store_seq", "sellerStoreSeq"):
+            store_seq = _normalize_store_seq(nested.get(key))
+            if store_seq is not None:
+                return store_seq
 
     return None
 
@@ -209,6 +251,7 @@ def _normalize_item(item):
     self_audit_flag = _coerce_bool(item.get("selfAuditFlag") or item.get("self_audit_flag"))
     image_url = _extract_image_url(item)
     product_url = f"https://web.joongna.com/product/{seq}" if seq is not None else ""
+    store_seq = _extract_store_seq(item)
 
     return {
         "seq": seq,
@@ -216,13 +259,17 @@ def _normalize_item(item):
         "title": title,
         "price": price,
         "sort_date": sort_date,
+        "sortDate": sort_date,
         "refresh_key": refresh_key,
         "location_names": location_names,
         "wish_count": wish_count,
         "chat_count": chat_count,
         "self_audit_flag": self_audit_flag,
         "image_url": image_url,
+        "url": image_url,
         "product_url": product_url,
+        "store_seq": store_seq,
+        "storeSeq": store_seq,
     }
 
 
@@ -274,3 +321,55 @@ def search_joongna_products(search_word, page=0, quantity=50):
         normalized_items.append(_normalize_item(raw_item))
 
     return normalized_items
+
+
+def fetch_joongna_store_profile(store_seq, *, store_profile_cache=None):
+    normalized_store_seq = _normalize_store_seq(store_seq)
+    if normalized_store_seq is None:
+        return None
+
+    if isinstance(store_profile_cache, dict) and normalized_store_seq in store_profile_cache:
+        return store_profile_cache.get(normalized_store_seq)
+
+    url = STORE_PROFILE_API_URL_TEMPLATE.format(store_seq=normalized_store_seq)
+    try:
+        response = requests.get(
+            url,
+            headers=STORE_PROFILE_HEADERS,
+            timeout=STORE_PROFILE_REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        response_json = response.json()
+        if not isinstance(response_json, dict):
+            raise RuntimeError("invalid_json")
+
+        meta = response_json.get("meta")
+        if isinstance(meta, dict):
+            code = _coerce_int(meta.get("code"))
+            if code not in (None, 0, 200):
+                raise RuntimeError(f"meta_code_{code}")
+
+        data = response_json.get("data")
+        if not isinstance(data, dict):
+            raise RuntimeError("missing_data")
+
+        profile = {
+            "store_seq": _normalize_store_seq(data.get("storeSeq")) or normalized_store_seq,
+            "store_name": _coerce_nullable_text(data.get("storeName")) or _coerce_nullable_text(data.get("nickName")),
+            "profile_image_url": _coerce_nullable_text(data.get("profileImageUrl")),
+            "store_level": _coerce_nullable_text(data.get("storeLevel")),
+            "trust_score": _coerce_int(data.get("trustScore")),
+            "review_count": _coerce_int(data.get("reviewCount")),
+        }
+    except Exception as exc:
+        print(
+            "[joongna_search_client] warning: my-store API 조회 실패 "
+            f"(storeSeq={normalized_store_seq}): {exc}"
+        )
+        if isinstance(store_profile_cache, dict):
+            store_profile_cache[normalized_store_seq] = None
+        return None
+
+    if isinstance(store_profile_cache, dict):
+        store_profile_cache[normalized_store_seq] = profile
+    return profile

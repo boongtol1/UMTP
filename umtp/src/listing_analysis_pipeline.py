@@ -1,3 +1,4 @@
+import json
 import re
 from datetime import datetime, timezone
 
@@ -272,11 +273,119 @@ def _build_listing_snapshot_from_job(job):
         "user_id": _normalize_optional_text(job.get("user_id")),
         "watch_rule_id": _normalize_optional_watch_rule_id(job.get("watch_rule_id")),
         "sort_date": _coerce_datetime(job.get("sort_date")),
+        "seller_store_seq": _normalize_optional_int(job.get("seller_store_seq")),
+        "seller_store_name": _normalize_optional_text(job.get("seller_store_name")),
     }
 
 
 def enqueue_analysis_for_product(product, watch_rules, trigger_reason):
     return create_analysis_jobs_for_rules(product, watch_rules, trigger_reason)
+
+
+def _safe_json_loads(value, *, fallback):
+    if value is None:
+        return fallback
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return fallback
+    if isinstance(parsed, type(fallback)):
+        return parsed
+    return fallback
+
+
+def _resolve_seller_info_for_alert(
+    cursor,
+    *,
+    product_id,
+    fallback_store_seq=None,
+    fallback_store_name=None,
+):
+    normalized_product_id = _normalize_optional_text(product_id)
+    if normalized_product_id is None:
+        return {
+            "seller_store_seq": _normalize_optional_int(fallback_store_seq),
+            "seller_store_name": _normalize_optional_text(fallback_store_name),
+        }
+
+    normalized_store_seq = _normalize_optional_int(fallback_store_seq)
+    normalized_store_name = _normalize_optional_text(fallback_store_name)
+    latest_raw_json = None
+
+    try:
+        cursor.execute(
+            """
+            SELECT seller_store_seq, seller_store_name, raw_json
+            FROM search_results
+            WHERE product_id = %s
+            ORDER BY fetched_at DESC, id DESC
+            LIMIT 1
+            """,
+            (normalized_product_id,),
+        )
+        row = cursor.fetchone()
+    except Exception as exc:
+        lowered = str(exc).lower()
+        if "unknown column" not in lowered and "doesn't exist" not in lowered:
+            raise
+        try:
+            cursor.execute(
+                """
+                SELECT raw_json
+                FROM search_results
+                WHERE product_id = %s
+                ORDER BY fetched_at DESC, id DESC
+                LIMIT 1
+                """,
+                (normalized_product_id,),
+            )
+            row = cursor.fetchone()
+        except Exception as inner_exc:
+            lowered_inner = str(inner_exc).lower()
+            if "unknown column" in lowered_inner or "doesn't exist" in lowered_inner:
+                row = None
+            else:
+                raise
+
+    if isinstance(row, dict):
+        normalized_store_seq = _normalize_optional_int(row.get("seller_store_seq")) or normalized_store_seq
+        normalized_store_name = _normalize_optional_text(row.get("seller_store_name")) or normalized_store_name
+        latest_raw_json = row.get("raw_json")
+    elif isinstance(row, (tuple, list)):
+        if len(row) >= 1:
+            normalized_store_seq = _normalize_optional_int(row[0]) or normalized_store_seq
+        if len(row) >= 2:
+            normalized_store_name = _normalize_optional_text(row[1]) or normalized_store_name
+        if len(row) >= 3:
+            latest_raw_json = row[2]
+
+    if normalized_store_seq is not None and normalized_store_name is not None:
+        return {
+            "seller_store_seq": normalized_store_seq,
+            "seller_store_name": normalized_store_name,
+        }
+
+    raw_json_obj = _safe_json_loads(latest_raw_json, fallback={})
+    if isinstance(raw_json_obj, dict):
+        if normalized_store_seq is None:
+            normalized_store_seq = _normalize_optional_int(
+                raw_json_obj.get("seller_store_seq")
+                or raw_json_obj.get("store_seq")
+                or raw_json_obj.get("storeSeq")
+            )
+        if normalized_store_name is None:
+            normalized_store_name = _normalize_optional_text(
+                raw_json_obj.get("seller_store_name")
+                or raw_json_obj.get("store_name")
+                or raw_json_obj.get("storeName")
+            )
+
+    return {
+        "seller_store_seq": normalized_store_seq,
+        "seller_store_name": normalized_store_name,
+    }
 
 
 def _resolve_price_rules(cursor, user_id, parsed_spec, watch_rule_id=None):
@@ -547,6 +656,8 @@ def maybe_create_alert_event(
     body_excerpt=None,
     body_text=None,
     sort_date=None,
+    seller_store_seq=None,
+    seller_store_name=None,
 ):
     parsed_spec = parsed_spec or {}
     risk_result = risk_result or {}
@@ -578,6 +689,8 @@ def maybe_create_alert_event(
                 watch_rule_id,
                 analysis_job_id,
                 product_id,
+                seller_store_seq,
+                seller_store_name,
                 source,
                 url,
                 title,
@@ -609,7 +722,7 @@ def maybe_create_alert_event(
             VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, 'pending', 0
+                %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, 'pending', 0
             )
             """,
             (
@@ -617,6 +730,8 @@ def maybe_create_alert_event(
                 normalized_watch_rule_id,
                 _normalize_optional_int(analysis_job_id),
                 normalized_product_id,
+                _normalize_optional_int(seller_store_seq),
+                _normalize_optional_text(seller_store_name),
                 _normalize_optional_text(source),
                 _normalize_optional_text(url),
                 _normalize_optional_text(title),
@@ -654,6 +769,8 @@ def maybe_create_alert_event(
                         watch_rule_id,
                         analysis_job_id,
                         product_id,
+                        seller_store_seq,
+                        seller_store_name,
                         source,
                         url,
                         title,
@@ -684,7 +801,7 @@ def maybe_create_alert_event(
                     VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, 'pending', 0
+                        %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, 'pending', 0
                     )
                     """,
                     (
@@ -692,6 +809,8 @@ def maybe_create_alert_event(
                         normalized_watch_rule_id,
                         _normalize_optional_int(analysis_job_id),
                         normalized_product_id,
+                        _normalize_optional_int(seller_store_seq),
+                        _normalize_optional_text(seller_store_name),
                         _normalize_optional_text(source),
                         _normalize_optional_text(url),
                         _normalize_optional_text(title),
@@ -1218,6 +1337,12 @@ def analyze_product_for_watch_rule(job):
         }
         alert_message = None
         if is_alert_target:
+            seller_info = _resolve_seller_info_for_alert(
+                cursor,
+                product_id=product_id,
+                fallback_store_seq=listing_snapshot.get("seller_store_seq"),
+                fallback_store_name=listing_snapshot.get("seller_store_name"),
+            )
             alert_message = _build_alert_message(
                 title=title,
                 listing_price_krw=listing_price_krw or 0,
@@ -1229,8 +1354,6 @@ def analyze_product_for_watch_rule(job):
             risk_keywords_json = None
             if isinstance(risk_keywords, list):
                 try:
-                    import json
-
                     risk_keywords_json = json.dumps(risk_keywords, ensure_ascii=False)
                 except Exception:
                     risk_keywords_json = None
@@ -1263,6 +1386,8 @@ def analyze_product_for_watch_rule(job):
                 body_excerpt=_build_body_excerpt(description),
                 body_text=_normalize_optional_text(description),
                 sort_date=sort_date,
+                seller_store_seq=seller_info.get("seller_store_seq"),
+                seller_store_name=seller_info.get("seller_store_name"),
             )
 
         result_save = save_listing_analysis_result(

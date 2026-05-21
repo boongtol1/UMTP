@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS alert_events (
   watch_rule_id BIGINT UNSIGNED NULL,
   analysis_job_id BIGINT UNSIGNED NULL,
   product_id VARCHAR(100) NULL,
+  seller_store_seq BIGINT NULL,
+  seller_store_name VARCHAR(100) NULL,
   source VARCHAR(50) NULL,
   url TEXT NOT NULL,
   title VARCHAR(500) NULL,
@@ -94,6 +96,34 @@ SET @sql_product_id = IF(
 PREPARE stmt_product_id FROM @sql_product_id;
 EXECUTE stmt_product_id;
 DEALLOCATE PREPARE stmt_product_id;
+
+SELECT COUNT(*) INTO @has_seller_store_seq
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND COLUMN_NAME = 'seller_store_seq';
+SET @sql_seller_store_seq = IF(
+  @has_seller_store_seq = 0,
+  'ALTER TABLE alert_events ADD COLUMN seller_store_seq BIGINT NULL AFTER product_id',
+  'SELECT "seller_store_seq exists"'
+);
+PREPARE stmt_seller_store_seq FROM @sql_seller_store_seq;
+EXECUTE stmt_seller_store_seq;
+DEALLOCATE PREPARE stmt_seller_store_seq;
+
+SELECT COUNT(*) INTO @has_seller_store_name
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND COLUMN_NAME = 'seller_store_name';
+SET @sql_seller_store_name = IF(
+  @has_seller_store_name = 0,
+  'ALTER TABLE alert_events ADD COLUMN seller_store_name VARCHAR(100) NULL AFTER seller_store_seq',
+  'SELECT "seller_store_name exists"'
+);
+PREPARE stmt_seller_store_name FROM @sql_seller_store_name;
+EXECUTE stmt_seller_store_name;
+DEALLOCATE PREPARE stmt_seller_store_name;
 
 SELECT COUNT(*) INTO @has_sort_date
 FROM INFORMATION_SCHEMA.COLUMNS
