@@ -155,6 +155,8 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 일괄 제어 API: `PATCH /user-watch-rules/bulk-enabled`, `PATCH /user-fair-prices/bulk-drop-rate`, `POST /user-fair-prices/reset-to-system-market-prices`를 추가해 제품군 단위로 알림 ON/OFF, `alert_drop_rate_percent` 일괄 변경, `mac_fair_prices` 기준 시장가 일괄 초기화를 지원합니다.
 - 일괄 초기화 규칙: `reset-to-system-market-prices`는 `fair_price_krw`만 시스템 기준으로 덮어쓰고, 기존 사용자 설정(`enabled`, 알림 방향, 차이 %, 가격 경계, 검색어 등)은 유지합니다.
 - UI 용어: 앱에서는 `공정가` 대신 `사용자가 생각한 시장가`, `시스템 기준 시장가`, `시장가와의 차이 %` 문구를 우선 사용합니다.
+- 앱 에러 보안 표시: 사용자 화면에는 원본 예외(`IP/URL/토큰/내부 경로/스택트레이스`)를 노출하지 않고, 네트워크/저장/검색요청/일시 오류용 안전 문구만 표시합니다.
+- 설정 저장 안내 문구: 저장 성공 시 기본 문구는 `저장 완료. 즉시 검색을 요청했어요.`를 사용하며, 즉시 검색 요청 실패 시 별도 안내 문구를 표시합니다.
 
 ## 빠른 시작
 

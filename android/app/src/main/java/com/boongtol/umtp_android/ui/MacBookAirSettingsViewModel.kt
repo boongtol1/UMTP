@@ -11,9 +11,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.net.ConnectException
-import java.net.SocketTimeoutException
-import java.net.UnknownHostException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -118,12 +115,12 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
 
                 if (unitsRefreshError != null || settingsRefreshError != null) {
                     val reasons = listOfNotNull(unitsRefreshError, settingsRefreshError)
-                    _errorMessage.value = "데이터 로딩 에러: ${reasons.joinToString(" / ")}"
+                    _errorMessage.value = reasons.joinToString(" / ")
                 }
                 fetchAlerts(uid, showFeedback = false)
                 fetchReadGroupedAlerts(uid, showFeedback = false)
             } catch (e: Exception) {
-                _errorMessage.value = "데이터 로딩 에러: ${e.localizedMessage}"
+                _errorMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
             } finally {
                 _isLoading.value = false
             }
@@ -168,13 +165,13 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     } else {
                         val reasons = listOfNotNull(refreshSavedAtError, unitsRefreshError, settingsRefreshError)
                         _settingsRefreshStatusMessage.value = "새로고침 실패"
-                        _toastMessage.value = "새로고침 실패: ${reasons.joinToString(" / ")}"
+                        _toastMessage.value = reasons.joinToString(" / ")
                     }
                 }
             } catch (e: Exception) {
                 if (showFeedback) {
                     _settingsRefreshStatusMessage.value = "새로고침 실패"
-                    _toastMessage.value = buildNetworkErrorMessage("새로고침 실패", e)
+                    _toastMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
                 }
             } finally {
                 if (showFeedback) {
@@ -206,12 +203,15 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     refreshUserSettingsInternal(uid)
                 } else {
                     _ruleRefreshStatusMessages.value = _ruleRefreshStatusMessages.value + (ruleId to "새로고침 실패")
-                    _toastMessage.value =
-                        "새로고침 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.NETWORK,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
                 }
             } catch (e: Exception) {
                 _ruleRefreshStatusMessages.value = _ruleRefreshStatusMessages.value + (ruleId to "새로고침 실패")
-                _toastMessage.value = buildNetworkErrorMessage("새로고침 실패", e)
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
             } finally {
                 _refreshingRuleIds.value = _refreshingRuleIds.value - ruleId
             }
@@ -239,12 +239,16 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     }
                 } else if (showFeedback) {
                     _alertsRefreshStatusMessage.value = "새로고침 실패"
-                    _toastMessage.value = "새로고침 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.NETWORK,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
                 }
             } catch (e: Exception) {
                 if (showFeedback) {
                     _alertsRefreshStatusMessage.value = "새로고침 실패"
-                    _toastMessage.value = buildNetworkErrorMessage("새로고침 실패", e)
+                    _toastMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
                 }
             } finally {
                 if (showFeedback) {
@@ -270,12 +274,16 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     }
                 } else if (showFeedback) {
                     _readArchiveRefreshStatusMessage.value = "새로고침 실패"
-                    _toastMessage.value = "읽음 보관함 새로고침 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.NETWORK,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
                 }
             } catch (e: Exception) {
                 if (showFeedback) {
                     _readArchiveRefreshStatusMessage.value = "새로고침 실패"
-                    _toastMessage.value = buildNetworkErrorMessage("읽음 보관함 새로고침 실패", e)
+                    _toastMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
                 }
             } finally {
                 if (showFeedback) {
@@ -302,14 +310,17 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     onComplete?.invoke(true)
                 } else {
                     if (showFeedback) {
-                        _toastMessage.value =
-                            "읽음 처리 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                        _toastMessage.value = resolveSafeErrorMessage(
+                            context = ErrorContext.UNKNOWN,
+                            rawMessage = response.message,
+                            rawReason = response.reason,
+                        )
                     }
                     onComplete?.invoke(false)
                 }
             } catch (e: Exception) {
                 if (showFeedback) {
-                    _toastMessage.value = buildNetworkErrorMessage("읽음 처리 실패", e)
+                    _toastMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
                 }
                 onComplete?.invoke(false)
             }
@@ -329,11 +340,14 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     fetchAlerts(uid, showFeedback = false)
                     fetchReadGroupedAlerts(uid, showFeedback = false)
                 } else {
-                    _toastMessage.value =
-                        "모두 읽음 처리 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.UNKNOWN,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
                 }
             } catch (e: Exception) {
-                _toastMessage.value = buildNetworkErrorMessage("모두 읽음 처리 실패", e)
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
             } finally {
                 _isMarkingAllAlertsRead.value = false
             }
@@ -353,11 +367,14 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     _toastMessage.value = response.message ?: "읽음 보관함 전체 비우기 완료 (${clearedCount}건)"
                     fetchReadGroupedAlerts(uid, showFeedback = false)
                 } else {
-                    _toastMessage.value =
-                        "읽음 보관함 전체 비우기 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.UNKNOWN,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
                 }
             } catch (e: Exception) {
-                _toastMessage.value = buildNetworkErrorMessage("읽음 보관함 전체 비우기 실패", e)
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
             } finally {
                 _isClearingReadArchiveAll.value = false
             }
@@ -393,11 +410,14 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     }
                     fetchReadGroupedAlerts(uid, showFeedback = false)
                 } else {
-                    _toastMessage.value =
-                        "읽음 보관함 선택 비우기 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.UNKNOWN,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
                 }
             } catch (e: Exception) {
-                _toastMessage.value = buildNetworkErrorMessage("읽음 보관함 선택 비우기 실패", e)
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
             } finally {
                 _isClearingReadArchiveSelected.value = false
             }
@@ -434,7 +454,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                         device_id = trimmedDeviceId
                     )
                 )
-                
+
                 Log.d("UMTP_NET", "Register Response: ok=${response.ok}, user_id=${response.user_id}, message=${response.message}")
 
                 if (response.ok) {
@@ -447,11 +467,15 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     startAlertPolling(effectiveUserId)
                     _toastMessage.value = response.message ?: "등록 완료"
                 } else {
-                    _toastMessage.value = "등록 실패: ${response.message ?: response.reason ?: "서버 응답 오류"}"
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.UNKNOWN,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
                 }
             } catch (e: Exception) {
                 Log.e("UMTP_NET", "Register Error", e)
-                _toastMessage.value = buildNetworkErrorMessage("등록 실패", e)
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
             } finally {
                 _isLoading.value = false
             }
@@ -515,20 +539,25 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 )
                 val response = UmtpApiClient.apiService.upsertUserFairPrice(request)
                 if (response.ok) {
-                    val missedCandidateCount = response.missed_candidate_count ?: 0
-                    _toastMessage.value = if (missedCandidateCount > 0) {
-                        response.message ?: "조건 변경 사이에 새 기준에 맞는 매물이 ${missedCandidateCount}개 있었어요."
-                    } else if (response.immediate_poll_requested == true) {
-                        response.message ?: "저장 완료 (즉시 검색 요청됨)"
+                    _toastMessage.value = if (enabled) {
+                        if (response.immediate_poll_requested == true) {
+                            "저장 완료. 즉시 검색을 요청했어요."
+                        } else {
+                            "저장은 완료됐지만, 즉시 검색 요청은 보내지 못했어요. 잠시 후 다시 시도해 주세요."
+                        }
                     } else {
-                        response.message ?: "저장 완료"
+                        "저장 완료."
                     }
                     loadUserSettings(uid)
                 } else {
-                    _toastMessage.value = "저장 실패: ${response.message ?: response.reason}"
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.SAVE,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
                 }
             } catch (e: Exception) {
-                _toastMessage.value = buildNetworkErrorMessage("저장 실패", e)
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
             } finally {
                 _savingItemKey.value = null
             }
@@ -561,10 +590,14 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     fetchAlerts(uid, showFeedback = false)
                     fetchReadGroupedAlerts(uid, showFeedback = false)
                 } else {
-                    _toastMessage.value = "일괄 알림 변경 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.SAVE,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
                 }
             } catch (e: Exception) {
-                _toastMessage.value = buildNetworkErrorMessage("일괄 알림 변경 실패", e)
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
             } finally {
                 _isApplyingBulkSettings.value = false
             }
@@ -591,10 +624,14 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     _toastMessage.value = "전체 차이 %가 변경되었습니다."
                     refreshUserSettingsInternal(uid)
                 } else {
-                    _toastMessage.value = "전체 차이 % 변경 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.SAVE,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
                 }
             } catch (e: Exception) {
-                _toastMessage.value = buildNetworkErrorMessage("전체 차이 % 변경 실패", e)
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
             } finally {
                 _isApplyingBulkSettings.value = false
             }
@@ -620,10 +657,14 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     _toastMessage.value = "시스템 기준 시장가로 업데이트했습니다."
                     refreshUserSettingsInternal(uid)
                 } else {
-                    _toastMessage.value = "시스템 기준 시장가 초기화 실패: ${response.reason ?: response.message ?: "서버 응답 오류"}"
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.SAVE,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
                 }
             } catch (e: Exception) {
-                _toastMessage.value = buildNetworkErrorMessage("시스템 기준 시장가 초기화 실패", e)
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
             } finally {
                 _isApplyingBulkSettings.value = false
             }
@@ -634,27 +675,21 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         _toastMessage.value = null
     }
 
-    private fun buildNetworkErrorMessage(prefix: String, error: Exception): String {
-        val reason = when (error) {
-            is UnknownHostException -> "서버 주소를 찾지 못했어요."
-            is ConnectException -> "서버에 연결할 수 없어요."
-            is SocketTimeoutException -> "서버 응답 시간이 초과됐어요."
-            else -> error.localizedMessage ?: "알 수 없는 네트워크 오류"
-        }
-        return "$prefix: $reason 서버 주소(${UmtpApiClient.baseUrl})를 확인해주세요."
-    }
-
     private suspend fun refreshUnitsInternal(): String? {
         return try {
             val unitsResponse = UmtpApiClient.apiService.getMacBookAirUnits()
             if (!unitsResponse.ok) {
-                unitsResponse.reason ?: unitsResponse.message ?: "MacBook Air 단위 목록 응답 오류"
+                resolveSafeErrorMessage(
+                    context = ErrorContext.NETWORK,
+                    rawMessage = unitsResponse.message,
+                    rawReason = unitsResponse.reason,
+                )
             } else {
                 _units.value = unitsResponse.units
                 null
             }
         } catch (e: Exception) {
-            buildNetworkErrorMessage("MacBook Air 단위 목록 로딩 실패", e)
+            e.toSafeUserMessage(ErrorContext.NETWORK)
         }
     }
 
@@ -662,14 +697,18 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         return try {
             val response = UmtpApiClient.apiService.getUserFairPrices(uid)
             if (!response.ok) {
-                response.reason ?: response.message ?: "사용자 설정 응답 오류"
+                resolveSafeErrorMessage(
+                    context = ErrorContext.NETWORK,
+                    rawMessage = response.message,
+                    rawReason = response.reason,
+                )
             } else {
                 _userSettings.value = response.items
                 pruneRuleRefreshState(response.items.mapNotNull { it.id }.toSet())
                 null
             }
         } catch (e: Exception) {
-            buildNetworkErrorMessage("사용자 설정 로딩 실패", e)
+            e.toSafeUserMessage(ErrorContext.NETWORK)
         }
     }
 
@@ -677,12 +716,16 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         return try {
             val response = UmtpApiClient.apiService.refreshUserRulesSavedAt(uid)
             if (!response.ok) {
-                response.reason ?: response.message ?: "활성 조건 saved_at 새로고침 응답 오류"
+                resolveSafeErrorMessage(
+                    context = ErrorContext.NETWORK,
+                    rawMessage = response.message,
+                    rawReason = response.reason,
+                )
             } else {
                 null
             }
         } catch (e: Exception) {
-            buildNetworkErrorMessage("활성 조건 saved_at 새로고침 실패", e)
+            e.toSafeUserMessage(ErrorContext.NETWORK)
         }
     }
 

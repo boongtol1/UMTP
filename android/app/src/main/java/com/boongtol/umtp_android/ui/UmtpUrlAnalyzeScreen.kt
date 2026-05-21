@@ -76,7 +76,7 @@ fun UmtpUrlAnalyzeScreen(
                             )
                             formatResponse(response)
                         } catch (e: Exception) {
-                            "에러 발생: ${e.localizedMessage}"
+                            e.toSafeUserMessage(ErrorContext.UNKNOWN)
                         } finally {
                             isLoading = false
                         }
@@ -129,7 +129,11 @@ private fun formatResponse(response: com.boongtol.umtp_android.network.AnalyzeUr
     val sb = StringBuilder()
     sb.append("성공 여부: ${response.ok}\n")
     response.status?.let { sb.append("상태: $it\n") }
-    response.message?.let { sb.append("메시지: $it\n") }
+    if (!response.ok) {
+        sb.append("안내: ${resolveSafeErrorMessage(ErrorContext.UNKNOWN, response.message, response.reason)}\n")
+    } else {
+        response.message?.let { sb.append("메시지: $it\n") }
+    }
     response.title?.let { sb.append("제목: $it\n") }
     response.listing_price_krw?.let { sb.append("등록 가격: $it 원\n") }
     response.fair_price_krw?.let { sb.append("적정 가격: $it 원\n") }
@@ -140,8 +144,6 @@ private fun formatResponse(response: com.boongtol.umtp_android.network.AnalyzeUr
     response.is_alert_target?.let { sb.append("알림 대상: $it\n") }
     response.risk_level?.let { sb.append("위험도: $it\n") }
     response.trade_type?.let { sb.append("거래 방식: $it\n") }
-    response.reason?.let { sb.append("이유: $it\n") }
-    
     if (sb.isEmpty()) {
         return "응답 데이터가 비어 있습니다."
     }
