@@ -759,6 +759,39 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
     }
 
+    fun bulkSetWatchPriority(
+        priority: String,
+        productType: String? = null,
+        chip: String? = null,
+        screenInch: Int? = null,
+    ) {
+        val uid = _userId.value ?: return
+        if (_isApplyingBulkSettings.value) {
+            return
+        }
+        val normalizedChip = chip?.trim()?.takeIf { it.isNotEmpty() }
+        val normalizedPriority = normalizeWatchPriority(priority)
+
+        viewModelScope.launch {
+            _isApplyingBulkSettings.value = true
+            try {
+                applyBulkUpsertFallback(
+                    uid = uid,
+                    productType = productType,
+                    chip = normalizedChip,
+                    screenInch = screenInch,
+                    priorityOverride = normalizedPriority,
+                )
+                _toastMessage.value = "알림 속도가 변경되었습니다."
+                refreshUserSettingsInternal(uid)
+            } catch (e: Exception) {
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+            } finally {
+                _isApplyingBulkSettings.value = false
+            }
+        }
+    }
+
     fun resetFairPricesToSystem(
         productType: String? = null,
         chip: String? = null,
@@ -898,6 +931,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         screenInch: Int? = null,
         enabledOverride: Boolean? = null,
         conditionChangeCandidateNoticeEnabledOverride: Boolean? = null,
+        priorityOverride: String? = null,
         dropRatePercentOverride: Double? = null,
         useSystemFairPrice: Boolean = false,
     ) {
@@ -952,7 +986,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     ?: setting.condition_change_candidate_notice_enabled,
                 search_keyword = setting.custom_search_keyword?.trim()?.ifEmpty { null },
                 poll_interval_seconds = setting.poll_interval_seconds ?: 60,
-                priority = normalizeWatchPriority(setting.priority),
+                priority = priorityOverride ?: normalizeWatchPriority(setting.priority),
             )
             val response = UmtpApiClient.apiService.upsertUserFairPrice(request)
             if (!response.ok) {

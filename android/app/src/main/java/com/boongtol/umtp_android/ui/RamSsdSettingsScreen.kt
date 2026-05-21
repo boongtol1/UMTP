@@ -44,8 +44,11 @@ fun RamSsdSettingsScreen(
     bulkEnabledForProductType: Boolean,
     bulkConditionChangeNoticeForCurrentScope: Boolean,
     bulkConditionChangeNoticeForProductType: Boolean,
+    bulkWatchPriorityForCurrentScope: String,
+    bulkWatchPriorityForProductType: String,
     onBulkEnabledChange: (Boolean, Boolean) -> Unit,
     onBulkConditionChangeNoticeChange: (Boolean, Boolean) -> Unit,
+    onBulkWatchPriorityApply: (String, Boolean) -> Unit,
     onBulkDropRateApply: (Double, Boolean) -> Unit,
     onResetToSystemMarketPrices: (Boolean) -> Unit,
     onSave: (MacBookAirUnit, Int, Int, String, Boolean, Boolean, String?, String, Int?) -> Unit,
@@ -57,9 +60,21 @@ fun RamSsdSettingsScreen(
     val effectiveBulkEnabled = if (applyToProductType) bulkEnabledForProductType else bulkEnabledForCurrentScope
     val effectiveBulkConditionChangeNotice =
         if (applyToProductType) bulkConditionChangeNoticeForProductType else bulkConditionChangeNoticeForCurrentScope
+    val effectiveBulkWatchPriority = normalizeWatchPriority(
+        if (applyToProductType) bulkWatchPriorityForProductType else bulkWatchPriorityForCurrentScope
+    )
     var pendingEnabledValue by remember { mutableStateOf(effectiveBulkEnabled) }
     var showConditionChangeNoticeConfirmDialog by remember { mutableStateOf(false) }
     var pendingConditionChangeNoticeEnabled by remember { mutableStateOf(effectiveBulkConditionChangeNotice) }
+    var selectedBulkWatchPriority by remember(
+        applyToProductType,
+        bulkWatchPriorityForCurrentScope,
+        bulkWatchPriorityForProductType,
+    ) {
+        mutableStateOf(effectiveBulkWatchPriority)
+    }
+    var showWatchPriorityConfirmDialog by remember { mutableStateOf(false) }
+    var pendingBulkWatchPriority by remember { mutableStateOf(effectiveBulkWatchPriority) }
     var showDropRateConfirmDialog by remember { mutableStateOf(false) }
     var pendingDropRatePercent by remember { mutableStateOf(0.0) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
@@ -232,6 +247,38 @@ fun RamSsdSettingsScreen(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color.Gray,
                             )
+                            Text(
+                                text = "알림 속도",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                WATCH_PRIORITY_UI_OPTIONS.forEach { option ->
+                                    FilterChip(
+                                        selected = selectedBulkWatchPriority == option.value,
+                                        onClick = { selectedBulkWatchPriority = option.value },
+                                        label = { Text(option.label) },
+                                        enabled = !isApplyingBulkSettings,
+                                    )
+                                }
+                            }
+                            Text(
+                                text = WATCH_PRIORITY_UI_OPTIONS.firstOrNull { it.value == selectedBulkWatchPriority }?.description
+                                    ?: "일반적인 속도",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray,
+                            )
+                            Button(
+                                onClick = {
+                                    pendingBulkWatchPriority = selectedBulkWatchPriority
+                                    showWatchPriorityConfirmDialog = true
+                                },
+                                enabled = !isApplyingBulkSettings,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("전체 알림 속도 적용")
+                            }
                             OutlinedTextField(
                                 value = bulkDropRateInput,
                                 onValueChange = {
@@ -396,6 +443,38 @@ fun RamSsdSettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDropRateConfirmDialog = false }) {
+                    Text("취소")
+                }
+            },
+        )
+    }
+
+    if (showWatchPriorityConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showWatchPriorityConfirmDialog = false },
+            title = { Text("알림 속도 변경") },
+            text = {
+                val priorityLabel = WATCH_PRIORITY_UI_OPTIONS
+                    .firstOrNull { it.value == pendingBulkWatchPriority }
+                    ?.label
+                    ?: "보통"
+                Text("$bulkScopeLabel 알림 속도를 $priorityLabel(으)로 모두 변경할까요?")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showWatchPriorityConfirmDialog = false
+                        onBulkWatchPriorityApply(
+                            pendingBulkWatchPriority,
+                            applyToProductType,
+                        )
+                    }
+                ) {
+                    Text("확인")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWatchPriorityConfirmDialog = false }) {
                     Text("취소")
                 }
             },

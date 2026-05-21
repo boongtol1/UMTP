@@ -277,6 +277,14 @@ fun MainTabScreen(
                             screenInch = screenInch,
                         )
                     },
+                    onBulkSetWatchPriority = { priority, productType, chip, screenInch ->
+                        viewModel.bulkSetWatchPriority(
+                            priority = priority,
+                            productType = productType,
+                            chip = chip,
+                            screenInch = screenInch,
+                        )
+                    },
                     onBulkSetDropRate = { dropRatePercent, productType, chip, screenInch ->
                         viewModel.bulkSetDropRatePercent(
                             dropRatePercent = dropRatePercent,
@@ -316,6 +324,7 @@ fun SettingsNavigator(
     onRefreshRule: (Long) -> Unit,
     onBulkSetAlertsEnabled: (Boolean, String?, String?, Int?) -> Unit,
     onBulkSetConditionChangeNoticeEnabled: (Boolean, String?, String?, Int?) -> Unit,
+    onBulkSetWatchPriority: (String, String?, String?, Int?) -> Unit,
     onBulkSetDropRate: (Double, String?, String?, Int?) -> Unit,
     onResetFairPricesToSystem: (String?, String?, Int?) -> Unit,
 ) {
@@ -439,6 +448,8 @@ fun SettingsNavigator(
                     scopedUserSettings.all { it.condition_change_candidate_notice_enabled },
                 bulkConditionChangeNoticeForProductType = productScopedUserSettings.isNotEmpty() &&
                     productScopedUserSettings.all { it.condition_change_candidate_notice_enabled },
+                bulkWatchPriorityForCurrentScope = resolveBulkWatchPriority(scopedUserSettings),
+                bulkWatchPriorityForProductType = resolveBulkWatchPriority(productScopedUserSettings),
                 onBulkEnabledChange = { enabled, applyToProductType ->
                     if (applyToProductType) {
                         onBulkSetAlertsEnabled(enabled, screen.productType, null, null)
@@ -451,6 +462,13 @@ fun SettingsNavigator(
                         onBulkSetConditionChangeNoticeEnabled(enabled, screen.productType, null, null)
                     } else {
                         onBulkSetConditionChangeNoticeEnabled(enabled, screen.productType, screen.chip, screenScopeInch)
+                    }
+                },
+                onBulkWatchPriorityApply = { priority, applyToProductType ->
+                    if (applyToProductType) {
+                        onBulkSetWatchPriority(priority, screen.productType, null, null)
+                    } else {
+                        onBulkSetWatchPriority(priority, screen.productType, screen.chip, screenScopeInch)
                     }
                 },
                 onBulkDropRateApply = { dropRatePercent, applyToProductType ->
@@ -507,4 +525,14 @@ private fun chipSortOrder(chip: String): Int {
         "M5" -> 7
         else -> 99
     }
+}
+
+private fun resolveBulkWatchPriority(
+    settings: List<com.boongtol.umtp_android.network.UserFairPriceItem>,
+): String {
+    if (settings.isEmpty()) {
+        return WATCH_PRIORITY_NORMAL
+    }
+    val normalized = settings.map { normalizeWatchPriority(it.priority) }.distinct()
+    return if (normalized.size == 1) normalized.first() else WATCH_PRIORITY_NORMAL
 }
