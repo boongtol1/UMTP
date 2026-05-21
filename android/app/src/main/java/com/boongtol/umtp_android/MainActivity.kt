@@ -269,6 +269,14 @@ fun MainTabScreen(
                             screenInch = screenInch,
                         )
                     },
+                    onBulkSetConditionChangeNoticeEnabled = { enabled, productType, chip, screenInch ->
+                        viewModel.bulkSetConditionChangeCandidateNoticeEnabled(
+                            enabled = enabled,
+                            productType = productType,
+                            chip = chip,
+                            screenInch = screenInch,
+                        )
+                    },
                     onBulkSetDropRate = { dropRatePercent, productType, chip, screenInch ->
                         viewModel.bulkSetDropRatePercent(
                             dropRatePercent = dropRatePercent,
@@ -307,6 +315,7 @@ fun SettingsNavigator(
     onUpsert: (com.boongtol.umtp_android.network.MacBookAirUnit, Int, Int, String, Boolean, Boolean, String?, String, Int?) -> Unit,
     onRefreshRule: (Long) -> Unit,
     onBulkSetAlertsEnabled: (Boolean, String?, String?, Int?) -> Unit,
+    onBulkSetConditionChangeNoticeEnabled: (Boolean, String?, String?, Int?) -> Unit,
     onBulkSetDropRate: (Double, String?, String?, Int?) -> Unit,
     onResetFairPricesToSystem: (String?, String?, Int?) -> Unit,
 ) {
@@ -426,11 +435,22 @@ fun SettingsNavigator(
                 ruleLastRefreshLabels = ruleLastRefreshLabels,
                 bulkEnabledForCurrentScope = scopedUserSettings.isNotEmpty() && scopedUserSettings.all { it.enabled },
                 bulkEnabledForProductType = productScopedUserSettings.isNotEmpty() && productScopedUserSettings.all { it.enabled },
+                bulkConditionChangeNoticeForCurrentScope = scopedUserSettings.isNotEmpty() &&
+                    scopedUserSettings.all { it.condition_change_candidate_notice_enabled },
+                bulkConditionChangeNoticeForProductType = productScopedUserSettings.isNotEmpty() &&
+                    productScopedUserSettings.all { it.condition_change_candidate_notice_enabled },
                 onBulkEnabledChange = { enabled, applyToProductType ->
                     if (applyToProductType) {
                         onBulkSetAlertsEnabled(enabled, screen.productType, null, null)
                     } else {
                         onBulkSetAlertsEnabled(enabled, screen.productType, screen.chip, screenScopeInch)
+                    }
+                },
+                onBulkConditionChangeNoticeChange = { enabled, applyToProductType ->
+                    if (applyToProductType) {
+                        onBulkSetConditionChangeNoticeEnabled(enabled, screen.productType, null, null)
+                    } else {
+                        onBulkSetConditionChangeNoticeEnabled(enabled, screen.productType, screen.chip, screenScopeInch)
                     }
                 },
                 onBulkDropRateApply = { dropRatePercent, applyToProductType ->

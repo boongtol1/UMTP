@@ -723,6 +723,42 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
     }
 
+    fun bulkSetConditionChangeCandidateNoticeEnabled(
+        enabled: Boolean,
+        productType: String? = null,
+        chip: String? = null,
+        screenInch: Int? = null,
+    ) {
+        val uid = _userId.value ?: return
+        if (_isApplyingBulkSettings.value) {
+            return
+        }
+        val normalizedChip = chip?.trim()?.takeIf { it.isNotEmpty() }
+
+        viewModelScope.launch {
+            _isApplyingBulkSettings.value = true
+            try {
+                applyBulkUpsertFallback(
+                    uid = uid,
+                    productType = productType,
+                    chip = normalizedChip,
+                    screenInch = screenInch,
+                    conditionChangeCandidateNoticeEnabledOverride = enabled,
+                )
+                _toastMessage.value = if (enabled) {
+                    "조건 변경 후보 알림이 켜졌습니다."
+                } else {
+                    "조건 변경 후보 알림이 꺼졌습니다."
+                }
+                refreshUserSettingsInternal(uid)
+            } catch (e: Exception) {
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+            } finally {
+                _isApplyingBulkSettings.value = false
+            }
+        }
+    }
+
     fun resetFairPricesToSystem(
         productType: String? = null,
         chip: String? = null,
@@ -861,6 +897,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         chip: String? = null,
         screenInch: Int? = null,
         enabledOverride: Boolean? = null,
+        conditionChangeCandidateNoticeEnabledOverride: Boolean? = null,
         dropRatePercentOverride: Double? = null,
         useSystemFairPrice: Boolean = false,
     ) {
@@ -911,7 +948,8 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 min_price_krw = boundsRequest.min_price_krw,
                 max_price_krw = boundsRequest.max_price_krw,
                 enabled = enabledOverride ?: setting.enabled,
-                condition_change_candidate_notice_enabled = setting.condition_change_candidate_notice_enabled,
+                condition_change_candidate_notice_enabled = conditionChangeCandidateNoticeEnabledOverride
+                    ?: setting.condition_change_candidate_notice_enabled,
                 search_keyword = setting.custom_search_keyword?.trim()?.ifEmpty { null },
                 poll_interval_seconds = setting.poll_interval_seconds ?: 60,
                 priority = normalizeWatchPriority(setting.priority),

@@ -42,7 +42,10 @@ fun RamSsdSettingsScreen(
     ruleLastRefreshLabels: Map<Long, String>,
     bulkEnabledForCurrentScope: Boolean,
     bulkEnabledForProductType: Boolean,
+    bulkConditionChangeNoticeForCurrentScope: Boolean,
+    bulkConditionChangeNoticeForProductType: Boolean,
     onBulkEnabledChange: (Boolean, Boolean) -> Unit,
+    onBulkConditionChangeNoticeChange: (Boolean, Boolean) -> Unit,
     onBulkDropRateApply: (Double, Boolean) -> Unit,
     onResetToSystemMarketPrices: (Boolean) -> Unit,
     onSave: (MacBookAirUnit, Int, Int, String, Boolean, Boolean, String?, String, Int?) -> Unit,
@@ -52,7 +55,11 @@ fun RamSsdSettingsScreen(
     var showEnableConfirmDialog by remember { mutableStateOf(false) }
     var applyToProductType by remember(productType, chip, screenSize) { mutableStateOf(false) }
     val effectiveBulkEnabled = if (applyToProductType) bulkEnabledForProductType else bulkEnabledForCurrentScope
+    val effectiveBulkConditionChangeNotice =
+        if (applyToProductType) bulkConditionChangeNoticeForProductType else bulkConditionChangeNoticeForCurrentScope
     var pendingEnabledValue by remember { mutableStateOf(effectiveBulkEnabled) }
+    var showConditionChangeNoticeConfirmDialog by remember { mutableStateOf(false) }
+    var pendingConditionChangeNoticeEnabled by remember { mutableStateOf(effectiveBulkConditionChangeNotice) }
     var showDropRateConfirmDialog by remember { mutableStateOf(false) }
     var pendingDropRatePercent by remember { mutableStateOf(0.0) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
@@ -202,6 +209,29 @@ fun RamSsdSettingsScreen(
                                     enabled = !isApplyingBulkSettings,
                                 )
                             }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = "조건 변경 후보 알림",
+                                    style = MaterialTheme.typography.titleSmall,
+                                )
+                                Switch(
+                                    checked = effectiveBulkConditionChangeNotice,
+                                    onCheckedChange = { checked ->
+                                        pendingConditionChangeNoticeEnabled = checked
+                                        showConditionChangeNoticeConfirmDialog = true
+                                    },
+                                    enabled = !isApplyingBulkSettings,
+                                )
+                            }
+                            Text(
+                                text = "조건 변경 사이에 새 기준에 맞는 매물 참고 알림을 범위 전체에 반영합니다.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray,
+                            )
                             OutlinedTextField(
                                 value = bulkDropRateInput,
                                 onValueChange = {
@@ -366,6 +396,40 @@ fun RamSsdSettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDropRateConfirmDialog = false }) {
+                    Text("취소")
+                }
+            },
+        )
+    }
+
+    if (showConditionChangeNoticeConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showConditionChangeNoticeConfirmDialog = false },
+            title = { Text("조건 변경 후보 알림 변경") },
+            text = {
+                Text(
+                    if (pendingConditionChangeNoticeEnabled) {
+                        "$bulkScopeLabel 조건 변경 후보 알림을 모두 켜시겠습니까?"
+                    } else {
+                        "$bulkScopeLabel 조건 변경 후보 알림을 모두 끄시겠습니까?"
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showConditionChangeNoticeConfirmDialog = false
+                        onBulkConditionChangeNoticeChange(
+                            pendingConditionChangeNoticeEnabled,
+                            applyToProductType,
+                        )
+                    }
+                ) {
+                    Text("확인")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConditionChangeNoticeConfirmDialog = false }) {
                     Text("취소")
                 }
             },
