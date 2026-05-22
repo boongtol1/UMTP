@@ -50,6 +50,8 @@ fun RamSsdSettingsScreen(
     onBulkConditionChangeNoticeChange: (Boolean, Boolean) -> Unit,
     onBulkWatchPriorityApply: (String, Boolean) -> Unit,
     onBulkDropRateApply: (Double, Boolean) -> Unit,
+    onBulkMinPriceApply: (Int, Boolean) -> Unit,
+    onBulkMaxPriceApply: (Int, Boolean) -> Unit,
     onResetToSystemMarketPrices: (Boolean) -> Unit,
     onSave: (MacBookAirUnit, Int, Int, String, Boolean, Boolean, String?, String, Int?) -> Unit,
     onRefreshRule: (Long) -> Unit,
@@ -77,9 +79,48 @@ fun RamSsdSettingsScreen(
     var pendingBulkWatchPriority by remember { mutableStateOf(effectiveBulkWatchPriority) }
     var showDropRateConfirmDialog by remember { mutableStateOf(false) }
     var pendingDropRatePercent by remember { mutableStateOf(0.0) }
+    var showMinPriceConfirmDialog by remember { mutableStateOf(false) }
+    var showMaxPriceConfirmDialog by remember { mutableStateOf(false) }
+    var pendingMinPrice by remember { mutableStateOf(0) }
+    var pendingMaxPrice by remember { mutableStateOf(0) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
     var bulkDropRateInput by remember { mutableStateOf("") }
     var bulkDropRateInputError by remember { mutableStateOf<String?>(null) }
+    var bulkMinPriceInputError by remember { mutableStateOf<String?>(null) }
+    var bulkMaxPriceInputError by remember { mutableStateOf<String?>(null) }
+    val currentScopeSettingsForBounds = remember(userSettings, productType, chip, screenSize) {
+        userSettings.filter {
+            it.product_type == productType &&
+                it.chip == chip &&
+                (productType == "Mac mini" || it.screen_inch == screenSize)
+        }
+    }
+    val productScopeSettingsForBounds = remember(userSettings, productType) {
+        userSettings.filter { it.product_type == productType }
+    }
+    val currentScopeBoundsState = remember(currentScopeSettingsForBounds) {
+        resolveBulkPriceBoundsScopeState(currentScopeSettingsForBounds)
+    }
+    val productScopeBoundsState = remember(productScopeSettingsForBounds) {
+        resolveBulkPriceBoundsScopeState(productScopeSettingsForBounds)
+    }
+    val effectiveBulkBoundsState = if (applyToProductType) productScopeBoundsState else currentScopeBoundsState
+    val hasBelowDirectionInScope = effectiveBulkBoundsState.hasBelowDirection
+    val hasAboveDirectionInScope = effectiveBulkBoundsState.hasAboveDirection
+    var bulkMinPriceInput by remember(
+        applyToProductType,
+        currentScopeBoundsState.minPrice,
+        productScopeBoundsState.minPrice,
+    ) {
+        mutableStateOf(effectiveBulkBoundsState.minPrice?.toString() ?: "")
+    }
+    var bulkMaxPriceInput by remember(
+        applyToProductType,
+        currentScopeBoundsState.maxPrice,
+        productScopeBoundsState.maxPrice,
+    ) {
+        mutableStateOf(effectiveBulkBoundsState.maxPrice?.toString() ?: "")
+    }
     val bulkScopeLabel = buildBulkScopeLabel(
         productType = productType,
         chip = chip,
@@ -317,6 +358,104 @@ fun RamSsdSettingsScreen(
                             ) {
                                 Text("전체 차이 % 적용")
                             }
+                            OutlinedTextField(
+                                value = bulkMinPriceInput,
+                                onValueChange = {
+                                    if (it.all { char -> char.isDigit() }) {
+                                        bulkMinPriceInput = normalizePriceTextInput(it)
+                                        bulkMinPriceInputError = null
+                                    }
+                                },
+                                label = { Text("최소 가격 (원)") },
+                                placeholder = { Text("예: 300000") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                enabled = !isApplyingBulkSettings,
+                                isError = bulkMinPriceInputError != null,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            if (!bulkMinPriceInputError.isNullOrBlank()) {
+                                Text(
+                                    text = bulkMinPriceInputError ?: "",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                            Text(
+                                text = if (hasBelowDirectionInScope) {
+                                    "이하 알림 항목에 최소 가격으로 적용됩니다."
+                                } else {
+                                    "현재 범위에는 이하 알림 항목이 없어 최소 가격은 적용되지 않습니다."
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray,
+                            )
+                            Button(
+                                onClick = {
+                                    val parsed = bulkMinPriceInput.toIntOrNull()
+                                    if (parsed == null) {
+                                        bulkMinPriceInputError = "숫자(예: 300000)를 입력해주세요."
+                                    } else if (parsed < 0) {
+                                        bulkMinPriceInputError = "0원 이상으로 입력해주세요."
+                                    } else {
+                                        pendingMinPrice = parsed
+                                        showMinPriceConfirmDialog = true
+                                    }
+                                },
+                                enabled = !isApplyingBulkSettings && hasBelowDirectionInScope,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("전체 최소 가격 적용")
+                            }
+                            OutlinedTextField(
+                                value = bulkMaxPriceInput,
+                                onValueChange = {
+                                    if (it.all { char -> char.isDigit() }) {
+                                        bulkMaxPriceInput = normalizePriceTextInput(it)
+                                        bulkMaxPriceInputError = null
+                                    }
+                                },
+                                label = { Text("최대 가격 (원)") },
+                                placeholder = { Text("예: 900000") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                enabled = !isApplyingBulkSettings,
+                                isError = bulkMaxPriceInputError != null,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            if (!bulkMaxPriceInputError.isNullOrBlank()) {
+                                Text(
+                                    text = bulkMaxPriceInputError ?: "",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                            Text(
+                                text = if (hasAboveDirectionInScope) {
+                                    "이상 알림 항목에 최대 가격으로 적용됩니다."
+                                } else {
+                                    "현재 범위에는 이상 알림 항목이 없어 최대 가격은 적용되지 않습니다."
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray,
+                            )
+                            Button(
+                                onClick = {
+                                    val parsed = bulkMaxPriceInput.toIntOrNull()
+                                    if (parsed == null) {
+                                        bulkMaxPriceInputError = "숫자(예: 900000)를 입력해주세요."
+                                    } else if (parsed < 0) {
+                                        bulkMaxPriceInputError = "0원 이상으로 입력해주세요."
+                                    } else {
+                                        pendingMaxPrice = parsed
+                                        showMaxPriceConfirmDialog = true
+                                    }
+                                },
+                                enabled = !isApplyingBulkSettings && hasAboveDirectionInScope,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("전체 최대 가격 적용")
+                            }
                             OutlinedButton(
                                 onClick = { showResetConfirmDialog = true },
                                 enabled = !isApplyingBulkSettings,
@@ -450,6 +589,62 @@ fun RamSsdSettingsScreen(
         )
     }
 
+    if (showMinPriceConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showMinPriceConfirmDialog = false },
+            title = { Text("전체 최소 가격 변경") },
+            text = {
+                Text("$bulkScopeLabel 이하 알림 최소 가격을 ${formatKrwDisplay(pendingMinPrice)}로 변경할까요?")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showMinPriceConfirmDialog = false
+                        onBulkMinPriceApply(
+                            pendingMinPrice,
+                            applyToProductType,
+                        )
+                    }
+                ) {
+                    Text("확인")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMinPriceConfirmDialog = false }) {
+                    Text("취소")
+                }
+            },
+        )
+    }
+
+    if (showMaxPriceConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showMaxPriceConfirmDialog = false },
+            title = { Text("전체 최대 가격 변경") },
+            text = {
+                Text("$bulkScopeLabel 이상 알림 최대 가격을 ${formatKrwDisplay(pendingMaxPrice)}로 변경할까요?")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showMaxPriceConfirmDialog = false
+                        onBulkMaxPriceApply(
+                            pendingMaxPrice,
+                            applyToProductType,
+                        )
+                    }
+                ) {
+                    Text("확인")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMaxPriceConfirmDialog = false }) {
+                    Text("취소")
+                }
+            },
+        )
+    }
+
     if (showWatchPriorityConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showWatchPriorityConfirmDialog = false },
@@ -555,4 +750,49 @@ private fun buildBulkScopeLabel(
         return "$chip $productType"
     }
     return "$chip $productType ${screenSize}인치"
+}
+
+private data class BulkPriceBoundsScopeState(
+    val minPrice: Int?,
+    val maxPrice: Int?,
+    val hasBelowDirection: Boolean,
+    val hasAboveDirection: Boolean,
+)
+
+private fun resolveBulkPriceBoundsScopeState(
+    settings: List<UserFairPriceItem>,
+): BulkPriceBoundsScopeState {
+    if (settings.isEmpty()) {
+        return BulkPriceBoundsScopeState(
+            minPrice = null,
+            maxPrice = null,
+            hasBelowDirection = false,
+            hasAboveDirection = false,
+        )
+    }
+
+    val belowItems = settings.filter { item ->
+        normalizeAlertDirection(
+            item.user_alert_price_direction
+                ?: item.effective_alert_price_direction
+                ?: item.system_alert_price_direction
+        ) == BELOW_OR_EQUAL_DIRECTION
+    }
+    val aboveItems = settings.filter { item ->
+        normalizeAlertDirection(
+            item.user_alert_price_direction
+                ?: item.effective_alert_price_direction
+                ?: item.system_alert_price_direction
+        ) == ABOVE_OR_EQUAL_DIRECTION
+    }
+
+    val belowBounds = belowItems.map { it.user_min_price_krw ?: it.effective_min_price_krw }.distinct()
+    val aboveBounds = aboveItems.map { it.user_max_price_krw ?: it.effective_max_price_krw }.distinct()
+
+    return BulkPriceBoundsScopeState(
+        minPrice = if (belowBounds.size == 1) belowBounds.firstOrNull() else null,
+        maxPrice = if (aboveBounds.size == 1) aboveBounds.firstOrNull() else null,
+        hasBelowDirection = belowItems.isNotEmpty(),
+        hasAboveDirection = aboveItems.isNotEmpty(),
+    )
 }

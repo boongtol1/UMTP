@@ -735,6 +735,80 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
     }
 
+    fun bulkSetMinPrice(
+        minPrice: Int,
+        productType: String? = null,
+        chip: String? = null,
+        screenInch: Int? = null,
+    ) {
+        val uid = _userId.value ?: return
+        if (_isApplyingBulkSettings.value) {
+            return
+        }
+        if (minPrice < 0) {
+            _toastMessage.value = "최소 가격은 0원 이상이어야 합니다."
+            return
+        }
+        val normalizedChip = chip?.trim()?.takeIf { it.isNotEmpty() }
+
+        viewModelScope.launch {
+            _isApplyingBulkSettings.value = true
+            try {
+                applyBulkUpsertFallback(
+                    uid = uid,
+                    productType = productType,
+                    chip = normalizedChip,
+                    screenInch = screenInch,
+                    minPriceOverride = minPrice,
+                    applyMinPriceOverride = true,
+                )
+                _toastMessage.value = "최소 가격이 변경되었습니다."
+                refreshUserSettingsInternal(uid)
+            } catch (e: Exception) {
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+            } finally {
+                _isApplyingBulkSettings.value = false
+            }
+        }
+    }
+
+    fun bulkSetMaxPrice(
+        maxPrice: Int,
+        productType: String? = null,
+        chip: String? = null,
+        screenInch: Int? = null,
+    ) {
+        val uid = _userId.value ?: return
+        if (_isApplyingBulkSettings.value) {
+            return
+        }
+        if (maxPrice < 0) {
+            _toastMessage.value = "최대 가격은 0원 이상이어야 합니다."
+            return
+        }
+        val normalizedChip = chip?.trim()?.takeIf { it.isNotEmpty() }
+
+        viewModelScope.launch {
+            _isApplyingBulkSettings.value = true
+            try {
+                applyBulkUpsertFallback(
+                    uid = uid,
+                    productType = productType,
+                    chip = normalizedChip,
+                    screenInch = screenInch,
+                    maxPriceOverride = maxPrice,
+                    applyMaxPriceOverride = true,
+                )
+                _toastMessage.value = "최대 가격이 변경되었습니다."
+                refreshUserSettingsInternal(uid)
+            } catch (e: Exception) {
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+            } finally {
+                _isApplyingBulkSettings.value = false
+            }
+        }
+    }
+
     fun bulkSetConditionChangeCandidateNoticeEnabled(
         enabled: Boolean,
         productType: String? = null,
@@ -945,6 +1019,10 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         conditionChangeCandidateNoticeEnabledOverride: Boolean? = null,
         priorityOverride: String? = null,
         dropRatePercentOverride: Double? = null,
+        minPriceOverride: Int? = null,
+        applyMinPriceOverride: Boolean = false,
+        maxPriceOverride: Int? = null,
+        applyMaxPriceOverride: Boolean = false,
         useSystemFairPrice: Boolean = false,
     ) {
         val scopedSettings = _userSettings.value.filter { item ->
@@ -972,14 +1050,20 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     ?: setting.effective_alert_price_direction
                     ?: setting.system_alert_price_direction
             )
-            val boundPrice = if (direction == ABOVE_OR_EQUAL_DIRECTION) {
+            var boundPriceForDirection = if (direction == ABOVE_OR_EQUAL_DIRECTION) {
                 setting.user_max_price_krw ?: setting.effective_max_price_krw
             } else {
                 setting.user_min_price_krw ?: setting.effective_min_price_krw
             }
+            if (direction == ABOVE_OR_EQUAL_DIRECTION && applyMaxPriceOverride) {
+                boundPriceForDirection = maxPriceOverride
+            }
+            if (direction == BELOW_OR_EQUAL_DIRECTION && applyMinPriceOverride) {
+                boundPriceForDirection = minPriceOverride
+            }
             val boundsRequest = buildAlertBoundsRequest(
                 alertPriceDirection = direction,
-                boundPriceKrw = boundPrice,
+                boundPriceKrw = boundPriceForDirection,
             )
             val request = UserFairPriceUpsertRequest(
                 user_id = uid,

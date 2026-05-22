@@ -309,6 +309,22 @@ fun MainTabScreen(
                             screenInch = screenInch,
                         )
                     },
+                    onBulkSetMinPrice = { minPrice, productType, chip, screenInch ->
+                        viewModel.bulkSetMinPrice(
+                            minPrice = minPrice,
+                            productType = productType,
+                            chip = chip,
+                            screenInch = screenInch,
+                        )
+                    },
+                    onBulkSetMaxPrice = { maxPrice, productType, chip, screenInch ->
+                        viewModel.bulkSetMaxPrice(
+                            maxPrice = maxPrice,
+                            productType = productType,
+                            chip = chip,
+                            screenInch = screenInch,
+                        )
+                    },
                     onResetFairPricesToSystem = { productType, chip, screenInch ->
                         viewModel.resetFairPricesToSystem(
                             productType = productType,
@@ -342,6 +358,8 @@ fun SettingsNavigator(
     onBulkSetConditionChangeNoticeEnabled: (Boolean, String?, String?, Int?) -> Unit,
     onBulkSetWatchPriority: (String, String?, String?, Int?) -> Unit,
     onBulkSetDropRate: (Double, String?, String?, Int?) -> Unit,
+    onBulkSetMinPrice: (Int, String?, String?, Int?) -> Unit,
+    onBulkSetMaxPrice: (Int, String?, String?, Int?) -> Unit,
     onResetFairPricesToSystem: (String?, String?, Int?) -> Unit,
 ) {
     var currentScreen by remember { mutableStateOf<Screen>(Screen.ProductTypeList) }
@@ -492,6 +510,20 @@ fun SettingsNavigator(
                         onBulkSetDropRate(dropRatePercent, screen.productType, null, null)
                     } else {
                         onBulkSetDropRate(dropRatePercent, screen.productType, screen.chip, screenScopeInch)
+                    }
+                },
+                onBulkMinPriceApply = { minPrice, applyToProductType ->
+                    if (applyToProductType) {
+                        onBulkSetMinPrice(minPrice, screen.productType, null, null)
+                    } else {
+                        onBulkSetMinPrice(minPrice, screen.productType, screen.chip, screenScopeInch)
+                    }
+                },
+                onBulkMaxPriceApply = { maxPrice, applyToProductType ->
+                    if (applyToProductType) {
+                        onBulkSetMaxPrice(maxPrice, screen.productType, null, null)
+                    } else {
+                        onBulkSetMaxPrice(maxPrice, screen.productType, screen.chip, screenScopeInch)
                     }
                 },
                 onResetToSystemMarketPrices = { applyToProductType ->
