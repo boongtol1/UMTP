@@ -618,77 +618,27 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             return
         }
         val normalizedChip = chip?.trim()?.takeIf { it.isNotEmpty() }
-        val hasNarrowScope = normalizedChip != null || screenInch != null
 
         viewModelScope.launch {
             _isApplyingBulkSettings.value = true
             try {
-                if (hasNarrowScope) {
-                    applyBulkUpsertFallback(
-                        uid = uid,
-                        productType = productType,
-                        chip = normalizedChip,
-                        screenInch = screenInch,
-                        enabledOverride = enabled,
-                    )
-                    _toastMessage.value = if (enabled) {
-                        "전체 알림이 켜졌습니다."
-                    } else {
-                        "전체 알림이 꺼졌습니다."
-                    }
-                    refreshUserSettingsInternal(uid)
-                    fetchAlerts(uid, showFeedback = false)
-                    fetchReadGroupedAlerts(uid, showFeedback = false)
-                    return@launch
-                }
-
-                val response = UmtpApiClient.apiService.bulkSetUserWatchRulesEnabled(
-                    UserWatchRulesBulkEnabledRequest(
-                        user_id = uid,
-                        enabled = enabled,
-                        product_type = productType,
-                    )
+                applyBulkUpsertFallback(
+                    uid = uid,
+                    productType = productType,
+                    chip = normalizedChip,
+                    screenInch = screenInch,
+                    enabledOverride = enabled,
                 )
-                if (response.ok) {
-                    _toastMessage.value = if (enabled) {
-                        "전체 알림이 켜졌습니다."
-                    } else {
-                        "전체 알림이 꺼졌습니다."
-                    }
-                    refreshUserSettingsInternal(uid)
-                    fetchAlerts(uid, showFeedback = false)
-                    fetchReadGroupedAlerts(uid, showFeedback = false)
+                _toastMessage.value = if (enabled) {
+                    "전체 알림이 켜졌습니다."
                 } else {
-                    _toastMessage.value = resolveSafeErrorMessage(
-                        context = ErrorContext.SAVE,
-                        rawMessage = response.message,
-                        rawReason = response.reason,
-                    )
+                    "전체 알림이 꺼졌습니다."
                 }
+                refreshUserSettingsInternal(uid)
+                fetchAlerts(uid, showFeedback = false)
+                fetchReadGroupedAlerts(uid, showFeedback = false)
             } catch (e: Exception) {
-                if (isMissingBulkEndpointError(e)) {
-                    try {
-                        applyBulkUpsertFallback(
-                            uid = uid,
-                            productType = productType,
-                            chip = normalizedChip,
-                            screenInch = screenInch,
-                            enabledOverride = enabled,
-                        )
-                        _toastMessage.value = if (enabled) {
-                            "전체 알림이 켜졌습니다."
-                        } else {
-                            "전체 알림이 꺼졌습니다."
-                        }
-                        refreshUserSettingsInternal(uid)
-                        fetchAlerts(uid, showFeedback = false)
-                        fetchReadGroupedAlerts(uid, showFeedback = false)
-                    } catch (_: Exception) {
-                        _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
-                    }
-                } else {
-                    _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
-                }
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
             } finally {
                 _isApplyingBulkSettings.value = false
             }
@@ -706,59 +656,23 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             return
         }
         val normalizedChip = chip?.trim()?.takeIf { it.isNotEmpty() }
-        val hasNarrowScope = normalizedChip != null || screenInch != null
 
         viewModelScope.launch {
             _isApplyingBulkSettings.value = true
             try {
-                if (hasNarrowScope) {
-                    applyBulkUpsertFallback(
-                        uid = uid,
-                        productType = productType,
-                        chip = normalizedChip,
-                        screenInch = screenInch,
-                        dropRatePercentOverride = dropRatePercent,
-                    )
-                    _toastMessage.value = "전체 차이 %가 변경되었습니다."
-                    refreshUserSettingsInternal(uid)
-                    return@launch
-                }
-
-                val response = UmtpApiClient.apiService.bulkSetUserFairPricesDropRate(
-                    UserFairPricesBulkDropRateRequest(
-                        user_id = uid,
-                        alert_drop_rate_percent = dropRatePercent,
-                        product_type = productType,
-                    )
+                applyBulkUpsertFallback(
+                    uid = uid,
+                    productType = productType,
+                    chip = normalizedChip,
+                    screenInch = screenInch,
+                    dropRatePercentOverride = dropRatePercent,
                 )
-                if (response.ok) {
-                    _toastMessage.value = "전체 차이 %가 변경되었습니다."
-                    refreshUserSettingsInternal(uid)
-                } else {
-                    _toastMessage.value = resolveSafeErrorMessage(
-                        context = ErrorContext.SAVE,
-                        rawMessage = response.message,
-                        rawReason = response.reason,
-                    )
-                }
+                _toastMessage.value = "전체 차이 %가 변경되었습니다."
+                refreshUserSettingsInternal(uid)
+                fetchAlerts(uid, showFeedback = false)
+                fetchReadGroupedAlerts(uid, showFeedback = false)
             } catch (e: Exception) {
-                if (isMissingBulkEndpointError(e)) {
-                    try {
-                        applyBulkUpsertFallback(
-                            uid = uid,
-                            productType = productType,
-                            chip = normalizedChip,
-                            screenInch = screenInch,
-                            dropRatePercentOverride = dropRatePercent,
-                        )
-                        _toastMessage.value = "전체 차이 %가 변경되었습니다."
-                        refreshUserSettingsInternal(uid)
-                    } catch (_: Exception) {
-                        _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
-                    }
-                } else {
-                    _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
-                }
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
             } finally {
                 _isApplyingBulkSettings.value = false
             }
@@ -918,58 +832,23 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             return
         }
         val normalizedChip = chip?.trim()?.takeIf { it.isNotEmpty() }
-        val hasNarrowScope = normalizedChip != null || screenInch != null
 
         viewModelScope.launch {
             _isApplyingBulkSettings.value = true
             try {
-                if (hasNarrowScope) {
-                    applyBulkUpsertFallback(
-                        uid = uid,
-                        productType = productType,
-                        chip = normalizedChip,
-                        screenInch = screenInch,
-                        useSystemFairPrice = true,
-                    )
-                    _toastMessage.value = "시스템 기준 시장가로 업데이트했습니다."
-                    refreshUserSettingsInternal(uid)
-                    return@launch
-                }
-
-                val response = UmtpApiClient.apiService.resetUserFairPricesToSystemMarketPrices(
-                    UserFairPricesResetToSystemRequest(
-                        user_id = uid,
-                        product_type = productType,
-                    )
+                applyBulkUpsertFallback(
+                    uid = uid,
+                    productType = productType,
+                    chip = normalizedChip,
+                    screenInch = screenInch,
+                    useSystemFairPrice = true,
                 )
-                if (response.ok) {
-                    _toastMessage.value = "시스템 기준 시장가로 업데이트했습니다."
-                    refreshUserSettingsInternal(uid)
-                } else {
-                    _toastMessage.value = resolveSafeErrorMessage(
-                        context = ErrorContext.SAVE,
-                        rawMessage = response.message,
-                        rawReason = response.reason,
-                    )
-                }
+                _toastMessage.value = "시스템 기준 시장가로 업데이트했습니다."
+                refreshUserSettingsInternal(uid)
+                fetchAlerts(uid, showFeedback = false)
+                fetchReadGroupedAlerts(uid, showFeedback = false)
             } catch (e: Exception) {
-                if (isMissingBulkEndpointError(e)) {
-                    try {
-                        applyBulkUpsertFallback(
-                            uid = uid,
-                            productType = productType,
-                            chip = normalizedChip,
-                            screenInch = screenInch,
-                            useSystemFairPrice = true,
-                        )
-                        _toastMessage.value = "시스템 기준 시장가로 업데이트했습니다."
-                        refreshUserSettingsInternal(uid)
-                    } catch (_: Exception) {
-                        _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
-                    }
-                } else {
-                    _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
-                }
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
             } finally {
                 _isApplyingBulkSettings.value = false
             }
@@ -1032,12 +911,6 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         } catch (e: Exception) {
             e.toSafeUserMessage(ErrorContext.NETWORK)
         }
-    }
-
-    private fun isMissingBulkEndpointError(error: Throwable): Boolean {
-        return (error as? HttpException)?.let { httpException ->
-            httpException.code() == 404 || httpException.code() == 405
-        } ?: false
     }
 
     private suspend fun applyBulkUpsertFallback(
