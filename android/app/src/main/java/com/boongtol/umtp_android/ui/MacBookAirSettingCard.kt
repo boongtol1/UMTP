@@ -299,7 +299,26 @@ fun MacBookAirSettingCard(
                 placeholder = { Text("예: 20 또는 -15.5", fontSize = 12.sp) },
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                singleLine = true
+                singleLine = true,
+                leadingIcon = {
+                    TextButton(
+                        onClick = {
+                            gapPercentText = if (gapPercentText.startsWith("-")) {
+                                gapPercentText.substring(1)
+                            } else {
+                                if (gapPercentText.isEmpty()) "-" else "-$gapPercentText"
+                            }
+                            val fairPrice = fairPriceText.toIntOrNull()
+                            val gapPercent = gapPercentText.toDoubleOrNull()
+                            if (fairPrice != null && gapPercent != null) {
+                                desiredPriceText = calculateDesiredPrice(fairPrice, gapPercent)?.toString() ?: ""
+                            }
+                        },
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Text(text = "+/-", fontWeight = FontWeight.Bold)
+                    }
+                }
             )
 
             Spacer(modifier = Modifier.height(8.dp))

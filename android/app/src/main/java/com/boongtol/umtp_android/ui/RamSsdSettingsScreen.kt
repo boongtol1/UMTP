@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -334,6 +335,20 @@ fun RamSsdSettingsScreen(
                                 enabled = !isApplyingBulkSettings,
                                 isError = bulkDropRateInputError != null,
                                 modifier = Modifier.fillMaxWidth(),
+                                leadingIcon = {
+                                    TextButton(
+                                        onClick = {
+                                            bulkDropRateInput = if (bulkDropRateInput.startsWith("-")) {
+                                                bulkDropRateInput.substring(1)
+                                            } else {
+                                                if (bulkDropRateInput.isEmpty()) "-" else "-$bulkDropRateInput"
+                                            }
+                                        },
+                                        contentPadding = PaddingValues(0.dp)
+                                    ) {
+                                        Text(text = "+/-", fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             )
                             if (!bulkDropRateInputError.isNullOrBlank()) {
                                 Text(
