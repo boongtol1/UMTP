@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 
@@ -9,6 +10,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.joongna_polling_service import (  # noqa: E402
+    _has_analysis_job_for_target,
     _build_keyword_targets_from_watch_rules,
     parse_sort_date,
     poll_once,
@@ -56,6 +58,27 @@ class _FakeConnection:
         return None
 
 
+class _AnalysisLookupCursor:
+    def __init__(self, *, existing_params=None, raise_sort_date_unknown=False):
+        self.executed = []
+        self._fetchone_result = None
+        self._existing_params = set(existing_params or set())
+        self._raise_sort_date_unknown = raise_sort_date_unknown
+
+    def execute(self, query, params=None):
+        normalized = " ".join((query or "").split()).lower()
+        self.executed.append((normalized, params))
+        if self._raise_sort_date_unknown and "and sort_date = %s" in normalized:
+            raise RuntimeError("Unknown column 'sort_date' in 'where clause'")
+        if params in self._existing_params:
+            self._fetchone_result = {"id": 1}
+        else:
+            self._fetchone_result = None
+
+    def fetchone(self):
+        return self._fetchone_result
+
+
 class PollingWatchRuleKeywordTest(unittest.TestCase):
     def test_parse_sort_date_from_sort_date_key(self):
         self.assertEqual(
@@ -67,6 +90,55 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(
             parse_sort_date({"sortDate": "2026-05-15 12:28:52"}),
             "2026-05-15 12:28:52",
+        )
+
+    def test_analysis_job_lookup_uses_sort_date_for_backfill_identity(self):
+        target = {"user_id": "boongtol", "setting_id": 25}
+        cursor = _AnalysisLookupCursor(
+            existing_params={
+                ("boongtol", "228861602", 25, datetime(2026, 5, 22, 16, 44, 19)),
+            }
+        )
+
+        self.assertTrue(
+            _has_analysis_job_for_target(
+                cursor,
+                target,
+                "228861602",
+                sort_date="2026-05-22 16:44:19",
+            )
+        )
+        self.assertFalse(
+            _has_analysis_job_for_target(
+                cursor,
+                target,
+                "228861602",
+                sort_date="2026-05-22 12:42:47",
+            )
+        )
+        self.assertTrue(any("and sort_date = %s" in query for query, _ in cursor.executed))
+
+    def test_analysis_job_lookup_falls_back_when_sort_date_column_missing(self):
+        target = {"user_id": "boongtol", "setting_id": 25}
+        cursor = _AnalysisLookupCursor(
+            existing_params={("boongtol", "228861602", 25)},
+            raise_sort_date_unknown=True,
+        )
+
+        self.assertTrue(
+            _has_analysis_job_for_target(
+                cursor,
+                target,
+                "228861602",
+                sort_date="2026-05-22 16:44:19",
+            )
+        )
+        self.assertTrue(any("and sort_date = %s" in query for query, _ in cursor.executed))
+        self.assertTrue(
+            any(
+                "and watch_rule_id = %s" in query and "and sort_date = %s" not in query
+                for query, _ in cursor.executed
+            )
         )
 
     def test_build_keyword_targets_dedupes_keyword_and_keeps_multiple_users(self):

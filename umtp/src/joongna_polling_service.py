@@ -237,35 +237,51 @@ def _target_setting_id(target):
     return _normalize_setting_id(target.get("setting_id") or target.get("rule_id"))
 
 
-def _has_analysis_job_for_target(cursor, target, product_id):
+def _has_analysis_job_for_target(cursor, target, product_id, sort_date=None):
     if cursor is None or not isinstance(target, dict):
         return False
 
     user_id = _normalize_optional_user_id(target.get("user_id"))
     setting_id = _target_setting_id(target)
     normalized_product_id = _safe_text(product_id)
+    normalized_sort_date = _coerce_datetime(sort_date)
     if user_id is None or setting_id is None or normalized_product_id is None:
         return False
 
     try:
-        cursor.execute(
-            """
-            SELECT id
-            FROM analysis_jobs
-            WHERE user_id = %s
-              AND product_id = %s
-              AND watch_rule_id = %s
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (user_id, normalized_product_id, setting_id),
-        )
+        if normalized_sort_date is not None:
+            cursor.execute(
+                """
+                SELECT id
+                FROM analysis_jobs
+                WHERE user_id = %s
+                  AND product_id = %s
+                  AND watch_rule_id = %s
+                  AND sort_date = %s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (user_id, normalized_product_id, setting_id, normalized_sort_date),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT id
+                FROM analysis_jobs
+                WHERE user_id = %s
+                  AND product_id = %s
+                  AND watch_rule_id = %s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (user_id, normalized_product_id, setting_id),
+            )
         row = cursor.fetchone()
         if row is not None:
             return True
     except Exception as exc:
         lowered = str(exc).lower()
-        if "unknown column" not in lowered:
+        if "unknown column" not in lowered or "sort_date" not in lowered:
             return False
         try:
             cursor.execute(
@@ -274,15 +290,34 @@ def _has_analysis_job_for_target(cursor, target, product_id):
                 FROM analysis_jobs
                 WHERE user_id = %s
                   AND product_id = %s
+                  AND watch_rule_id = %s
                 ORDER BY id DESC
                 LIMIT 1
                 """,
-                (user_id, normalized_product_id),
+                (user_id, normalized_product_id, setting_id),
             )
             row = cursor.fetchone()
             return row is not None
-        except Exception:
-            return False
+        except Exception as nested_exc:
+            lowered_nested = str(nested_exc).lower()
+            if "unknown column" not in lowered_nested:
+                return False
+            try:
+                cursor.execute(
+                    """
+                    SELECT id
+                    FROM analysis_jobs
+                    WHERE user_id = %s
+                      AND product_id = %s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (user_id, normalized_product_id),
+                )
+                row = cursor.fetchone()
+                return row is not None
+            except Exception:
+                return False
 
     return False
 
@@ -294,10 +329,16 @@ def _filter_unchanged_targets_needing_backfill(cursor, observed_product, eligibl
     )
     if product_id is None:
         return []
+    normalized_sort_date = _coerce_datetime((observed_product or {}).get("sort_date"))
 
     backfill_targets = []
     for target in eligible_targets or []:
-        if _has_analysis_job_for_target(cursor, target, product_id):
+        if _has_analysis_job_for_target(
+            cursor,
+            target,
+            product_id,
+            sort_date=normalized_sort_date,
+        ):
             continue
         backfill_targets.append(target)
     return backfill_targets
