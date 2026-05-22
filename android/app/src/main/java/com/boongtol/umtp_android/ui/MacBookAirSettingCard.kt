@@ -416,7 +416,8 @@ fun MacBookAirSettingCard(
             }
             Text(
                 text = "조건을 변경하면 최근 7일 안에 분석된 매물도 새 기준으로 다시 확인해요.\n" +
-                    "이전 기준에는 안 맞았지만 새 기준에는 맞는 매물은 조건 변경 후보로 알려드려요.",
+                    "이전 기준에는 안 맞았지만 새 기준에는 맞는 매물은 조건 변경 후보로 알려드려요.\n" +
+                    "최근 7일 기준은 분석 시각(analyzed_at, 구현상 lar.created_at/fallback aj.created_at)과 저장 시점(서버 현재시각) 차이로 계산해요.",
                 style = MaterialTheme.typography.labelSmall,
                 color = Color.Gray,
             )
