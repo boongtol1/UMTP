@@ -286,7 +286,7 @@ fun RamSsdSettingsScreen(
                             }
                             Text(
                                 text = "조건을 바꾸면 최근 7일 안에 분석된 매물도 새 기준으로 다시 확인해요.\n" +
-                                    "조건 변경 후보는 새 매물뿐 아니라 최근 분석된 매물도 포함될 수 있어요.\n" +
+                                    "조건 변경 시 최근 분석된 매물 중 새 기준에 맞는 후보가 표시될 수 있어요.\n" +
                                     "최근 7일은 매물 등록일이 아니라, 시스템이 매물을 확인한 시점부터 저장 시점까지를 기준으로 계산해요.",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color.Gray,
