@@ -286,7 +286,7 @@ fun RamSsdSettingsScreen(
                             Text(
                                 text = "조건을 바꾸면 최근 7일 안에 분석된 매물도 새 기준으로 다시 확인해요.\n" +
                                     "조건 변경 후보는 새 매물뿐 아니라 최근 분석된 매물도 포함될 수 있어요.\n" +
-                                    "최근 7일 기준은 분석 시각(analyzed_at, 구현상 lar.created_at/fallback aj.created_at)과 저장 시점(서버 현재시각) 차이로 계산해요.",
+                                    "최근 7일은 매물 등록일이 아니라, 시스템이 매물을 확인한 시점부터 저장 시점까지를 기준으로 계산해요.",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color.Gray,
                             )
