@@ -433,6 +433,8 @@ def _extract_unique_chip_candidates(text):
 
 
 def _extract_chip_candidates_for_product(text, product_type):
+    if product_type == MAC_MINI_PRODUCT_TYPE:
+        return _extract_unique_mac_mini_chip_candidates(text)
     return _extract_unique_chip_candidates(text)
 
 
