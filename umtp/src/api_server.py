@@ -474,7 +474,7 @@ def alert_events(user_id: str, limit: int = 200, is_read: Optional[str] = "0"):
     )
 
 
-@app.patch("/alert-events/{alert_event_id}/read")
+@app.api_route("/alert-events/{alert_event_id}/read", methods=["PATCH", "POST"])
 def mark_alert_event_as_read(alert_event_id: int, user_id: str):
     normalized_user_id = _normalize_user_id(user_id)
     if not normalized_user_id:
@@ -498,7 +498,7 @@ def mark_alert_event_as_read(alert_event_id: int, user_id: str):
         return {"ok": False, "reason": f"읽음 처리 실패: {exc}", "user_id": normalized_user_id}
 
 
-@app.patch("/alert-events/read-all")
+@app.api_route("/alert-events/read-all", methods=["PATCH", "POST"])
 def mark_all_alert_events_as_read(user_id: str):
     normalized_user_id = _normalize_user_id(user_id)
     if not normalized_user_id:

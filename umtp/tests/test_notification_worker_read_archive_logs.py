@@ -39,6 +39,13 @@ class _ReadArchiveCursor:
 
         for token, exc in self._raise_on_tokens.items():
             if token in normalized:
+                if isinstance(exc, list):
+                    if not exc:
+                        continue
+                    next_exc = exc.pop(0)
+                    if next_exc is None:
+                        continue
+                    raise next_exc
                 raise exc
 
         self.rowcount = 0
@@ -111,6 +118,24 @@ class NotificationWorkerReadArchiveLogsTest(unittest.TestCase):
         self.assertEqual(params[3], 1)
         self.assertEqual(params[4], 1)
         self.assertEqual(params[7], "marked_read")
+
+    def test_mark_single_read_recovers_when_read_columns_missing(self):
+        cursor = _ReadArchiveCursor(
+            fetchone_rows=[{"id": 101, "is_read": 1, "read_at": "2026-05-20 18:00:00"}],
+            rowcount_map={"update alert_events set is_read = 1": 1},
+            raise_on_tokens={
+                "update alert_events set is_read = 1": [RuntimeError("Unknown column 'read_at' in 'field list'")],
+            },
+        )
+        connection = _ReadArchiveConnection(cursor)
+
+        with patch("src.notification_worker.get_connection", return_value=connection):
+            result = mark_alert_event_read_for_user(user_id="boongtol", alert_event_id=101)
+
+        self.assertTrue(result.get("ok"))
+        executed_queries = [query for query, _ in cursor.executed]
+        self.assertTrue(any("alter table alert_events add column is_read" in query for query in executed_queries))
+        self.assertTrue(any("alter table alert_events add column read_at" in query for query in executed_queries))
 
     def test_clear_selected_read_archive_inserts_action_log_row(self):
         cursor = _ReadArchiveCursor(
@@ -216,6 +241,28 @@ class NotificationWorkerReadArchiveLogsTest(unittest.TestCase):
         self.assertIn("mark_read_all_failed", result.get("reason") or "")
         self.assertEqual(connection.commit_count, 0)
         self.assertEqual(connection.rollback_count, 1)
+
+    def test_mark_all_read_recovers_when_read_columns_missing(self):
+        cursor = _ReadArchiveCursor(
+            fetchall_rows=[
+                [{"id": 11}, {"id": 12}],
+                [],
+            ],
+            rowcount_map={"update alert_events set is_read = 1": 2},
+            raise_on_tokens={
+                "update alert_events set is_read = 1": [RuntimeError("Unknown column 'is_read' in 'field list'")],
+            },
+        )
+        connection = _ReadArchiveConnection(cursor)
+
+        with patch("src.notification_worker.get_connection", return_value=connection):
+            result = mark_all_alert_events_read_for_user(user_id="boongtol")
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("updated_count"), 2)
+        executed_queries = [query for query, _ in cursor.executed]
+        self.assertTrue(any("alter table alert_events add column is_read" in query for query in executed_queries))
+        self.assertTrue(any("alter table alert_events add column read_at" in query for query in executed_queries))
 
     def test_mark_single_read_logs_alert_detail_fields(self):
         cursor = _ReadArchiveCursor(

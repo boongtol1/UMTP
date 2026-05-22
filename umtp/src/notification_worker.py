@@ -1082,6 +1082,38 @@ def _rollback_quietly(connection):
         return
 
 
+def _is_missing_alert_read_columns_error(exc):
+    lowered = str(exc).lower()
+    if "unknown column" not in lowered and "doesn't exist" not in lowered:
+        return False
+    return "is_read" in lowered or "read_at" in lowered
+
+
+def _is_duplicate_schema_error(exc):
+    lowered = str(exc).lower()
+    return "duplicate column name" in lowered or "already exists" in lowered
+
+
+def _ensure_alert_read_status_columns(cursor):
+    if cursor is None or not hasattr(cursor, "execute"):
+        return False
+
+    alter_statements = (
+        "ALTER TABLE alert_events ADD COLUMN is_read TINYINT(1) NOT NULL DEFAULT 0",
+        "ALTER TABLE alert_events ADD COLUMN read_at DATETIME NULL",
+    )
+
+    for statement in alter_statements:
+        try:
+            cursor.execute(statement)
+        except Exception as exc:
+            if _is_duplicate_schema_error(exc):
+                continue
+            raise
+
+    return True
+
+
 def _safe_decimal_2(value):
     normalized = _normalize_optional_float(value)
     if normalized is None:
@@ -2460,14 +2492,28 @@ def mark_alert_event_read_for_user(*, user_id, alert_event_id):
             )
             updated_rows = cursor.rowcount or 0
         except Exception as exc:
-            lowered = str(exc).lower()
-            if "unknown column" in lowered:
-                return {
-                    "ok": False,
-                    "reason": "alert_read_columns_missing",
-                    "alert_event_id": normalized_alert_id,
-                }
-            raise
+            if _is_missing_alert_read_columns_error(exc):
+                try:
+                    _ensure_alert_read_status_columns(cursor)
+                    cursor.execute(
+                        """
+                        UPDATE alert_events
+                        SET is_read = 1,
+                            read_at = COALESCE(read_at, NOW())
+                        WHERE id = %s
+                          AND user_id = %s
+                        """,
+                        (normalized_alert_id, normalized_user_id),
+                    )
+                    updated_rows = cursor.rowcount or 0
+                except Exception:
+                    return {
+                        "ok": False,
+                        "reason": "alert_read_columns_missing",
+                        "alert_event_id": normalized_alert_id,
+                    }
+            else:
+                raise
 
         if updated_rows == 0:
             cursor.execute(
@@ -2608,9 +2654,27 @@ def mark_all_alert_events_read_for_user(*, user_id):
                     continue
                 unread_alert_ids.append(alert_id)
         except Exception as preload_exc:
-            lowered = str(preload_exc).lower()
-            if "unknown column" in lowered:
-                unread_alert_ids = []
+            if _is_missing_alert_read_columns_error(preload_exc):
+                try:
+                    _ensure_alert_read_status_columns(cursor)
+                    cursor.execute(
+                        """
+                        SELECT id
+                        FROM alert_events
+                        WHERE user_id = %s
+                          AND COALESCE(is_read, 0) = 0
+                        """,
+                        (normalized_user_id,),
+                    )
+                    unread_rows = cursor.fetchall() or []
+                    unread_alert_ids = []
+                    for row in unread_rows:
+                        alert_id = _safe_int(row.get("id")) if isinstance(row, dict) else None
+                        if alert_id is None or alert_id <= 0:
+                            continue
+                        unread_alert_ids.append(alert_id)
+                except Exception:
+                    unread_alert_ids = []
             else:
                 raise
         try:
@@ -2626,14 +2690,28 @@ def mark_all_alert_events_read_for_user(*, user_id):
             )
             updated_rows = cursor.rowcount or 0
         except Exception as exc:
-            lowered = str(exc).lower()
-            if "unknown column" in lowered:
-                return {
-                    "ok": False,
-                    "reason": "alert_read_columns_missing",
-                    "updated_count": 0,
-                }
-            raise
+            if _is_missing_alert_read_columns_error(exc):
+                try:
+                    _ensure_alert_read_status_columns(cursor)
+                    cursor.execute(
+                        """
+                        UPDATE alert_events
+                        SET is_read = 1,
+                            read_at = COALESCE(read_at, NOW())
+                        WHERE user_id = %s
+                          AND COALESCE(is_read, 0) = 0
+                        """,
+                        (normalized_user_id,),
+                    )
+                    updated_rows = cursor.rowcount or 0
+                except Exception:
+                    return {
+                        "ok": False,
+                        "reason": "alert_read_columns_missing",
+                        "updated_count": 0,
+                    }
+            else:
+                raise
 
         unread_alert_details = _fetch_alert_event_details_for_archive_log(
             cursor,

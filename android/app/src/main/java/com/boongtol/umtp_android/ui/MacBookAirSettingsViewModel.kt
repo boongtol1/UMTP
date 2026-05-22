@@ -311,7 +311,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
         viewModelScope.launch {
             try {
-                val response = UmtpApiClient.apiService.markAlertEventRead(alertEventId, uid)
+                val response = markAlertEventReadWithFallback(alertEventId, uid)
                 if (response.ok) {
                     onComplete?.invoke(true)
                 } else {
@@ -340,7 +340,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         viewModelScope.launch {
             _isMarkingAllAlertsRead.value = true
             try {
-                val response = UmtpApiClient.apiService.markAllAlertEventsRead(uid)
+                val response = markAllAlertsReadWithFallback(uid)
                 if (response.ok) {
                     _toastMessage.value = response.message ?: "모두 읽음 처리 완료"
                     fetchAlerts(uid, showFeedback = false)
@@ -358,6 +358,36 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 _isMarkingAllAlertsRead.value = false
             }
         }
+    }
+
+    private suspend fun markAlertEventReadWithFallback(
+        alertEventId: Long,
+        userId: String,
+    ): MarkAlertReadResponse {
+        return try {
+            UmtpApiClient.apiService.markAlertEventRead(alertEventId, userId)
+        } catch (error: Exception) {
+            if (!shouldFallbackToPostForReadActions(error)) {
+                throw error
+            }
+            UmtpApiClient.apiService.markAlertEventReadPost(alertEventId, userId)
+        }
+    }
+
+    private suspend fun markAllAlertsReadWithFallback(userId: String): MarkAllAlertsReadResponse {
+        return try {
+            UmtpApiClient.apiService.markAllAlertEventsRead(userId)
+        } catch (error: Exception) {
+            if (!shouldFallbackToPostForReadActions(error)) {
+                throw error
+            }
+            UmtpApiClient.apiService.markAllAlertEventsReadPost(userId)
+        }
+    }
+
+    private fun shouldFallbackToPostForReadActions(error: Throwable): Boolean {
+        val statusCode = (error as? HttpException)?.code() ?: return false
+        return statusCode == 404 || statusCode == 405 || statusCode == 501
     }
 
     fun clearAllReadArchive(uid: String) {

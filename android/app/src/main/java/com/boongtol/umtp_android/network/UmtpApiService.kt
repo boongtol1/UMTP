@@ -75,8 +75,19 @@ interface UmtpApiService {
         @Query("user_id") userId: String,
     ): MarkAlertReadResponse
 
+    @POST("alert-events/{alert_event_id}/read")
+    suspend fun markAlertEventReadPost(
+        @Path("alert_event_id") alertEventId: Long,
+        @Query("user_id") userId: String,
+    ): MarkAlertReadResponse
+
     @PATCH("alert-events/read-all")
     suspend fun markAllAlertEventsRead(
+        @Query("user_id") userId: String,
+    ): MarkAllAlertsReadResponse
+
+    @POST("alert-events/read-all")
+    suspend fun markAllAlertEventsReadPost(
         @Query("user_id") userId: String,
     ): MarkAllAlertsReadResponse
 
