@@ -17,11 +17,13 @@ class _NoticeInsertCursor:
         *,
         fail_primary=False,
         fail_fallback=False,
+        existing_alert_id=None,
         alert_detail_row=None,
         url_log_row=None,
     ):
         self.fail_primary = fail_primary
         self.fail_fallback = fail_fallback
+        self.existing_alert_id = existing_alert_id
         self.alert_detail_row = alert_detail_row
         self.url_log_row = url_log_row
         self.executed = []
@@ -48,7 +50,20 @@ class _NoticeInsertCursor:
                 raise RuntimeError("unknown column fallback_col")
 
     def fetchone(self):
-        if "from alert_events" in self._last_query and self.alert_detail_row is not None:
+        if (
+            "from alert_events" in self._last_query
+            and "watch_rule_id = %s" in self._last_query
+            and "product_id = %s" in self._last_query
+            and "select id" in self._last_query
+        ):
+            if self.existing_alert_id is not None:
+                return (self.existing_alert_id,)
+            return None
+        if (
+            "from alert_events" in self._last_query
+            and "coalesce(trigger_reason, '') <> %s" in self._last_query
+            and self.alert_detail_row is not None
+        ):
             row = self.alert_detail_row
             self.alert_detail_row = None
             return row
@@ -157,6 +172,17 @@ class UserSettingsNoticeDeliveryStatusTest(unittest.TestCase):
         self.assertIn("exchange", insert_params)
         self.assertIn("교환 제안 포함", insert_params)
         self.assertTrue(any("[참고 알림]" in str(value) for value in insert_params))
+
+    def test_skips_when_same_user_rule_product_already_has_alert_event(self):
+        cursor = _NoticeInsertCursor(existing_alert_id=321)
+
+        result = self._call_insert_notice(cursor)
+
+        self.assertFalse(result.get("created"))
+        self.assertEqual(result.get("reason"), "existing_alert_event_for_user_rule_product")
+        self.assertEqual(result.get("alert_id"), 321)
+        insert_queries = [query for query, _params in cursor.executed if "insert into alert_events" in query]
+        self.assertEqual(insert_queries, [])
 
 
 if __name__ == "__main__":

@@ -485,6 +485,65 @@ def _coerce_bool_or_none(value):
     return None
 
 
+def _find_existing_alert_event_for_user_rule_product(
+    cursor,
+    *,
+    user_id,
+    watch_rule_id,
+    product_id,
+):
+    normalized_user_id = _safe_text(user_id)
+    normalized_rule_id = _safe_int_or_none(watch_rule_id)
+    normalized_product_id = _safe_text(product_id)
+    if normalized_user_id is None or normalized_rule_id is None or normalized_product_id is None:
+        return None
+
+    try:
+        cursor.execute(
+            """
+            SELECT id
+            FROM alert_events
+            WHERE user_id = %s
+              AND watch_rule_id = %s
+              AND product_id = %s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                normalized_user_id,
+                normalized_rule_id,
+                normalized_product_id,
+            ),
+        )
+        row = cursor.fetchone()
+    except Exception as exc:
+        if not _is_unknown_column_error(exc, "watch_rule_id"):
+            raise
+        cursor.execute(
+            """
+            SELECT id
+            FROM alert_events
+            WHERE user_id = %s
+              AND product_id = %s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                normalized_user_id,
+                normalized_product_id,
+            ),
+        )
+        row = cursor.fetchone()
+
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return _safe_int_or_none(row.get("id"))
+    if isinstance(row, (tuple, list)) and row:
+        return _safe_int_or_none(row[0])
+    return _safe_int_or_none(row)
+
+
 def _build_body_excerpt_from_text(value, *, max_len=280):
     normalized = _safe_text(value)
     if normalized is None:
@@ -794,6 +853,20 @@ def _insert_condition_change_candidate_notice_alert_event(
     product_id = _safe_text(listing_product_id)
     if product_id is None:
         product_id = f"cccn-{normalized_rule_id}-{int(normalized_notice_sort_date.timestamp())}"
+
+    existing_alert_event_id = _find_existing_alert_event_for_user_rule_product(
+        cursor,
+        user_id=normalized_user_id,
+        watch_rule_id=normalized_rule_id,
+        product_id=product_id,
+    )
+    if existing_alert_event_id is not None:
+        return {
+            "created": False,
+            "reason": "existing_alert_event_for_user_rule_product",
+            "product_id": product_id,
+            "alert_id": existing_alert_event_id,
+        }
 
     normalized_listing_source = _safe_text(listing_source)
     normalized_listing_url = _safe_text(listing_url)
@@ -2966,15 +3039,43 @@ def upsert_user_fair_price_setting(
             and rule_id is not None
         ):
             candidate_notice_targets = []
+            candidate_notice_target_product_ids = set()
             for candidate in missed_candidates:
                 if isinstance(candidate, dict):
+                    candidate_product_id = _safe_text(candidate.get("product_id"))
+                    if candidate_product_id is not None:
+                        if candidate_product_id in candidate_notice_target_product_ids:
+                            continue
+                        existing_alert_event_id = _find_existing_alert_event_for_user_rule_product(
+                            cursor,
+                            user_id=normalized_user_id,
+                            watch_rule_id=rule_id,
+                            product_id=candidate_product_id,
+                        )
+                        if existing_alert_event_id is not None:
+                            continue
+                        candidate_notice_target_product_ids.add(candidate_product_id)
                     candidate_notice_targets.append(candidate)
 
             if not candidate_notice_targets and isinstance(representative_missed_candidate, dict):
-                candidate_notice_targets.append(representative_missed_candidate)
-
-            if not candidate_notice_targets:
-                candidate_notice_targets.append({})
+                candidate_product_id = _safe_text(representative_missed_candidate.get("product_id"))
+                should_append_representative = True
+                if candidate_product_id is not None:
+                    if candidate_product_id in candidate_notice_target_product_ids:
+                        should_append_representative = False
+                    else:
+                        existing_alert_event_id = _find_existing_alert_event_for_user_rule_product(
+                            cursor,
+                            user_id=normalized_user_id,
+                            watch_rule_id=rule_id,
+                            product_id=candidate_product_id,
+                        )
+                        if existing_alert_event_id is not None:
+                            should_append_representative = False
+                        else:
+                            candidate_notice_target_product_ids.add(candidate_product_id)
+                if should_append_representative:
+                    candidate_notice_targets.append(representative_missed_candidate)
 
             created_notice_count = 0
             failed_notice_count = 0
@@ -3012,10 +3113,13 @@ def upsert_user_fair_price_setting(
                         created_notice_count += 1
                         continue
 
-                    failed_notice_count += 1
                     notice_reason = _safe_text(
                         notice_insert_result.get("reason") if isinstance(notice_insert_result, dict) else None
                     )
+                    if notice_reason == "existing_alert_event_for_user_rule_product":
+                        continue
+
+                    failed_notice_count += 1
                     if first_notice_error is None:
                         first_notice_error = notice_reason or "notice_not_created"
                     logger.warning(
@@ -3026,9 +3130,7 @@ def upsert_user_fair_price_setting(
                         notice_insert_result,
                     )
 
-                condition_change_notice_created = (
-                    created_notice_count > 0 and failed_notice_count == 0
-                )
+                condition_change_notice_created = failed_notice_count == 0
 
                 if failed_notice_count > 0:
                     condition_change_notice_error = first_notice_error or "notice_not_created"
@@ -3041,7 +3143,7 @@ def upsert_user_fair_price_setting(
                         len(candidate_notice_targets),
                     )
 
-                if created_notice_count == 0 and condition_change_notice_error is None:
+                if failed_notice_count > 0 and condition_change_notice_error is None:
                     condition_change_notice_error = "notice_not_created"
             except Exception as notice_exc:
                 condition_change_notice_created = False
