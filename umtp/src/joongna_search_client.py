@@ -1,12 +1,19 @@
+import logging
 import re
 
 import requests
+
+try:
+    from src.outbound_rate_limiter import joongna_search_limiter
+except ModuleNotFoundError:
+    from outbound_rate_limiter import joongna_search_limiter
 
 
 SEARCH_API_URL = "https://search-api.joongna.com/v3/search/all"
 STORE_PROFILE_API_URL = "https://main-api.joongna.com/user/info/product-detail"
 REQUEST_TIMEOUT_SECONDS = 10
 STORE_PROFILE_REQUEST_TIMEOUT_SECONDS = 10
+logger = logging.getLogger("umtp.outbound_rate_limit")
 DEFAULT_HEADERS = {
     "accept": "application/json, text/plain, */*",
     "content-type": "application/json",
@@ -299,6 +306,12 @@ def search_joongna_products(search_word, page=0, quantity=50):
     payload = _build_search_payload(search_word=search_word.strip(), page=page, quantity=quantity)
 
     try:
+        sleep_seconds = joongna_search_limiter.wait()
+        if sleep_seconds > 0:
+            logger.debug(
+                "[outbound_rate_limit] type=search sleep_seconds=%.2f",
+                sleep_seconds,
+            )
         response = requests.post(
             SEARCH_API_URL,
             headers=DEFAULT_HEADERS,

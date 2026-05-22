@@ -1,10 +1,17 @@
+import logging
 import re
 
 import requests
 from bs4 import BeautifulSoup
 
+try:
+    from src.outbound_rate_limiter import joongna_detail_limiter
+except ModuleNotFoundError:
+    from outbound_rate_limiter import joongna_detail_limiter
+
 
 REQUEST_TIMEOUT_SECONDS = 10
+logger = logging.getLogger("umtp.outbound_rate_limit")
 DEFAULT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -18,6 +25,12 @@ SELF_CHECK_IGNORED_TOKENS = ("스펙보기",)
 
 def fetch_html(url):
     try:
+        sleep_seconds = joongna_detail_limiter.wait()
+        if sleep_seconds > 0:
+            logger.debug(
+                "[outbound_rate_limit] type=detail sleep_seconds=%.2f",
+                sleep_seconds,
+            )
         response = requests.get(
             url,
             headers=DEFAULT_HEADERS,

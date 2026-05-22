@@ -234,6 +234,17 @@ DB 저장 완료
 
 ---
 
+## Outbound rate limiting
+
+중고나라 outbound 호출 폭주를 막기 위해 UMTP 서버 전역 rate limiter를 적용합니다.
+
+- Search API 호출 제한: `1 req/sec` (`min interval = 1.0s`)
+- 상세 페이지(fetch_html) 호출 제한: `2 req/sec` (`min interval = 0.5s`)
+
+Limiter는 `src/outbound_rate_limiter.py`의 전역 객체(`joongna_search_limiter`, `joongna_detail_limiter`)를 사용하며, 각 outbound HTTP 요청 직전에 적용됩니다.
+
+---
+
 ## 버전별 상세 이력
 
 ### UMTP 2차 MVP
