@@ -1622,6 +1622,7 @@ def _send_fcm_to_user(user_id, alert):
                 token=token,
                 notification=messaging.Notification(title=title, body=body),  # type: ignore[union-attr]
                 data=data_payload,
+                android=messaging.AndroidConfig(priority="high"),  # type: ignore[union-attr]
             )
             messaging.send(message)  # type: ignore[union-attr]
             if token_id is not None:

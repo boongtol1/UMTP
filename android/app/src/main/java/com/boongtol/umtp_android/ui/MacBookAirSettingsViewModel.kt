@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.boongtol.umtp_android.network.*
 import com.boongtol.umtp_android.user.UserPreferences
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,6 +18,9 @@ import java.util.Date
 import java.util.Locale
 
 class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) : ViewModel() {
+    companion object {
+        private const val ALERT_POLL_INTERVAL_MS = 10_000L
+    }
 
     class Factory(private val userPreferences: UserPreferences) : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -99,6 +103,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
 
     private var isAlertRefreshInFlight: Boolean = false
     private var isSettingsRefreshInFlight: Boolean = false
+    private var alertPollingJob: Job? = null
 
     init {
         _userId.value?.let {
@@ -426,12 +431,19 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     }
 
     private fun startAlertPolling(uid: String) {
-        viewModelScope.launch {
+        alertPollingJob?.cancel()
+        alertPollingJob = viewModelScope.launch {
             while (true) {
-                delay(30000) // 30 seconds
                 fetchAlerts(uid, showFeedback = false)
+                delay(ALERT_POLL_INTERVAL_MS)
             }
         }
+    }
+
+    override fun onCleared() {
+        alertPollingJob?.cancel()
+        alertPollingJob = null
+        super.onCleared()
     }
 
     fun registerUser(userId: String, deviceId: String?) {

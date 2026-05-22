@@ -24,6 +24,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.boongtol.umtp_android.fcm.PushTokenManager
 import com.boongtol.umtp_android.ui.*
@@ -136,6 +139,7 @@ fun MainTabScreen(
     onAlertNavigated: () -> Unit = {}
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
     
     BackHandler(enabled = selectedTab != 0) {
         selectedTab = 0
@@ -169,6 +173,18 @@ fun MainTabScreen(
             targetAlertId = initialAlertId
             selectedTab = 0
             onAlertNavigated()
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, userId) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.fetchAlerts(userId, showFeedback = false)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 
