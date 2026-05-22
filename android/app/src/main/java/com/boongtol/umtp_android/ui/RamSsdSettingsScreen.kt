@@ -243,7 +243,8 @@ fun RamSsdSettingsScreen(
                                 )
                             }
                             Text(
-                                text = "조건 변경 사이에 새 기준에 맞는 매물 참고 알림을 범위 전체에 반영합니다.",
+                                text = "조건을 바꾸면 최근 7일 안에 분석된 매물도 새 기준으로 다시 확인해요.\n" +
+                                    "조건 변경 후보는 새 매물뿐 아니라 최근 분석된 매물도 포함될 수 있어요.",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color.Gray,
                             )

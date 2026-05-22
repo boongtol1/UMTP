@@ -154,7 +154,7 @@ class UserSettingsConditionChangeNoticeResultTest(unittest.TestCase):
         )
 
         self.assertTrue(result.get("ok"))
-        self.assertEqual(result.get("message"), "조건 변경 사이에 새 기준에 맞는 매물이 1개 있었어요.")
+        self.assertEqual(result.get("message"), "조건 변경 후보: 새 기준에 맞는 매물이 1개 있었어요.")
         self.assertEqual(result.get("missed_candidate_count"), 1)
         self.assertTrue(result.get("condition_change_notice_created"))
         self.assertIsNone(result.get("condition_change_notice_error"))
@@ -260,7 +260,7 @@ class UserSettingsConditionChangeNoticeResultTest(unittest.TestCase):
 
         self.assertTrue(result.get("ok"))
         self.assertTrue(result.get("condition_change_notice_created"))
-        self.assertEqual(result.get("message"), "조건 변경 사이에 새 기준에 맞는 매물이 2개 있었어요.")
+        self.assertEqual(result.get("message"), "조건 변경 후보: 새 기준에 맞는 매물이 2개 있었어요.")
         self.assertEqual(mock_notice_insert.call_count, 2)
 
         first_call_kwargs = mock_notice_insert.call_args_list[0].kwargs

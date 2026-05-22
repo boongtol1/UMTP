@@ -197,7 +197,7 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
                     "alert_drop_rate_percent": 5.0,
                     "alert_price_direction": "BELOW_OR_EQUAL",
                     "trigger_reason": "condition_change_candidate_notice",
-                    "message": "조건 변경 사이에 새 기준에 맞는 매물이 1개 있었어요.",
+                    "message": "조건 변경 후보: 새 기준에 맞는 매물이 1개 있었어요.",
                     "status": "app_only",
                     "send_attempts": 0,
                     "error_message": None,

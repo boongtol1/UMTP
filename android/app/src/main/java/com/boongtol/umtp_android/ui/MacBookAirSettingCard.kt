@@ -415,7 +415,8 @@ fun MacBookAirSettingCard(
                 )
             }
             Text(
-                text = "새 기준에는 맞는 최근 매물도 알려줍니다.",
+                text = "조건을 변경하면 최근 7일 안에 분석된 매물도 새 기준으로 다시 확인해요.\n" +
+                    "이전 기준에는 안 맞았지만 새 기준에는 맞는 매물은 조건 변경 후보로 알려드려요.",
                 style = MaterialTheme.typography.labelSmall,
                 color = Color.Gray,
             )
