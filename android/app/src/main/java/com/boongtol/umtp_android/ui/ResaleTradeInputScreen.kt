@@ -173,6 +173,132 @@ private val RESALE_JOURNEY_ALL_COLUMNS = listOf(
     "updated_at",
 )
 
+private val COMMON_STORED_COLUMNS = listOf(
+    "id",
+    "user_id",
+    "source",
+    "product_id",
+    "url",
+    "url_digest",
+    "title",
+    "listing_created_at",
+    "discovered_at",
+    "listing_price_krw",
+    "seller_nickname",
+    "seller_shop_id",
+    "seller_location",
+    "image_urls",
+    "body_text",
+    "product_type",
+    "chip",
+    "screen_inch",
+    "ram_gb",
+    "ssd_gb",
+    "color",
+    "keyboard_layout",
+    "fair_price_krw",
+    "discount_rate_percent",
+    "current_stage",
+    "created_at",
+    "updated_at",
+)
+
+private val PURCHASE_STORED_COLUMNS = (COMMON_STORED_COLUMNS + listOf(
+    "expected_profit_krw",
+    "risk_score",
+    "reason_tags",
+    "contacted_at",
+    "seller_response_at",
+    "response_time_minutes",
+    "seller_answer_text",
+    "negotiable",
+    "seller_tone",
+    "suspicious_points",
+    "confirmed_price_krw",
+    "decision_at",
+    "decision_result",
+    "decision_reason",
+    "target_purchase_price_krw",
+    "expected_sale_price_krw",
+    "expected_net_profit_krw",
+    "expected_sale_duration_days",
+    "purchased_at",
+    "purchase_price_krw",
+    "purchase_method",
+    "purchase_location",
+    "transport_cost_krw",
+    "shipping_cost_krw",
+    "total_cost_krw",
+    "payment_method",
+    "serial_number",
+    "model_number",
+    "applecare_status",
+    "activation_lock_off",
+    "mdm_lock_none",
+    "cpu_core_count",
+    "gpu_core_count",
+    "battery_health_percent",
+    "battery_cycle_count",
+    "battery_condition",
+    "truetone_ok",
+    "display_condition",
+    "keyboard_condition",
+    "trackpad_condition",
+    "speaker_condition",
+    "camera_condition",
+    "wifi_bluetooth_ok",
+    "exterior_grade",
+    "included_items",
+    "repair_suspected",
+    "inspection_notes",
+    "purchase_speed_minutes",
+)).distinct()
+
+private val RESALE_STORED_COLUMNS = (COMMON_STORED_COLUMNS + listOf(
+    "purchase_price_krw",
+    "total_cost_krw",
+    "cleaned_at",
+    "photo_taken_at",
+    "resale_title",
+    "resale_body_text",
+    "resale_photo_count",
+    "resale_listing_price_krw",
+    "minimum_accept_price_krw",
+    "resale_platform",
+    "resale_strategy_notes",
+    "resale_listing_created_at",
+    "resale_url",
+    "resale_product_id",
+    "initial_resale_price_krw",
+    "upload_time_slot",
+    "view_count",
+    "favorite_count",
+    "inquiry_count",
+    "first_inquiry_at",
+    "first_inquiry_delay_minutes",
+    "negotiation_count",
+    "price_drop_count",
+    "price_drop_history",
+    "buyer_questions",
+    "common_objections",
+    "sold_at",
+    "sale_price_krw",
+    "buyer_nickname",
+    "sale_method",
+    "sale_location",
+    "sale_platform",
+    "final_shipping_cost_krw",
+    "platform_fee_krw",
+    "refund_or_claim",
+    "gross_profit_krw",
+    "net_profit_krw",
+    "roi_percent",
+    "sale_duration_hours",
+    "total_holding_time_hours",
+    "profit_per_day_krw",
+    "final_result_notes",
+)).distinct()
+
 private fun buildAdditionalColumnUpdates(values: Map<String, String>): Map<String, Any?> {
     return RESALE_JOURNEY_ALL_COLUMNS
         .mapNotNull { key ->
@@ -196,12 +322,15 @@ private fun formatStoredElement(element: JsonElement): String? {
     return if (normalized.isEmpty() || normalized == "[]" || normalized == "{}") null else normalized
 }
 
-private fun buildStoredJourneyRows(row: ResaleTradeJourneyRow?): List<Pair<String, String>> {
+private fun buildStoredJourneyRows(
+    row: ResaleTradeJourneyRow?,
+    visibleColumns: List<String>,
+): List<Pair<String, String>> {
     if (row == null) {
         return emptyList()
     }
     val jsonObject = Gson().toJsonTree(row).asJsonObject
-    return RESALE_JOURNEY_ALL_COLUMNS.mapNotNull { key ->
+    return visibleColumns.mapNotNull { key ->
         val element = jsonObject.get(key) ?: return@mapNotNull null
         val text = formatStoredElement(element) ?: return@mapNotNull null
         key to text
@@ -342,16 +471,6 @@ fun ResaleTradeInputScreen(
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-        val storedRows = buildStoredJourneyRows(selectedJourney)
-        Text(text = "저장값 조회 (실제 저장된 값만)", style = MaterialTheme.typography.titleMedium)
-        if (storedRows.isEmpty()) {
-            Text(text = "저장된 값이 없습니다.")
-        } else {
-            storedRows.forEach { (key, value) ->
-                Text(text = "$key: $value")
-            }
-        }
-
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
                 selected = inputMode == ResaleInputMode.PURCHASE,
@@ -363,6 +482,26 @@ fun ResaleTradeInputScreen(
                 onClick = { inputMode = ResaleInputMode.RESALE },
                 label = { Text("되팔이 후 기록하기") },
             )
+        }
+
+        val visibleStoredColumns = if (inputMode == ResaleInputMode.PURCHASE) {
+            PURCHASE_STORED_COLUMNS
+        } else {
+            RESALE_STORED_COLUMNS
+        }
+        val modeStoredRows = buildStoredJourneyRows(selectedJourney, visibleStoredColumns)
+        val storedTitle = if (inputMode == ResaleInputMode.PURCHASE) {
+            "구매 후 저장값 조회 (실제 저장된 값만)"
+        } else {
+            "되팔이 후 저장값 조회 (실제 저장된 값만)"
+        }
+        Text(text = storedTitle, style = MaterialTheme.typography.titleMedium)
+        if (modeStoredRows.isEmpty()) {
+            Text(text = "저장된 값이 없습니다.")
+        } else {
+            modeStoredRows.forEach { (key, value) ->
+                Text(text = "$key: $value")
+            }
         }
 
         FilterChip(
