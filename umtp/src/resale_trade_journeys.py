@@ -204,6 +204,11 @@ SOLD_PATCH_FIELDS = {
     "final_result_notes",
 }
 
+BLOCKED_PATCH_FIELDS = {
+    "id",
+    "url_digest",
+}
+
 LEGACY_PURCHASE_UPSERT_FIELDS = PURCHASE_PATCH_FIELDS | RESALE_PATCH_FIELDS
 LEGACY_RESALE_UPSERT_FIELDS = RESALE_PATCH_FIELDS | SOLD_PATCH_FIELDS
 
@@ -401,9 +406,17 @@ def _filter_writable_updates(updates: dict[str, Any], writable_columns: set[str]
     return {key: value for key, value in updates.items() if key in writable_columns}
 
 
-def _prepare_sparse_updates(payload: dict[str, Any], allowed_fields: set[str], writable_columns: set[str]) -> dict[str, Any]:
+def _prepare_sparse_updates(
+    payload: dict[str, Any],
+    allowed_fields: Optional[set[str]],
+    writable_columns: set[str],
+) -> dict[str, Any]:
     updates: dict[str, Any] = {}
-    for field in allowed_fields:
+    target_fields = allowed_fields if allowed_fields is not None else set(payload.keys())
+
+    for field in target_fields:
+        if field in BLOCKED_PATCH_FIELDS:
+            continue
         if field not in payload:
             continue
         normalized = _normalize_for_column(field, payload.get(field))
@@ -1165,7 +1178,11 @@ def patch_resale_trade_journey_purchase(*, user_id: str, journey_id: int, update
         if not row:
             return {"ok": False, "reason": "not_found"}
 
-        sparse_updates = _prepare_sparse_updates(updates or {}, PURCHASE_PATCH_FIELDS, writable_columns)
+        sparse_updates = _prepare_sparse_updates(
+            updates or {},
+            None,
+            writable_columns,
+        )
         _apply_updates(cursor, row_id=journey_id, updates=sparse_updates)
 
         row_after_update = _load_row_detail(cursor, journey_id)
@@ -1209,7 +1226,7 @@ def patch_resale_trade_journey_purchase(*, user_id: str, journey_id: int, update
             connection.close()
 
 
-def _patch_resale_or_sold(*, user_id: str, journey_id: int, updates: dict[str, Any], allowed_fields: set[str]) -> dict[str, Any]:
+def _patch_resale_or_sold(*, user_id: str, journey_id: int, updates: dict[str, Any]) -> dict[str, Any]:
     normalized_user_id = _normalize_optional_text(user_id)
     if normalized_user_id is None:
         raise ValueError("invalid_user_id")
@@ -1225,7 +1242,11 @@ def _patch_resale_or_sold(*, user_id: str, journey_id: int, updates: dict[str, A
         if not row:
             return {"ok": False, "reason": "not_found"}
 
-        sparse_updates = _prepare_sparse_updates(updates or {}, allowed_fields, writable_columns)
+        sparse_updates = _prepare_sparse_updates(
+            updates or {},
+            None,
+            writable_columns,
+        )
         _apply_updates(cursor, row_id=journey_id, updates=sparse_updates)
 
         row_after_update = _load_row_detail(cursor, journey_id)
@@ -1272,7 +1293,6 @@ def patch_resale_trade_journey_resale(*, user_id: str, journey_id: int, updates:
         user_id=user_id,
         journey_id=journey_id,
         updates=updates,
-        allowed_fields=RESALE_PATCH_FIELDS,
     )
 
 
@@ -1281,7 +1301,6 @@ def patch_resale_trade_journey_sold(*, user_id: str, journey_id: int, updates: d
         user_id=user_id,
         journey_id=journey_id,
         updates=updates,
-        allowed_fields=SOLD_PATCH_FIELDS,
     )
 
 

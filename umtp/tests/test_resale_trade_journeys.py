@@ -79,6 +79,26 @@ class ResaleTradeJourneysTest(unittest.TestCase):
 
         self.assertEqual(updates, {"battery_cycle_count": 123})
 
+    def test_prepare_sparse_updates_accepts_all_payload_keys_when_allowed_fields_none(self):
+        updates = journeys._prepare_sparse_updates(
+            {
+                "seller_nickname": "seller-a",
+                "listing_price_krw": "720000",
+                "id": 99,
+                "url_digest": "abc",
+            },
+            None,
+            {"seller_nickname", "listing_price_krw", "id", "url_digest"},
+        )
+
+        self.assertEqual(
+            updates,
+            {
+                "seller_nickname": "seller-a",
+                "listing_price_krw": 720000,
+            },
+        )
+
     def test_alert_event_mapping_hydrates_core_fields(self):
         mapped = journeys._build_alert_mapping(
             {

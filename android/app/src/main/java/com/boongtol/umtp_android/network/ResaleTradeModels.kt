@@ -74,6 +74,8 @@ data class ResaleTradeJourneyRow(
     val current_stage: String? = null,
     val purchased_at: String? = null,
     val sold_at: String? = null,
+    val sale_price_krw: Int? = null,
+    val purchase_price_krw: Int? = null,
     val net_profit_krw: Int? = null,
     val roi_percent: Double? = null,
 )
