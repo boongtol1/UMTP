@@ -119,6 +119,23 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             },
         )
 
+    def test_prepare_sparse_updates_purchase_fields_allow_seller_location(self):
+        updates = journeys._prepare_sparse_updates(
+            {
+                "seller_location": "  서울 강남구  ",
+                "url": "https://example.com/product/1",
+            },
+            journeys.PURCHASE_PATCH_FIELDS,
+            {"seller_location", "url"},
+        )
+
+        self.assertEqual(
+            updates,
+            {
+                "seller_location": "서울 강남구",
+            },
+        )
+
     def test_prepare_sparse_updates_resale_record_allows_sold_fields(self):
         updates = journeys._prepare_sparse_updates(
             {

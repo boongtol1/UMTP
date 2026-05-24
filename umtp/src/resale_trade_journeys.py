@@ -126,6 +126,7 @@ PURCHASE_PATCH_FIELDS = {
     "seller_answer_text",
     "negotiable",
     "seller_tone",
+    "seller_location",
     "suspicious_points",
     "confirmed_price_krw",
     "decision_at",
