@@ -173,6 +173,36 @@ private val RESALE_JOURNEY_ALL_COLUMNS = listOf(
     "updated_at",
 )
 
+private val AUTO_HYDRATE_COLUMNS = setOf(
+    "source",
+    "product_id",
+    "url",
+    "title",
+    "listing_created_at",
+    "discovered_at",
+    "listing_price_krw",
+    "seller_nickname",
+    "seller_shop_id",
+    "seller_location",
+    "image_urls",
+    "body_text",
+    "product_type",
+    "chip",
+    "screen_inch",
+    "ram_gb",
+    "ssd_gb",
+    "fair_price_krw",
+    "discount_rate_percent",
+    "expected_profit_krw",
+    "risk_score",
+    "reason_tags",
+    "watch_rule_id",
+    "analysis_job_id",
+)
+
+private val ADDITIONAL_MANUAL_INPUT_COLUMNS = RESALE_JOURNEY_ALL_COLUMNS
+    .filter { it !in AUTO_HYDRATE_COLUMNS }
+
 private val COMMON_STORED_COLUMNS = listOf(
     "id",
     "user_id",
@@ -299,8 +329,11 @@ private val RESALE_STORED_COLUMNS = (COMMON_STORED_COLUMNS + listOf(
     "final_result_notes",
 )).distinct()
 
-private fun buildAdditionalColumnUpdates(values: Map<String, String>): Map<String, Any?> {
-    return RESALE_JOURNEY_ALL_COLUMNS
+private fun buildAdditionalColumnUpdates(
+    values: Map<String, String>,
+    editableColumns: List<String>,
+): Map<String, Any?> {
+    return editableColumns
         .mapNotNull { key ->
             val text = values[key]?.toOptionalText() ?: return@mapNotNull null
             key to text
@@ -357,7 +390,6 @@ fun ResaleTradeInputScreen(
     var productId by remember { mutableStateOf("") }
 
     var inputMode by remember { mutableStateOf(ResaleInputMode.PURCHASE) }
-    var showAdvancedPurchase by remember { mutableStateOf(false) }
 
     var purchasePriceKrw by remember { mutableStateOf("") }
     var purchasedAt by remember { mutableStateOf("") }
@@ -504,6 +536,18 @@ fun ResaleTradeInputScreen(
             }
         }
 
+        val normalizedSourceForAdditional = if (selectedSource == "기타") {
+            customSource.toOptionalText()
+        } else {
+            selectedSource.toOptionalText()
+        }
+        val hasSourceAndProductForHydrate = normalizedSourceForAdditional != null && productId.toOptionalText() != null
+        val additionalInputColumns = if (hasSourceAndProductForHydrate) {
+            ADDITIONAL_MANUAL_INPUT_COLUMNS
+        } else {
+            RESALE_JOURNEY_ALL_COLUMNS
+        }
+
         FilterChip(
             selected = showAdditionalInputs,
             onClick = { showAdditionalInputs = !showAdditionalInputs },
@@ -512,10 +556,14 @@ fun ResaleTradeInputScreen(
 
         if (showAdditionalInputs) {
             Text(
-                text = "전체 컬럼을 개별 입력칸으로 입력합니다. 빈칸은 전송되지 않습니다.",
+                text = if (hasSourceAndProductForHydrate) {
+                    "source/product_id 기준 자동 채움 컬럼을 제외한 나머지 컬럼만 입력합니다."
+                } else {
+                    "source/product_id 입력 전에는 전체 컬럼 입력이 가능합니다."
+                },
                 style = MaterialTheme.typography.bodySmall,
             )
-            RESALE_JOURNEY_ALL_COLUMNS.forEach { key ->
+            additionalInputColumns.forEach { key ->
                 OutlinedTextField(
                     value = additionalFieldValues[key] ?: "",
                     onValueChange = { additionalFieldValues[key] = it },
@@ -584,38 +632,30 @@ fun ResaleTradeInputScreen(
                 label = { Text("inspection_notes") },
             )
 
-            FilterChip(
-                selected = showAdvancedPurchase,
-                onClick = { showAdvancedPurchase = !showAdvancedPurchase },
-                label = { Text(if (showAdvancedPurchase) "고급 입력 접기" else "고급 입력 열기") },
-            )
-
-            if (showAdvancedPurchase) {
-                OutlinedTextField(value = truetoneOk, onValueChange = { truetoneOk = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("truetone_ok (true/false)") })
-                OutlinedTextField(value = purchaseMethod, onValueChange = { purchaseMethod = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("purchase_method") })
-                OutlinedTextField(value = purchaseLocation, onValueChange = { purchaseLocation = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("purchase_location") })
-                OutlinedTextField(value = transportCostKrw, onValueChange = { transportCostKrw = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("transport_cost_krw") })
-                OutlinedTextField(value = shippingCostKrw, onValueChange = { shippingCostKrw = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("shipping_cost_krw") })
-                OutlinedTextField(value = paymentMethod, onValueChange = { paymentMethod = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("payment_method") })
-                OutlinedTextField(value = serialNumber, onValueChange = { serialNumber = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("serial_number") })
-                OutlinedTextField(value = modelNumber, onValueChange = { modelNumber = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("model_number") })
-                OutlinedTextField(value = applecareStatus, onValueChange = { applecareStatus = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("applecare_status") })
-                OutlinedTextField(value = activationLockOff, onValueChange = { activationLockOff = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("activation_lock_off (true/false)") })
-                OutlinedTextField(value = mdmLockNone, onValueChange = { mdmLockNone = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("mdm_lock_none (true/false)") })
-                OutlinedTextField(value = batteryCondition, onValueChange = { batteryCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("battery_condition") })
-                OutlinedTextField(value = displayCondition, onValueChange = { displayCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("display_condition") })
-                OutlinedTextField(value = keyboardCondition, onValueChange = { keyboardCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("keyboard_condition") })
-                OutlinedTextField(value = trackpadCondition, onValueChange = { trackpadCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("trackpad_condition") })
-                OutlinedTextField(value = speakerCondition, onValueChange = { speakerCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("speaker_condition") })
-                OutlinedTextField(value = cameraCondition, onValueChange = { cameraCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("camera_condition") })
-                OutlinedTextField(value = wifiBluetoothOk, onValueChange = { wifiBluetoothOk = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("wifi_bluetooth_ok (true/false)") })
-                OutlinedTextField(value = repairSuspected, onValueChange = { repairSuspected = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("repair_suspected (true/false)") })
-            }
+            OutlinedTextField(value = truetoneOk, onValueChange = { truetoneOk = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("truetone_ok (true/false)") })
+            OutlinedTextField(value = purchaseMethod, onValueChange = { purchaseMethod = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("purchase_method") })
+            OutlinedTextField(value = purchaseLocation, onValueChange = { purchaseLocation = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("purchase_location") })
+            OutlinedTextField(value = transportCostKrw, onValueChange = { transportCostKrw = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("transport_cost_krw") })
+            OutlinedTextField(value = shippingCostKrw, onValueChange = { shippingCostKrw = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("shipping_cost_krw") })
+            OutlinedTextField(value = paymentMethod, onValueChange = { paymentMethod = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("payment_method") })
+            OutlinedTextField(value = serialNumber, onValueChange = { serialNumber = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("serial_number") })
+            OutlinedTextField(value = modelNumber, onValueChange = { modelNumber = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("model_number") })
+            OutlinedTextField(value = applecareStatus, onValueChange = { applecareStatus = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("applecare_status") })
+            OutlinedTextField(value = activationLockOff, onValueChange = { activationLockOff = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("activation_lock_off (true/false)") })
+            OutlinedTextField(value = mdmLockNone, onValueChange = { mdmLockNone = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("mdm_lock_none (true/false)") })
+            OutlinedTextField(value = batteryCondition, onValueChange = { batteryCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("battery_condition") })
+            OutlinedTextField(value = displayCondition, onValueChange = { displayCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("display_condition") })
+            OutlinedTextField(value = keyboardCondition, onValueChange = { keyboardCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("keyboard_condition") })
+            OutlinedTextField(value = trackpadCondition, onValueChange = { trackpadCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("trackpad_condition") })
+            OutlinedTextField(value = speakerCondition, onValueChange = { speakerCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("speaker_condition") })
+            OutlinedTextField(value = cameraCondition, onValueChange = { cameraCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("camera_condition") })
+            OutlinedTextField(value = wifiBluetoothOk, onValueChange = { wifiBluetoothOk = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("wifi_bluetooth_ok (true/false)") })
+            OutlinedTextField(value = repairSuspected, onValueChange = { repairSuspected = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("repair_suspected (true/false)") })
 
             Button(
                 onClick = {
                     val mergedUpdates = mutableMapOf<String, Any?>()
-                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues))
+                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues, additionalInputColumns))
                     mergedUpdates.putAll(
                         mapOf(
                             "purchase_price_krw" to purchasePriceKrw.toOptionalInt(),
@@ -669,7 +709,7 @@ fun ResaleTradeInputScreen(
             Button(
                 onClick = {
                     val mergedUpdates = mutableMapOf<String, Any?>()
-                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues))
+                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues, additionalInputColumns))
                     mergedUpdates.putAll(
                         mapOf(
                             "resale_listing_price_krw" to resaleListingPriceKrw.toOptionalInt(),
@@ -698,7 +738,7 @@ fun ResaleTradeInputScreen(
             Button(
                 onClick = {
                     val mergedUpdates = mutableMapOf<String, Any?>()
-                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues))
+                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues, additionalInputColumns))
                     mergedUpdates.putAll(
                         mapOf(
                             "sold_at" to soldAt.toOptionalText(),
