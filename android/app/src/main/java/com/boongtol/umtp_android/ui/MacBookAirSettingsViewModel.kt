@@ -62,6 +62,15 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _isSubmittingResaleTrade = MutableStateFlow(false)
     val isSubmittingResaleTrade: StateFlow<Boolean> = _isSubmittingResaleTrade.asStateFlow()
 
+    private val _selectedResaleJourney = MutableStateFlow<ResaleTradeJourneyRow?>(null)
+    val selectedResaleJourney: StateFlow<ResaleTradeJourneyRow?> = _selectedResaleJourney.asStateFlow()
+
+    private val _completedResaleJourneys = MutableStateFlow<List<ResaleTradeJourneyRow>>(emptyList())
+    val completedResaleJourneys: StateFlow<List<ResaleTradeJourneyRow>> = _completedResaleJourneys.asStateFlow()
+
+    private val _isLoadingCompletedResaleJourneys = MutableStateFlow(false)
+    val isLoadingCompletedResaleJourneys: StateFlow<Boolean> = _isLoadingCompletedResaleJourneys.asStateFlow()
+
     private val _isRefreshingAlerts = MutableStateFlow(false)
     val isRefreshingAlerts: StateFlow<Boolean> = _isRefreshingAlerts.asStateFlow()
 
@@ -858,6 +867,274 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
     }
 
+    private fun filterSparseUpdates(updates: Map<String, Any?>): Map<String, Any> {
+        return updates.entries
+            .filter { (_, value) ->
+                when (value) {
+                    null -> false
+                    is String -> value.trim().isNotEmpty()
+                    else -> true
+                }
+            }
+            .associate { (key, value) -> key to (value as Any) }
+    }
+
+    fun createResaleTradeJourneyFromProduct(source: String, productId: String) {
+        val uid = _userId.value ?: return
+        if (_isSubmittingResaleTrade.value) {
+            return
+        }
+
+        val normalizedSource = source.trim()
+        val normalizedProductId = productId.trim()
+        if (normalizedSource.isEmpty()) {
+            _toastMessage.value = "source를 선택해 주세요."
+            return
+        }
+        if (normalizedProductId.isEmpty()) {
+            _toastMessage.value = "product_id를 입력해 주세요."
+            return
+        }
+
+        viewModelScope.launch {
+            _isSubmittingResaleTrade.value = true
+            try {
+                val response = UmtpApiClient.apiService.createResaleTradeJourneyFromProduct(
+                    userId = uid,
+                    request = ResaleTradeJourneyFromProductRequest(
+                        source = normalizedSource,
+                        product_id = normalizedProductId,
+                    ),
+                )
+                if (response.ok) {
+                    _selectedResaleJourney.value = response.row
+                    _toastMessage.value = "거래 기록을 자동으로 불러왔습니다."
+                } else {
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.SAVE,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+            } finally {
+                _isSubmittingResaleTrade.value = false
+            }
+        }
+    }
+
+    fun clearSelectedResaleJourney() {
+        _selectedResaleJourney.value = null
+    }
+
+    fun patchSelectedResaleJourneyPurchase(updates: Map<String, Any?>) {
+        val uid = _userId.value ?: return
+        val journey = _selectedResaleJourney.value
+        val journeyId = journey?.id
+        if (journeyId == null || journeyId <= 0L) {
+            _toastMessage.value = "먼저 거래 기록을 생성해 주세요."
+            return
+        }
+        if (_isSubmittingResaleTrade.value) {
+            return
+        }
+
+        val sparseUpdates = filterSparseUpdates(updates)
+        viewModelScope.launch {
+            _isSubmittingResaleTrade.value = true
+            try {
+                val response = UmtpApiClient.apiService.patchResaleTradeJourneyPurchase(
+                    userId = uid,
+                    journeyId = journeyId,
+                    request = ResaleTradeJourneyPatchRequest(updates = sparseUpdates),
+                )
+                if (response.ok) {
+                    _selectedResaleJourney.value = response.row
+                    _toastMessage.value = "구매 후 입력이 저장되었습니다."
+                    if (response.current_stage == "SOLD") {
+                        loadCompletedResaleJourneys()
+                    }
+                } else {
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.SAVE,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+            } finally {
+                _isSubmittingResaleTrade.value = false
+            }
+        }
+    }
+
+    fun patchSelectedResaleJourneyResale(updates: Map<String, Any?>) {
+        val uid = _userId.value ?: return
+        val journey = _selectedResaleJourney.value
+        val journeyId = journey?.id
+        if (journeyId == null || journeyId <= 0L) {
+            _toastMessage.value = "먼저 거래 기록을 생성해 주세요."
+            return
+        }
+        if (_isSubmittingResaleTrade.value) {
+            return
+        }
+
+        val sparseUpdates = filterSparseUpdates(updates)
+        viewModelScope.launch {
+            _isSubmittingResaleTrade.value = true
+            try {
+                val response = UmtpApiClient.apiService.patchResaleTradeJourneyResale(
+                    userId = uid,
+                    journeyId = journeyId,
+                    request = ResaleTradeJourneyPatchRequest(updates = sparseUpdates),
+                )
+                if (response.ok) {
+                    _selectedResaleJourney.value = response.row
+                    _toastMessage.value = "되팔이 후 입력이 저장되었습니다."
+                    if (response.current_stage == "SOLD") {
+                        loadCompletedResaleJourneys()
+                    }
+                } else {
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.SAVE,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+            } finally {
+                _isSubmittingResaleTrade.value = false
+            }
+        }
+    }
+
+    fun patchSelectedResaleJourneySold(updates: Map<String, Any?>) {
+        val uid = _userId.value ?: return
+        val journey = _selectedResaleJourney.value
+        val journeyId = journey?.id
+        if (journeyId == null || journeyId <= 0L) {
+            _toastMessage.value = "먼저 거래 기록을 생성해 주세요."
+            return
+        }
+        if (_isSubmittingResaleTrade.value) {
+            return
+        }
+
+        val sparseUpdates = filterSparseUpdates(updates)
+        viewModelScope.launch {
+            _isSubmittingResaleTrade.value = true
+            try {
+                val response = UmtpApiClient.apiService.patchResaleTradeJourneySold(
+                    userId = uid,
+                    journeyId = journeyId,
+                    request = ResaleTradeJourneyPatchRequest(updates = sparseUpdates),
+                )
+                if (response.ok) {
+                    _selectedResaleJourney.value = response.row
+                    _toastMessage.value = "판매 완료 입력이 저장되었습니다."
+                    loadCompletedResaleJourneys()
+                } else {
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.SAVE,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+            } finally {
+                _isSubmittingResaleTrade.value = false
+            }
+        }
+    }
+
+    fun loadCompletedResaleJourneys(limit: Int = 200) {
+        val uid = _userId.value ?: return
+        if (_isLoadingCompletedResaleJourneys.value) {
+            return
+        }
+
+        viewModelScope.launch {
+            _isLoadingCompletedResaleJourneys.value = true
+            try {
+                val response = UmtpApiClient.apiService.getCompletedResaleTradeJourneys(
+                    userId = uid,
+                    limit = limit,
+                )
+                if (response.ok) {
+                    _completedResaleJourneys.value = response.items
+                } else {
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.NETWORK,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
+            } finally {
+                _isLoadingCompletedResaleJourneys.value = false
+            }
+        }
+    }
+
+    fun deleteSelectedCompletedResaleJourneys(journeyIds: Set<Long>) {
+        val uid = _userId.value ?: return
+        if (journeyIds.isEmpty()) {
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val response = UmtpApiClient.apiService.deleteSelectedCompletedResaleTradeJourneys(
+                    userId = uid,
+                    request = ResaleTradeJourneyDeleteSelectedRequest(journey_ids = journeyIds.toList()),
+                )
+                if (response.ok) {
+                    val deletedCount = response.deleted_count ?: 0
+                    _toastMessage.value = "완료 거래 ${deletedCount}건을 삭제했습니다."
+                    loadCompletedResaleJourneys()
+                } else {
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.SAVE,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+            }
+        }
+    }
+
+    fun deleteAllCompletedResaleJourneys() {
+        val uid = _userId.value ?: return
+
+        viewModelScope.launch {
+            try {
+                val response = UmtpApiClient.apiService.deleteAllCompletedResaleTradeJourneys(uid)
+                if (response.ok) {
+                    val deletedCount = response.deleted_count ?: 0
+                    _toastMessage.value = "완료 거래 ${deletedCount}건을 전체 삭제했습니다."
+                    loadCompletedResaleJourneys()
+                } else {
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.SAVE,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+            }
+        }
+    }
+
+    // Legacy compatibility path
     fun upsertResaleTradeAfterPurchase(
         productId: String?,
         url: String?,
@@ -878,7 +1155,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         viewModelScope.launch {
             _isSubmittingResaleTrade.value = true
             try {
-                val normalizedUpdates = updates.filterValues { value -> value != null }
+                val normalizedUpdates = filterSparseUpdates(updates)
                 val response = UmtpApiClient.apiService.upsertResaleTradeAfterPurchase(
                     ResaleTradeAfterPurchaseUpsertRequest(
                         user_id = uid,
@@ -906,6 +1183,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
     }
 
+    // Legacy compatibility path
     fun upsertResaleTradeAfterResale(
         productId: String?,
         url: String?,
@@ -926,7 +1204,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         viewModelScope.launch {
             _isSubmittingResaleTrade.value = true
             try {
-                val normalizedUpdates = updates.filterValues { value -> value != null }
+                val normalizedUpdates = filterSparseUpdates(updates)
                 val response = UmtpApiClient.apiService.upsertResaleTradeAfterResale(
                     ResaleTradeAfterResaleUpsertRequest(
                         user_id = uid,

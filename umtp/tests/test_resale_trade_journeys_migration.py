@@ -91,8 +91,9 @@ class ResaleTradeJourneysMigrationTest(unittest.TestCase):
                 self.assertEqual(int(row.get("column_count", 0)), 1, f"missing column: {column_name}")
 
             expected_indexes = [
-                "uq_resale_trade_journeys_source_product",
-                "uq_resale_trade_journeys_source_url",
+                "uniq_resale_journey_user_source_product",
+                "idx_resale_journey_source_product",
+                "idx_resale_journey_stage",
             ]
 
             for index_name in expected_indexes:

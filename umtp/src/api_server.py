@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 import logging
 from fastapi import FastAPI
@@ -21,6 +21,12 @@ from src.notification_worker import (
 )
 from src.push_token_service import upsert_user_push_token
 from src.resale_trade_journeys import (
+    create_or_hydrate_resale_trade_journey_from_product,
+    delete_completed_resale_trade_journeys,
+    list_completed_resale_trade_journeys,
+    patch_resale_trade_journey_purchase,
+    patch_resale_trade_journey_resale,
+    patch_resale_trade_journey_sold,
     upsert_resale_trade_after_purchase,
     upsert_resale_trade_after_resale,
 )
@@ -162,6 +168,15 @@ class ResaleTradeAfterResaleUpsertRequest(BaseModel):
     product_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
     url: Optional[str] = Field(default=None, min_length=1, max_length=1000)
     updates: dict = Field(default_factory=dict)
+
+
+class ResaleTradeJourneyFromProductRequest(BaseModel):
+    source: str = Field(default="joongna", min_length=1, max_length=50)
+    product_id: str = Field(..., min_length=1, max_length=100)
+
+
+class ResaleTradeJourneyDeleteSelectedRequest(BaseModel):
+    journey_ids: list[int] = Field(default_factory=list)
 
 
 @app.get("/health")
@@ -398,6 +413,19 @@ def _prepare_resale_trade_payload(request):
     return payload
 
 
+def _normalize_patch_updates(request_body: Any) -> dict[str, Any]:
+    if not isinstance(request_body, dict):
+        return {}
+
+    nested_updates = request_body.get("updates")
+    if isinstance(nested_updates, dict):
+        merged = {**request_body, **nested_updates}
+        merged.pop("updates", None)
+        return merged
+
+    return dict(request_body)
+
+
 @app.post("/resale-trades/after-purchase/upsert")
 def resale_trades_after_purchase_upsert(request: ResaleTradeAfterPurchaseUpsertRequest):
     try:
@@ -417,6 +445,10 @@ def resale_trades_after_purchase_upsert(request: ResaleTradeAfterPurchaseUpsertR
         reason = str(exc) or "invalid_payload"
         if reason == "invalid_identity":
             reason = "product_id 또는 url 중 하나는 필요합니다."
+        elif reason == "invalid_product_id":
+            reason = "product_id를 확인해 주세요."
+        elif reason == "invalid_user_id":
+            reason = "invalid_user_id"
         elif reason == "invalid_updates_payload":
             reason = "updates는 JSON object 형태여야 합니다."
         return {"ok": False, "reason": reason}
@@ -445,6 +477,10 @@ def resale_trades_after_resale_upsert(request: ResaleTradeAfterResaleUpsertReque
         reason = str(exc) or "invalid_payload"
         if reason == "invalid_identity":
             reason = "product_id 또는 url 중 하나는 필요합니다."
+        elif reason == "invalid_product_id":
+            reason = "product_id를 확인해 주세요."
+        elif reason == "invalid_user_id":
+            reason = "invalid_user_id"
         elif reason == "invalid_updates_payload":
             reason = "updates는 JSON object 형태여야 합니다."
         return {"ok": False, "reason": reason}
@@ -452,6 +488,180 @@ def resale_trades_after_resale_upsert(request: ResaleTradeAfterResaleUpsertReque
         return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
     except Exception as exc:
         return {"ok": False, "reason": f"되팔이 후 데이터 저장 실패: {exc}"}
+
+
+@app.post("/users/{user_id}/resale-trade-journeys/from-product")
+def create_resale_trade_journey_from_product(user_id: str, request: ResaleTradeJourneyFromProductRequest):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/users/{user_id}/resale-trade-journeys/from-product",
+        )
+        return create_or_hydrate_resale_trade_journey_from_product(
+            user_id=resolved_user_id,
+            source=request.source,
+            product_id=request.product_id,
+        )
+    except ValueError as exc:
+        reason = str(exc) or "invalid_payload"
+        if reason == "invalid_product_id":
+            reason = "product_id는 필수입니다."
+        elif reason == "invalid_user_id":
+            reason = "invalid_user_id"
+        return {"ok": False, "reason": reason}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"거래 기록 생성 실패: {exc}"}
+
+
+@app.patch("/users/{user_id}/resale-trade-journeys/{journey_id}/purchase")
+def patch_resale_trade_purchase(user_id: str, journey_id: int, request: dict[str, Any]):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/users/{user_id}/resale-trade-journeys/{id}/purchase",
+        )
+        updates = _normalize_patch_updates(request)
+        return patch_resale_trade_journey_purchase(
+            user_id=resolved_user_id,
+            journey_id=journey_id,
+            updates=updates,
+        )
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc) or "invalid_payload"}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"구매 후 입력 저장 실패: {exc}"}
+
+
+@app.patch("/users/{user_id}/resale-trade-journeys/{journey_id}/resale")
+def patch_resale_trade_resale(user_id: str, journey_id: int, request: dict[str, Any]):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/users/{user_id}/resale-trade-journeys/{id}/resale",
+        )
+        updates = _normalize_patch_updates(request)
+        return patch_resale_trade_journey_resale(
+            user_id=resolved_user_id,
+            journey_id=journey_id,
+            updates=updates,
+        )
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc) or "invalid_payload"}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"되팔이 입력 저장 실패: {exc}"}
+
+
+@app.patch("/users/{user_id}/resale-trade-journeys/{journey_id}/sold")
+def patch_resale_trade_sold(user_id: str, journey_id: int, request: dict[str, Any]):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/users/{user_id}/resale-trade-journeys/{id}/sold",
+        )
+        updates = _normalize_patch_updates(request)
+        return patch_resale_trade_journey_sold(
+            user_id=resolved_user_id,
+            journey_id=journey_id,
+            updates=updates,
+        )
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc) or "invalid_payload"}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"판매 완료 입력 저장 실패: {exc}"}
+
+
+@app.get("/users/{user_id}/resale-trade-journeys/completed")
+def get_completed_resale_trade_journeys(user_id: str, limit: int = 200):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id", "items": []}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/users/{user_id}/resale-trade-journeys/completed",
+        )
+        return list_completed_resale_trade_journeys(
+            user_id=resolved_user_id,
+            limit=limit,
+        )
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc), "items": []}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}", "items": []}
+    except Exception as exc:
+        return {"ok": False, "reason": f"완료 거래 조회 실패: {exc}", "items": []}
+
+
+@app.patch("/users/{user_id}/resale-trade-journeys/completed/delete-selected")
+def delete_selected_completed_resale_trade_journeys(user_id: str, request: ResaleTradeJourneyDeleteSelectedRequest):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/users/{user_id}/resale-trade-journeys/completed/delete-selected",
+        )
+        return delete_completed_resale_trade_journeys(
+            user_id=resolved_user_id,
+            journey_ids=request.journey_ids,
+            delete_all=False,
+        )
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc)}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"완료 거래 선택 삭제 실패: {exc}"}
+
+
+@app.patch("/users/{user_id}/resale-trade-journeys/completed/delete-all")
+def delete_all_completed_resale_trade_journeys(user_id: str):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/users/{user_id}/resale-trade-journeys/completed/delete-all",
+        )
+        return delete_completed_resale_trade_journeys(
+            user_id=resolved_user_id,
+            delete_all=True,
+        )
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc)}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"완료 거래 전체 삭제 실패: {exc}"}
 
 
 @app.post("/users/{user_id}/rules/refresh")

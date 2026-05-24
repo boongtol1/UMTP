@@ -51,6 +51,50 @@ interface UmtpApiService {
         @Body request: ResaleTradeAfterResaleUpsertRequest
     ): ResaleTradeUpsertResponse
 
+    @POST("users/{user_id}/resale-trade-journeys/from-product")
+    suspend fun createResaleTradeJourneyFromProduct(
+        @Path("user_id") userId: String,
+        @Body request: ResaleTradeJourneyFromProductRequest,
+    ): ResaleTradeJourneyResponse
+
+    @PATCH("users/{user_id}/resale-trade-journeys/{journey_id}/purchase")
+    suspend fun patchResaleTradeJourneyPurchase(
+        @Path("user_id") userId: String,
+        @Path("journey_id") journeyId: Long,
+        @Body request: ResaleTradeJourneyPatchRequest,
+    ): ResaleTradeJourneyResponse
+
+    @PATCH("users/{user_id}/resale-trade-journeys/{journey_id}/resale")
+    suspend fun patchResaleTradeJourneyResale(
+        @Path("user_id") userId: String,
+        @Path("journey_id") journeyId: Long,
+        @Body request: ResaleTradeJourneyPatchRequest,
+    ): ResaleTradeJourneyResponse
+
+    @PATCH("users/{user_id}/resale-trade-journeys/{journey_id}/sold")
+    suspend fun patchResaleTradeJourneySold(
+        @Path("user_id") userId: String,
+        @Path("journey_id") journeyId: Long,
+        @Body request: ResaleTradeJourneyPatchRequest,
+    ): ResaleTradeJourneyResponse
+
+    @GET("users/{user_id}/resale-trade-journeys/completed")
+    suspend fun getCompletedResaleTradeJourneys(
+        @Path("user_id") userId: String,
+        @Query("limit") limit: Int = 200,
+    ): ResaleTradeJourneyListResponse
+
+    @PATCH("users/{user_id}/resale-trade-journeys/completed/delete-selected")
+    suspend fun deleteSelectedCompletedResaleTradeJourneys(
+        @Path("user_id") userId: String,
+        @Body request: ResaleTradeJourneyDeleteSelectedRequest,
+    ): ResaleTradeJourneyDeleteResponse
+
+    @PATCH("users/{user_id}/resale-trade-journeys/completed/delete-all")
+    suspend fun deleteAllCompletedResaleTradeJourneys(
+        @Path("user_id") userId: String,
+    ): ResaleTradeJourneyDeleteResponse
+
     @POST("users/{user_id}/rules/refresh")
     suspend fun refreshUserRulesSavedAt(
         @Path("user_id") userId: String

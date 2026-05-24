@@ -232,12 +232,12 @@ CREATE TABLE IF NOT EXISTS resale_trade_journeys (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
   KEY idx_resale_trade_journeys_user (user_id),
-  KEY idx_resale_trade_journeys_stage (current_stage),
+  KEY idx_resale_journey_stage (current_stage),
+  KEY idx_resale_journey_source_product (source, product_id),
   KEY idx_resale_trade_journeys_discovered_at (discovered_at),
   KEY idx_resale_trade_journeys_purchased_at (purchased_at),
   KEY idx_resale_trade_journeys_sold_at (sold_at),
-  UNIQUE KEY uq_resale_trade_journeys_source_product (source, product_id),
-  UNIQUE KEY uq_resale_trade_journeys_source_url (source, url_digest)
+  UNIQUE KEY uniq_resale_journey_user_source_product (user_id, source, product_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET @target_db = DATABASE();
@@ -269,3 +269,96 @@ SET @sql_gpu_core_count = IF(
 PREPARE stmt_gpu_core_count FROM @sql_gpu_core_count;
 EXECUTE stmt_gpu_core_count;
 DEALLOCATE PREPARE stmt_gpu_core_count;
+
+SELECT COUNT(*) INTO @has_legacy_uq_source_product
+FROM information_schema.statistics
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND index_name = 'uq_resale_trade_journeys_source_product';
+SET @sql_drop_legacy_uq_source_product = IF(
+  @has_legacy_uq_source_product = 0,
+  'SELECT ''uq_resale_trade_journeys_source_product already absent''',
+  'ALTER TABLE resale_trade_journeys DROP INDEX uq_resale_trade_journeys_source_product'
+);
+PREPARE stmt_drop_legacy_uq_source_product FROM @sql_drop_legacy_uq_source_product;
+EXECUTE stmt_drop_legacy_uq_source_product;
+DEALLOCATE PREPARE stmt_drop_legacy_uq_source_product;
+
+SELECT COUNT(*) INTO @has_legacy_uq_source_url
+FROM information_schema.statistics
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND index_name = 'uq_resale_trade_journeys_source_url';
+SET @sql_drop_legacy_uq_source_url = IF(
+  @has_legacy_uq_source_url = 0,
+  'SELECT ''uq_resale_trade_journeys_source_url already absent''',
+  'ALTER TABLE resale_trade_journeys DROP INDEX uq_resale_trade_journeys_source_url'
+);
+PREPARE stmt_drop_legacy_uq_source_url FROM @sql_drop_legacy_uq_source_url;
+EXECUTE stmt_drop_legacy_uq_source_url;
+DEALLOCATE PREPARE stmt_drop_legacy_uq_source_url;
+
+SELECT COUNT(*) INTO @has_uniq_user_source_product
+FROM information_schema.statistics
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND index_name = 'uniq_resale_journey_user_source_product';
+
+SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index SEPARATOR ',')
+INTO @uniq_user_source_product_cols
+FROM information_schema.statistics
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND index_name = 'uniq_resale_journey_user_source_product';
+
+SET @sql_drop_uniq_user_source_product_mismatch = IF(
+  @has_uniq_user_source_product > 0
+  AND IFNULL(@uniq_user_source_product_cols, '') <> 'user_id,source,product_id',
+  'ALTER TABLE resale_trade_journeys DROP INDEX uniq_resale_journey_user_source_product',
+  'SELECT ''uniq_resale_journey_user_source_product definition ok'''
+);
+PREPARE stmt_drop_uniq_user_source_product_mismatch FROM @sql_drop_uniq_user_source_product_mismatch;
+EXECUTE stmt_drop_uniq_user_source_product_mismatch;
+DEALLOCATE PREPARE stmt_drop_uniq_user_source_product_mismatch;
+
+SELECT COUNT(*) INTO @has_uniq_user_source_product_after_drop
+FROM information_schema.statistics
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND index_name = 'uniq_resale_journey_user_source_product';
+SET @sql_add_uniq_user_source_product = IF(
+  @has_uniq_user_source_product_after_drop = 0,
+  'ALTER TABLE resale_trade_journeys ADD UNIQUE KEY uniq_resale_journey_user_source_product (user_id, source, product_id)',
+  'SELECT ''uniq_resale_journey_user_source_product exists'''
+);
+PREPARE stmt_add_uniq_user_source_product FROM @sql_add_uniq_user_source_product;
+EXECUTE stmt_add_uniq_user_source_product;
+DEALLOCATE PREPARE stmt_add_uniq_user_source_product;
+
+SELECT COUNT(*) INTO @has_idx_source_product
+FROM information_schema.statistics
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND index_name = 'idx_resale_journey_source_product';
+SET @sql_add_idx_source_product = IF(
+  @has_idx_source_product = 0,
+  'ALTER TABLE resale_trade_journeys ADD INDEX idx_resale_journey_source_product (source, product_id)',
+  'SELECT ''idx_resale_journey_source_product exists'''
+);
+PREPARE stmt_add_idx_source_product FROM @sql_add_idx_source_product;
+EXECUTE stmt_add_idx_source_product;
+DEALLOCATE PREPARE stmt_add_idx_source_product;
+
+SELECT COUNT(*) INTO @has_idx_stage
+FROM information_schema.statistics
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND index_name = 'idx_resale_journey_stage';
+SET @sql_add_idx_stage = IF(
+  @has_idx_stage = 0,
+  'ALTER TABLE resale_trade_journeys ADD INDEX idx_resale_journey_stage (current_stage)',
+  'SELECT ''idx_resale_journey_stage exists'''
+);
+PREPARE stmt_add_idx_stage FROM @sql_add_idx_stage;
+EXECUTE stmt_add_idx_stage;
+DEALLOCATE PREPARE stmt_add_idx_stage;

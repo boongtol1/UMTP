@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -11,100 +11,162 @@ if PROJECT_ROOT not in sys.path:
 from src import resale_trade_journeys as journeys  # noqa: E402
 
 
-class _FakeCursor:
-    def __init__(self):
-        self.closed = False
-
-    def close(self):
-        self.closed = True
-
-
-class _FakeConnection:
-    def __init__(self):
-        self._cursor = _FakeCursor()
-        self.committed = False
-
-    def cursor(self, dictionary=False):
-        return self._cursor
-
-    def commit(self):
-        self.committed = True
-
-    def is_connected(self):
-        return True
-
-    def close(self):
-        return None
-
-
 class ResaleTradeJourneysTest(unittest.TestCase):
     def test_extract_product_id_from_url(self):
         product_id = journeys._extract_product_id_from_url("https://web.joongna.com/product/12345")
         self.assertEqual(product_id, "12345")
 
-    def test_resolve_stage_does_not_downgrade(self):
-        stage = journeys._resolve_stage("FINALIZED", "PURCHASED")
-        self.assertEqual(stage, "FINALIZED")
+    def test_merge_priority_prefers_user_over_existing_and_sources(self):
+        existing_row = {
+            "id": 1,
+            "title": "existing-title",
+            "listing_price_krw": 500000,
+            "fair_price_krw": None,
+        }
+        user_values = {
+            "title": "user-title",
+            "fair_price_krw": 640000,
+        }
+        source_candidates = [
+            {"title": "alert-title", "fair_price_krw": 630000, "listing_price_krw": 490000},
+            {"title": "analysis-title", "fair_price_krw": 620000},
+        ]
 
-    @patch("src.resale_trade_journeys._load_row_summary", return_value={"id": 5, "current_stage": "INSPECTED"})
-    @patch("src.resale_trade_journeys._update_row_by_id")
-    @patch("src.resale_trade_journeys._upsert_seed_row", return_value={"id": 5, "current_stage": "AUTO_ANALYZED"})
-    @patch("src.resale_trade_journeys._build_seed_snapshot", return_value={"source": "joongna", "product_id": "123"})
-    @patch("src.resale_trade_journeys.get_connection", return_value=_FakeConnection())
-    def test_upsert_after_purchase_promotes_stage(
-        self,
-        _mock_conn,
-        _mock_seed,
-        _mock_upsert_seed,
-        mock_update,
-        _mock_summary,
-    ):
-        result = journeys.upsert_resale_trade_after_purchase(
+        updates = journeys._merge_by_priority(
+            user_values=user_values,
+            existing_row=existing_row,
+            source_candidates=source_candidates,
+            writable_columns={"title", "listing_price_krw", "fair_price_krw"},
+        )
+
+        self.assertEqual(updates.get("title"), "user-title")
+        self.assertEqual(updates.get("fair_price_krw"), 640000)
+        self.assertNotIn("listing_price_krw", updates)
+
+    def test_merge_priority_uses_source_for_blank_existing(self):
+        existing_row = {
+            "id": 2,
+            "listing_price_krw": None,
+            "seller_nickname": "",
+        }
+        user_values = {}
+        source_candidates = [
+            {"listing_price_krw": 520000},
+            {"listing_price_krw": 510000, "seller_nickname": "seller-from-search"},
+        ]
+
+        updates = journeys._merge_by_priority(
+            user_values=user_values,
+            existing_row=existing_row,
+            source_candidates=source_candidates,
+            writable_columns={"listing_price_krw", "seller_nickname"},
+        )
+
+        self.assertEqual(updates.get("listing_price_krw"), 520000)
+        self.assertEqual(updates.get("seller_nickname"), "seller-from-search")
+
+    def test_prepare_sparse_updates_skips_null_and_empty(self):
+        updates = journeys._prepare_sparse_updates(
+            {
+                "purchase_price_krw": "",
+                "inspection_notes": "  ",
+                "battery_cycle_count": "123",
+                "battery_health_percent": None,
+            },
+            journeys.PURCHASE_PATCH_FIELDS,
+            {"purchase_price_krw", "inspection_notes", "battery_cycle_count", "battery_health_percent"},
+        )
+
+        self.assertEqual(updates, {"battery_cycle_count": 123})
+
+    def test_alert_event_mapping_hydrates_core_fields(self):
+        mapped = journeys._build_alert_mapping(
+            {
+                "source": "joongna",
+                "product_id": "228",
+                "url": "https://web.joongna.com/product/228",
+                "title": "M2 16GB",
+                "sort_date": "2026-05-24 10:00:00",
+                "created_at": "2026-05-24 10:05:00",
+                "price_krw": 700000,
+                "fair_price_krw": 860000,
+                "drop_rate_percent": 18.6,
+                "risk_keywords": ["급처", "풀박스"],
+                "seller_store_seq": 11,
+                "seller_store_name": "seller-a",
+            }
+        )
+
+        self.assertEqual(mapped.get("source"), "joongna")
+        self.assertEqual(mapped.get("product_id"), "228")
+        self.assertEqual(mapped.get("listing_price_krw"), 700000)
+        self.assertEqual(mapped.get("fair_price_krw"), 860000)
+        self.assertEqual(mapped.get("seller_shop_id"), "11")
+        self.assertEqual(mapped.get("seller_nickname"), "seller-a")
+        self.assertIsNotNone(mapped.get("reason_tags"))
+
+    def test_seen_product_mapping_hydrates_core_fields(self):
+        mapped = journeys._build_seen_product_mapping(
+            {
+                "seq": 228,
+                "product_url": "https://web.joongna.com/product/228",
+                "last_title": "M1 16GB",
+                "last_price_krw": 690000,
+                "last_sort_date": "2026-05-24 09:00:00",
+                "first_seen_at": "2026-05-24 08:00:00",
+                "image_url": "https://img.example.com/a.jpg",
+            }
+        )
+
+        self.assertEqual(mapped.get("source"), "joongna")
+        self.assertEqual(mapped.get("product_id"), "228")
+        self.assertEqual(mapped.get("title"), "M1 16GB")
+        self.assertEqual(mapped.get("listing_price_krw"), 690000)
+        self.assertIsNotNone(mapped.get("image_urls"))
+
+    def test_stage_after_purchase_becomes_inspected(self):
+        stage = journeys._derive_stage_after_purchase(
+            {"current_stage": journeys.STAGE_DISCOVERED},
+            {"purchased_at": "2026-05-24 10:00:00"},
+        )
+        self.assertEqual(stage, journeys.STAGE_INSPECTED)
+
+    def test_stage_after_resale_or_sold(self):
+        stage_listed = journeys._derive_stage_after_resale_or_sold(
+            {
+                "sale_price_krw": None,
+                "sold_at": None,
+                "resale_listing_price_krw": 780000,
+                "resale_platform": "joongna",
+                "resale_url": None,
+                "resale_listing_created_at": None,
+                "current_stage": journeys.STAGE_INSPECTED,
+            }
+        )
+        self.assertEqual(stage_listed, journeys.STAGE_RESALE_LISTED)
+
+        stage_sold = journeys._derive_stage_after_resale_or_sold(
+            {
+                "sale_price_krw": 820000,
+                "sold_at": None,
+                "current_stage": journeys.STAGE_RESALE_LISTED,
+            }
+        )
+        self.assertEqual(stage_sold, journeys.STAGE_SOLD)
+
+    @patch("src.resale_trade_journeys._fetch_journey_by_key", return_value={"id": 99})
+    def test_insert_or_get_journey_id_reuses_existing_row(self, _mock_fetch):
+        cursor = MagicMock()
+        row_id = journeys._insert_or_get_journey_id(
+            cursor,
+            user_id="user1",
             source="joongna",
             product_id="123",
-            purchased_at="2026-05-24 10:00:00",
-            purchase_price_krw=640000,
-            cpu_core_count=8,
-            gpu_core_count=8,
+            writable_columns={"user_id", "source", "product_id", "current_stage"},
         )
 
-        self.assertTrue(result.get("ok"))
-        self.assertEqual(result.get("current_stage"), "INSPECTED")
-
-        update_kwargs = mock_update.call_args.kwargs
-        updates = update_kwargs.get("updates", {})
-        self.assertEqual(updates.get("current_stage"), "INSPECTED")
-        self.assertEqual(updates.get("purchase_price_krw"), 640000)
-        self.assertEqual(updates.get("cpu_core_count"), 8)
-        self.assertEqual(updates.get("gpu_core_count"), 8)
-
-    @patch("src.resale_trade_journeys._load_row_summary", return_value={"id": 7, "current_stage": "FINALIZED"})
-    @patch("src.resale_trade_journeys._update_row_by_id")
-    @patch("src.resale_trade_journeys._upsert_seed_row", return_value={"id": 7, "current_stage": "LISTED"})
-    @patch("src.resale_trade_journeys._build_seed_snapshot", return_value={"source": "joongna", "product_id": "777"})
-    @patch("src.resale_trade_journeys.get_connection", return_value=_FakeConnection())
-    def test_upsert_after_resale_promotes_stage_to_finalized(
-        self,
-        _mock_conn,
-        _mock_seed,
-        _mock_upsert_seed,
-        mock_update,
-        _mock_summary,
-    ):
-        result = journeys.upsert_resale_trade_after_resale(
-            source="joongna",
-            product_id="777",
-            sold_at="2026-05-24 20:30:00",
-            sale_price_krw=850000,
-        )
-
-        self.assertTrue(result.get("ok"))
-        self.assertEqual(result.get("current_stage"), "FINALIZED")
-
-        update_kwargs = mock_update.call_args.kwargs
-        updates = update_kwargs.get("updates", {})
-        self.assertEqual(updates.get("current_stage"), "FINALIZED")
-        self.assertEqual(updates.get("sale_price_krw"), 850000)
+        self.assertEqual(row_id, 99)
+        cursor.execute.assert_not_called()
 
 
 if __name__ == "__main__":

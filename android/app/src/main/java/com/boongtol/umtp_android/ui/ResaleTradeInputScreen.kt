@@ -14,6 +14,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -24,10 +25,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.boongtol.umtp_android.network.ResaleTradeJourneyRow
 
 private enum class ResaleInputMode {
-    AFTER_PURCHASE,
-    AFTER_RESALE,
+    PURCHASE,
+    RESALE,
 }
 
 private fun String.toOptionalInt(): Int? {
@@ -43,40 +45,76 @@ private fun String.toOptionalText(): String? {
     return if (normalized.isEmpty()) null else normalized
 }
 
+private fun formatWon(value: Int?): String {
+    if (value == null) {
+        return "-"
+    }
+    return "%,d".format(value)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ResaleTradeInputScreen(
+    selectedJourney: ResaleTradeJourneyRow?,
+    completedJourneys: List<ResaleTradeJourneyRow>,
     isSubmitting: Boolean,
-    onSubmitAfterPurchase: (productId: String?, url: String?, updates: Map<String, Any?>) -> Unit,
-    onSubmitAfterResale: (productId: String?, url: String?, updates: Map<String, Any?>) -> Unit,
+    isLoadingCompleted: Boolean,
+    onCreateFromProduct: (source: String, productId: String) -> Unit,
+    onSubmitPurchase: (updates: Map<String, Any?>) -> Unit,
+    onSubmitResale: (updates: Map<String, Any?>) -> Unit,
+    onSubmitSold: (updates: Map<String, Any?>) -> Unit,
+    onLoadCompleted: () -> Unit,
+    onDeleteSelectedCompleted: (Set<Long>) -> Unit,
+    onDeleteAllCompleted: () -> Unit,
 ) {
-    var inputMode by remember { mutableStateOf(ResaleInputMode.AFTER_PURCHASE) }
-
+    var selectedSource by remember { mutableStateOf("joongna") }
+    var customSource by remember { mutableStateOf("") }
     var productId by remember { mutableStateOf("") }
-    var url by remember { mutableStateOf("") }
 
-    var purchasedAt by remember { mutableStateOf("") }
+    var inputMode by remember { mutableStateOf(ResaleInputMode.PURCHASE) }
+    var showAdvancedPurchase by remember { mutableStateOf(false) }
+
     var purchasePriceKrw by remember { mutableStateOf("") }
-    var purchaseMethod by remember { mutableStateOf("") }
-    var purchaseLocation by remember { mutableStateOf("") }
-    var cpuCoreCount by remember { mutableStateOf("") }
-    var gpuCoreCount by remember { mutableStateOf("") }
+    var purchasedAt by remember { mutableStateOf("") }
     var batteryHealthPercent by remember { mutableStateOf("") }
     var batteryCycleCount by remember { mutableStateOf("") }
+    var exteriorGrade by remember { mutableStateOf("") }
+    var includedItems by remember { mutableStateOf("") }
     var inspectionNotes by remember { mutableStateOf("") }
-    var resaleListingCreatedAt by remember { mutableStateOf("") }
-    var resaleListingPriceKrw by remember { mutableStateOf("") }
-    var resaleUrl by remember { mutableStateOf("") }
 
+    var truetoneOk by remember { mutableStateOf("") }
+    var purchaseMethod by remember { mutableStateOf("") }
+    var purchaseLocation by remember { mutableStateOf("") }
+    var transportCostKrw by remember { mutableStateOf("") }
+    var shippingCostKrw by remember { mutableStateOf("") }
+    var paymentMethod by remember { mutableStateOf("") }
+    var serialNumber by remember { mutableStateOf("") }
+    var modelNumber by remember { mutableStateOf("") }
+    var applecareStatus by remember { mutableStateOf("") }
+    var activationLockOff by remember { mutableStateOf("") }
+    var mdmLockNone by remember { mutableStateOf("") }
+    var batteryCondition by remember { mutableStateOf("") }
+    var displayCondition by remember { mutableStateOf("") }
+    var keyboardCondition by remember { mutableStateOf("") }
+    var trackpadCondition by remember { mutableStateOf("") }
+    var speakerCondition by remember { mutableStateOf("") }
+    var cameraCondition by remember { mutableStateOf("") }
+    var wifiBluetoothOk by remember { mutableStateOf("") }
+    var repairSuspected by remember { mutableStateOf("") }
+
+    var resaleListingPriceKrw by remember { mutableStateOf("") }
+    var resalePlatform by remember { mutableStateOf("") }
+    var resaleUrl by remember { mutableStateOf("") }
+    var resaleListingCreatedAt by remember { mutableStateOf("") }
     var soldAt by remember { mutableStateOf("") }
     var salePriceKrw by remember { mutableStateOf("") }
-    var saleMethod by remember { mutableStateOf("") }
-    var saleLocation by remember { mutableStateOf("") }
     var finalShippingCostKrw by remember { mutableStateOf("") }
     var platformFeeKrw by remember { mutableStateOf("") }
-    var viewCount by remember { mutableStateOf("") }
-    var inquiryCount by remember { mutableStateOf("") }
     var finalResultNotes by remember { mutableStateOf("") }
+
+    var selectedCompletedIds by remember { mutableStateOf(setOf<Long>()) }
+
+    val sourceOptions = listOf("joongna", "bunjang", "daangn", "기타")
 
     Column(
         modifier = Modifier
@@ -86,24 +124,35 @@ fun ResaleTradeInputScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = "거래 입력",
+            text = "거래 기록",
             style = MaterialTheme.typography.titleLarge,
         )
         Text(
-            text = "앱에서 바로 입력하면 서버 DB에 저장됩니다.",
+            text = "상품번호만 입력하면 기존 UMTP 기록에서 최대한 자동으로 채웁니다.",
             style = MaterialTheme.typography.bodySmall,
         )
 
+        Text(text = "상품번호로 거래 기록 만들기", style = MaterialTheme.typography.titleMedium)
+
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(
-                selected = inputMode == ResaleInputMode.AFTER_PURCHASE,
-                onClick = { inputMode = ResaleInputMode.AFTER_PURCHASE },
-                label = { Text("구매 후 입력") },
-            )
-            FilterChip(
-                selected = inputMode == ResaleInputMode.AFTER_RESALE,
-                onClick = { inputMode = ResaleInputMode.AFTER_RESALE },
-                label = { Text("되팔이 후 입력") },
+            sourceOptions.forEach { option ->
+                FilterChip(
+                    selected = selectedSource == option,
+                    onClick = { selectedSource = option },
+                    label = { Text(option) },
+                )
+            }
+        }
+
+        if (selectedSource == "기타") {
+            OutlinedTextField(
+                value = customSource,
+                onValueChange = { customSource = it },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isSubmitting,
+                singleLine = true,
+                label = { Text("기타 source") },
+                placeholder = { Text("예: naver-cafe") },
             )
         }
 
@@ -113,69 +162,74 @@ fun ResaleTradeInputScreen(
             modifier = Modifier.fillMaxWidth(),
             enabled = !isSubmitting,
             singleLine = true,
-            label = { Text("product_id (권장)") },
-            placeholder = { Text("예: 123456789") },
-        )
-        OutlinedTextField(
-            value = url,
-            onValueChange = { url = it },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !isSubmitting,
-            singleLine = true,
-            label = { Text("url (product_id 없을 때 필수)") },
-            placeholder = { Text("https://web.joongna.com/product/...") },
+            label = { Text("product_id") },
+            placeholder = { Text("예: 228826879") },
         )
 
-        if (inputMode == ResaleInputMode.AFTER_PURCHASE) {
-            OutlinedTextField(
-                value = purchasedAt,
-                onValueChange = { purchasedAt = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("구매 시각") },
-                placeholder = { Text("YYYY-MM-DD HH:MM") },
+        Button(
+            onClick = {
+                val sourceValue = if (selectedSource == "기타") customSource.toOptionalText() else selectedSource
+                onCreateFromProduct(sourceValue ?: "", productId)
+            },
+            enabled = !isSubmitting,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (isSubmitting) {
+                CircularProgressIndicator(strokeWidth = 2.dp)
+            } else {
+                Text("자동으로 불러오기")
+            }
+        }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+        Text(text = "거래 상세", style = MaterialTheme.typography.titleMedium)
+        Text(text = "title: ${selectedJourney?.title ?: "-"}")
+        Text(text = "source: ${selectedJourney?.source ?: "-"}")
+        Text(text = "product_id: ${selectedJourney?.product_id ?: "-"}")
+        Text(text = "url: ${selectedJourney?.url ?: "-"}")
+        Text(text = "listing_price_krw: ${formatWon(selectedJourney?.listing_price_krw)}")
+        Text(text = "fair_price_krw: ${formatWon(selectedJourney?.fair_price_krw)}")
+        Text(text = "discount_rate_percent: ${selectedJourney?.discount_rate_percent ?: "-"}")
+        Text(text = "product_type: ${selectedJourney?.product_type ?: "-"}")
+        Text(text = "chip: ${selectedJourney?.chip ?: "-"}")
+        Text(text = "screen_inch: ${selectedJourney?.screen_inch ?: "-"}")
+        Text(text = "ram_gb: ${selectedJourney?.ram_gb ?: "-"}")
+        Text(text = "ssd_gb: ${selectedJourney?.ssd_gb ?: "-"}")
+        Text(text = "seller_nickname: ${selectedJourney?.seller_nickname ?: "-"}")
+        Text(text = "seller_shop_id: ${selectedJourney?.seller_shop_id ?: "-"}")
+        Text(text = "current_stage: ${selectedJourney?.current_stage ?: "-"}")
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = inputMode == ResaleInputMode.PURCHASE,
+                onClick = { inputMode = ResaleInputMode.PURCHASE },
+                label = { Text("구매 후 기록하기") },
             )
+            FilterChip(
+                selected = inputMode == ResaleInputMode.RESALE,
+                onClick = { inputMode = ResaleInputMode.RESALE },
+                label = { Text("되팔이 후 기록하기") },
+            )
+        }
+
+        if (inputMode == ResaleInputMode.PURCHASE) {
             OutlinedTextField(
                 value = purchasePriceKrw,
                 onValueChange = { purchasePriceKrw = it },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !isSubmitting,
                 singleLine = true,
-                label = { Text("구매 금액(원)") },
+                label = { Text("purchase_price_krw") },
             )
             OutlinedTextField(
-                value = purchaseMethod,
-                onValueChange = { purchaseMethod = it },
+                value = purchasedAt,
+                onValueChange = { purchasedAt = it },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !isSubmitting,
                 singleLine = true,
-                label = { Text("구매 방식") },
-                placeholder = { Text("직거래 / 택배") },
-            )
-            OutlinedTextField(
-                value = purchaseLocation,
-                onValueChange = { purchaseLocation = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("구매 장소") },
-            )
-            OutlinedTextField(
-                value = cpuCoreCount,
-                onValueChange = { cpuCoreCount = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("CPU 코어 수") },
-            )
-            OutlinedTextField(
-                value = gpuCoreCount,
-                onValueChange = { gpuCoreCount = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("GPU 코어 수") },
+                label = { Text("purchased_at") },
+                placeholder = { Text("YYYY-MM-DD HH:MM") },
             )
             OutlinedTextField(
                 value = batteryHealthPercent,
@@ -183,7 +237,7 @@ fun ResaleTradeInputScreen(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !isSubmitting,
                 singleLine = true,
-                label = { Text("배터리 효율(%)") },
+                label = { Text("battery_health_percent") },
             )
             OutlinedTextField(
                 value = batteryCycleCount,
@@ -191,61 +245,90 @@ fun ResaleTradeInputScreen(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !isSubmitting,
                 singleLine = true,
-                label = { Text("배터리 사이클") },
+                label = { Text("battery_cycle_count") },
+            )
+            OutlinedTextField(
+                value = exteriorGrade,
+                onValueChange = { exteriorGrade = it },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isSubmitting,
+                singleLine = true,
+                label = { Text("exterior_grade") },
+            )
+            OutlinedTextField(
+                value = includedItems,
+                onValueChange = { includedItems = it },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isSubmitting,
+                label = { Text("included_items") },
             )
             OutlinedTextField(
                 value = inspectionNotes,
                 onValueChange = { inspectionNotes = it },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !isSubmitting,
-                label = { Text("검수 메모") },
+                label = { Text("inspection_notes") },
             )
-            OutlinedTextField(
-                value = resaleListingCreatedAt,
-                onValueChange = { resaleListingCreatedAt = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("재판매 글 업로드 시각") },
-                placeholder = { Text("YYYY-MM-DD HH:MM") },
+
+            FilterChip(
+                selected = showAdvancedPurchase,
+                onClick = { showAdvancedPurchase = !showAdvancedPurchase },
+                label = { Text(if (showAdvancedPurchase) "고급 입력 접기" else "고급 입력 열기") },
             )
-            OutlinedTextField(
-                value = resaleListingPriceKrw,
-                onValueChange = { resaleListingPriceKrw = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("재판매 시작가(원)") },
-            )
-            OutlinedTextField(
-                value = resaleUrl,
-                onValueChange = { resaleUrl = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("재판매 URL") },
-            )
+
+            if (showAdvancedPurchase) {
+                OutlinedTextField(value = truetoneOk, onValueChange = { truetoneOk = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("truetone_ok (true/false)") })
+                OutlinedTextField(value = purchaseMethod, onValueChange = { purchaseMethod = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("purchase_method") })
+                OutlinedTextField(value = purchaseLocation, onValueChange = { purchaseLocation = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("purchase_location") })
+                OutlinedTextField(value = transportCostKrw, onValueChange = { transportCostKrw = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("transport_cost_krw") })
+                OutlinedTextField(value = shippingCostKrw, onValueChange = { shippingCostKrw = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("shipping_cost_krw") })
+                OutlinedTextField(value = paymentMethod, onValueChange = { paymentMethod = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("payment_method") })
+                OutlinedTextField(value = serialNumber, onValueChange = { serialNumber = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("serial_number") })
+                OutlinedTextField(value = modelNumber, onValueChange = { modelNumber = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("model_number") })
+                OutlinedTextField(value = applecareStatus, onValueChange = { applecareStatus = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("applecare_status") })
+                OutlinedTextField(value = activationLockOff, onValueChange = { activationLockOff = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("activation_lock_off (true/false)") })
+                OutlinedTextField(value = mdmLockNone, onValueChange = { mdmLockNone = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("mdm_lock_none (true/false)") })
+                OutlinedTextField(value = batteryCondition, onValueChange = { batteryCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("battery_condition") })
+                OutlinedTextField(value = displayCondition, onValueChange = { displayCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("display_condition") })
+                OutlinedTextField(value = keyboardCondition, onValueChange = { keyboardCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("keyboard_condition") })
+                OutlinedTextField(value = trackpadCondition, onValueChange = { trackpadCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("trackpad_condition") })
+                OutlinedTextField(value = speakerCondition, onValueChange = { speakerCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("speaker_condition") })
+                OutlinedTextField(value = cameraCondition, onValueChange = { cameraCondition = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("camera_condition") })
+                OutlinedTextField(value = wifiBluetoothOk, onValueChange = { wifiBluetoothOk = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("wifi_bluetooth_ok (true/false)") })
+                OutlinedTextField(value = repairSuspected, onValueChange = { repairSuspected = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("repair_suspected (true/false)") })
+            }
 
             Button(
                 onClick = {
-                    val updates = mapOf(
-                        "purchased_at" to purchasedAt.toOptionalText(),
-                        "purchase_price_krw" to purchasePriceKrw.toOptionalInt(),
-                        "purchase_method" to purchaseMethod.toOptionalText(),
-                        "purchase_location" to purchaseLocation.toOptionalText(),
-                        "cpu_core_count" to cpuCoreCount.toOptionalInt(),
-                        "gpu_core_count" to gpuCoreCount.toOptionalInt(),
-                        "battery_health_percent" to batteryHealthPercent.toOptionalInt(),
-                        "battery_cycle_count" to batteryCycleCount.toOptionalInt(),
-                        "inspection_notes" to inspectionNotes.toOptionalText(),
-                        "resale_listing_created_at" to resaleListingCreatedAt.toOptionalText(),
-                        "resale_listing_price_krw" to resaleListingPriceKrw.toOptionalInt(),
-                        "resale_url" to resaleUrl.toOptionalText(),
-                    )
-                    onSubmitAfterPurchase(
-                        productId = productId.toOptionalText(),
-                        url = url.toOptionalText(),
-                        updates = updates,
+                    onSubmitPurchase(
+                        mapOf(
+                            "purchase_price_krw" to purchasePriceKrw.toOptionalInt(),
+                            "purchased_at" to purchasedAt.toOptionalText(),
+                            "battery_health_percent" to batteryHealthPercent.toOptionalInt(),
+                            "battery_cycle_count" to batteryCycleCount.toOptionalInt(),
+                            "exterior_grade" to exteriorGrade.toOptionalText(),
+                            "included_items" to includedItems.toOptionalText(),
+                            "inspection_notes" to inspectionNotes.toOptionalText(),
+                            "truetone_ok" to truetoneOk.toOptionalText(),
+                            "purchase_method" to purchaseMethod.toOptionalText(),
+                            "purchase_location" to purchaseLocation.toOptionalText(),
+                            "transport_cost_krw" to transportCostKrw.toOptionalInt(),
+                            "shipping_cost_krw" to shippingCostKrw.toOptionalInt(),
+                            "payment_method" to paymentMethod.toOptionalText(),
+                            "serial_number" to serialNumber.toOptionalText(),
+                            "model_number" to modelNumber.toOptionalText(),
+                            "applecare_status" to applecareStatus.toOptionalText(),
+                            "activation_lock_off" to activationLockOff.toOptionalText(),
+                            "mdm_lock_none" to mdmLockNone.toOptionalText(),
+                            "battery_condition" to batteryCondition.toOptionalText(),
+                            "display_condition" to displayCondition.toOptionalText(),
+                            "keyboard_condition" to keyboardCondition.toOptionalText(),
+                            "trackpad_condition" to trackpadCondition.toOptionalText(),
+                            "speaker_condition" to speakerCondition.toOptionalText(),
+                            "camera_condition" to cameraCondition.toOptionalText(),
+                            "wifi_bluetooth_ok" to wifiBluetoothOk.toOptionalText(),
+                            "repair_suspected" to repairSuspected.toOptionalText(),
+                        )
                     )
                 },
                 enabled = !isSubmitting,
@@ -254,101 +337,48 @@ fun ResaleTradeInputScreen(
                 if (isSubmitting) {
                     CircularProgressIndicator(strokeWidth = 2.dp)
                 } else {
-                    Text("구매 후 저장")
+                    Text("구매 후 기록 저장")
                 }
             }
         } else {
-            OutlinedTextField(
-                value = soldAt,
-                onValueChange = { soldAt = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("판매 완료 시각") },
-                placeholder = { Text("YYYY-MM-DD HH:MM") },
-            )
-            OutlinedTextField(
-                value = salePriceKrw,
-                onValueChange = { salePriceKrw = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("최종 판매 금액(원)") },
-            )
-            OutlinedTextField(
-                value = saleMethod,
-                onValueChange = { saleMethod = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("판매 방식") },
-                placeholder = { Text("직거래 / 택배") },
-            )
-            OutlinedTextField(
-                value = saleLocation,
-                onValueChange = { saleLocation = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("판매 장소") },
-            )
-            OutlinedTextField(
-                value = finalShippingCostKrw,
-                onValueChange = { finalShippingCostKrw = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("최종 배송비(원)") },
-            )
-            OutlinedTextField(
-                value = platformFeeKrw,
-                onValueChange = { platformFeeKrw = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("플랫폼 수수료(원)") },
-            )
-            OutlinedTextField(
-                value = viewCount,
-                onValueChange = { viewCount = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("조회수") },
-            )
-            OutlinedTextField(
-                value = inquiryCount,
-                onValueChange = { inquiryCount = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("문의수") },
-            )
-            OutlinedTextField(
-                value = finalResultNotes,
-                onValueChange = { finalResultNotes = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                label = { Text("최종 정산 메모") },
-            )
+            OutlinedTextField(value = resaleListingPriceKrw, onValueChange = { resaleListingPriceKrw = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("resale_listing_price_krw") })
+            OutlinedTextField(value = resalePlatform, onValueChange = { resalePlatform = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("resale_platform") })
+            OutlinedTextField(value = resaleUrl, onValueChange = { resaleUrl = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("resale_url") })
+            OutlinedTextField(value = resaleListingCreatedAt, onValueChange = { resaleListingCreatedAt = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("resale_listing_created_at") }, placeholder = { Text("YYYY-MM-DD HH:MM") })
 
             Button(
                 onClick = {
-                    val updates = mapOf(
-                        "sold_at" to soldAt.toOptionalText(),
-                        "sale_price_krw" to salePriceKrw.toOptionalInt(),
-                        "sale_method" to saleMethod.toOptionalText(),
-                        "sale_location" to saleLocation.toOptionalText(),
-                        "final_shipping_cost_krw" to finalShippingCostKrw.toOptionalInt(),
-                        "platform_fee_krw" to platformFeeKrw.toOptionalInt(),
-                        "view_count" to viewCount.toOptionalInt(),
-                        "inquiry_count" to inquiryCount.toOptionalInt(),
-                        "final_result_notes" to finalResultNotes.toOptionalText(),
+                    onSubmitResale(
+                        mapOf(
+                            "resale_listing_price_krw" to resaleListingPriceKrw.toOptionalInt(),
+                            "resale_platform" to resalePlatform.toOptionalText(),
+                            "resale_url" to resaleUrl.toOptionalText(),
+                            "resale_listing_created_at" to resaleListingCreatedAt.toOptionalText(),
+                        )
                     )
-                    onSubmitAfterResale(
-                        productId = productId.toOptionalText(),
-                        url = url.toOptionalText(),
-                        updates = updates,
+                },
+                enabled = !isSubmitting,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("되팔이 후 기록 저장")
+            }
+
+            OutlinedTextField(value = soldAt, onValueChange = { soldAt = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("sold_at") }, placeholder = { Text("YYYY-MM-DD HH:MM") })
+            OutlinedTextField(value = salePriceKrw, onValueChange = { salePriceKrw = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("sale_price_krw") })
+            OutlinedTextField(value = finalShippingCostKrw, onValueChange = { finalShippingCostKrw = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("final_shipping_cost_krw") })
+            OutlinedTextField(value = platformFeeKrw, onValueChange = { platformFeeKrw = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("platform_fee_krw") })
+            OutlinedTextField(value = finalResultNotes, onValueChange = { finalResultNotes = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, label = { Text("final_result_notes") })
+
+            Button(
+                onClick = {
+                    onSubmitSold(
+                        mapOf(
+                            "sold_at" to soldAt.toOptionalText(),
+                            "sale_price_krw" to salePriceKrw.toOptionalInt(),
+                            "final_shipping_cost_krw" to finalShippingCostKrw.toOptionalInt(),
+                            "platform_fee_krw" to platformFeeKrw.toOptionalInt(),
+                            "final_result_notes" to finalResultNotes.toOptionalText(),
+                        )
                     )
                 },
                 enabled = !isSubmitting,
@@ -357,9 +387,54 @@ fun ResaleTradeInputScreen(
                 if (isSubmitting) {
                     CircularProgressIndicator(strokeWidth = 2.dp)
                 } else {
-                    Text("되팔이 후 저장")
+                    Text("판매 완료 저장")
                 }
             }
+        }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+        Text(text = "완료된 거래", style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = onLoadCompleted,
+                enabled = !isLoadingCompleted,
+            ) {
+                if (isLoadingCompleted) {
+                    CircularProgressIndicator(strokeWidth = 2.dp)
+                } else {
+                    Text("목록 새로고침")
+                }
+            }
+            Button(
+                onClick = { onDeleteSelectedCompleted(selectedCompletedIds) },
+                enabled = selectedCompletedIds.isNotEmpty(),
+            ) {
+                Text("선택 삭제")
+            }
+            Button(onClick = onDeleteAllCompleted) {
+                Text("전체 삭제")
+            }
+        }
+
+        completedJourneys.forEach { item ->
+            val itemId = item.id ?: return@forEach
+            val selected = selectedCompletedIds.contains(itemId)
+            FilterChip(
+                selected = selected,
+                onClick = {
+                    selectedCompletedIds = if (selected) {
+                        selectedCompletedIds - itemId
+                    } else {
+                        selectedCompletedIds + itemId
+                    }
+                },
+                label = {
+                    Text(
+                        "#${item.id} ${item.title ?: "(제목없음)"} / ${formatWon(item.sale_price_krw)} / ROI ${item.roi_percent ?: "-"}%"
+                    )
+                },
+            )
         }
 
         Spacer(modifier = Modifier.height(40.dp))

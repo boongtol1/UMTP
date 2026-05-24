@@ -1,6 +1,7 @@
 import json
 import re
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Optional
 
 from src.db import get_connection
@@ -8,18 +9,10 @@ from src.db import get_connection
 
 DEFAULT_SOURCE = "joongna"
 
-STAGE_ORDER = {
-    "DISCOVERED": 1,
-    "AUTO_ANALYZED": 2,
-    "CONTACTED": 3,
-    "DECIDED": 4,
-    "PURCHASED": 5,
-    "INSPECTED": 6,
-    "READY_FOR_RESALE": 7,
-    "LISTED": 8,
-    "LIVE_RESALE": 9,
-    "FINALIZED": 10,
-}
+STAGE_DISCOVERED = "DISCOVERED"
+STAGE_INSPECTED = "INSPECTED"
+STAGE_RESALE_LISTED = "RESALE_LISTED"
+STAGE_SOLD = "SOLD"
 
 DATETIME_FIELDS = {
     "listing_created_at",
@@ -52,6 +45,7 @@ INT_FIELDS = {
     "purchase_price_krw",
     "transport_cost_krw",
     "shipping_cost_krw",
+    "total_cost_krw",
     "battery_health_percent",
     "battery_cycle_count",
     "resale_photo_count",
@@ -66,9 +60,18 @@ INT_FIELDS = {
     "sale_price_krw",
     "final_shipping_cost_krw",
     "platform_fee_krw",
+    "gross_profit_krw",
+    "net_profit_krw",
+    "purchase_speed_minutes",
+    "sale_duration_hours",
+    "total_holding_time_hours",
+    "profit_per_day_krw",
+    "watch_rule_id",
+    "analysis_job_id",
 }
 DECIMAL_FIELDS = {
     "discount_rate_percent",
+    "roi_percent",
 }
 BOOL_FIELDS = {
     "negotiable",
@@ -87,54 +90,10 @@ JSON_TEXT_FIELDS = {
     "buyer_questions",
     "common_objections",
 }
-TEXT_FIELDS = {
-    "source",
-    "product_id",
-    "url",
-    "title",
-    "seller_nickname",
-    "seller_shop_id",
-    "seller_location",
-    "body_text",
-    "product_type",
-    "chip",
-    "color",
-    "keyboard_layout",
-    "seller_answer_text",
-    "seller_tone",
-    "decision_result",
-    "decision_reason",
-    "purchase_method",
-    "purchase_location",
-    "payment_method",
-    "serial_number",
-    "model_number",
-    "applecare_status",
-    "battery_condition",
-    "display_condition",
-    "keyboard_condition",
-    "trackpad_condition",
-    "speaker_condition",
-    "camera_condition",
-    "exterior_grade",
-    "inspection_notes",
-    "resale_title",
-    "resale_body_text",
-    "resale_platform",
-    "resale_strategy_notes",
-    "resale_url",
-    "resale_product_id",
-    "upload_time_slot",
-    "buyer_nickname",
-    "sale_method",
-    "sale_location",
-    "sale_platform",
-    "refund_or_claim",
-    "final_result_notes",
-}
 
-SEED_COLUMNS = [
-    "user_id",
+IDENTITY_FIELDS = {"user_id", "source", "product_id", "url"}
+
+AUTO_HYDRATE_FIELDS = {
     "source",
     "product_id",
     "url",
@@ -144,6 +103,7 @@ SEED_COLUMNS = [
     "listing_price_krw",
     "seller_nickname",
     "seller_shop_id",
+    "seller_location",
     "image_urls",
     "body_text",
     "product_type",
@@ -156,10 +116,11 @@ SEED_COLUMNS = [
     "expected_profit_krw",
     "risk_score",
     "reason_tags",
-    "current_stage",
-]
+    "watch_rule_id",
+    "analysis_job_id",
+}
 
-PURCHASE_ALLOWED_FIELDS = {
+PURCHASE_PATCH_FIELDS = {
     "contacted_at",
     "seller_response_at",
     "seller_answer_text",
@@ -202,6 +163,9 @@ PURCHASE_ALLOWED_FIELDS = {
     "included_items",
     "repair_suspected",
     "inspection_notes",
+}
+
+RESALE_PATCH_FIELDS = {
     "cleaned_at",
     "photo_taken_at",
     "resale_title",
@@ -216,9 +180,6 @@ PURCHASE_ALLOWED_FIELDS = {
     "resale_product_id",
     "initial_resale_price_krw",
     "upload_time_slot",
-}
-
-SALE_ALLOWED_FIELDS = {
     "view_count",
     "favorite_count",
     "inquiry_count",
@@ -228,6 +189,9 @@ SALE_ALLOWED_FIELDS = {
     "price_drop_history",
     "buyer_questions",
     "common_objections",
+}
+
+SOLD_PATCH_FIELDS = {
     "sold_at",
     "sale_price_krw",
     "buyer_nickname",
@@ -239,6 +203,9 @@ SALE_ALLOWED_FIELDS = {
     "refund_or_claim",
     "final_result_notes",
 }
+
+LEGACY_PURCHASE_UPSERT_FIELDS = PURCHASE_PATCH_FIELDS | RESALE_PATCH_FIELDS
+LEGACY_RESALE_UPSERT_FIELDS = RESALE_PATCH_FIELDS | SOLD_PATCH_FIELDS
 
 
 def _normalize_optional_text(value: Any) -> Optional[str]:
@@ -254,6 +221,10 @@ def _normalize_optional_text(value: Any) -> Optional[str]:
 def _normalize_optional_int(value: Any) -> Optional[int]:
     if value is None or value == "":
         return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, Decimal):
+        return int(value)
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -263,6 +234,8 @@ def _normalize_optional_int(value: Any) -> Optional[int]:
 def _normalize_optional_float(value: Any) -> Optional[float]:
     if value is None or value == "":
         return None
+    if isinstance(value, Decimal):
+        return float(value)
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -274,7 +247,7 @@ def _normalize_optional_bool(value: Any) -> Optional[bool]:
         return None
     if isinstance(value, bool):
         return value
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float, Decimal)):
         return bool(value)
     if isinstance(value, str):
         normalized = value.strip().lower()
@@ -344,6 +317,30 @@ def _normalize_source(value: Any) -> str:
     return normalized if normalized else DEFAULT_SOURCE
 
 
+def _normalize_for_column(column: str, value: Any) -> Any:
+    if column in DATETIME_FIELDS:
+        return _normalize_optional_datetime(value)
+    if column in INT_FIELDS:
+        return _normalize_optional_int(value)
+    if column in DECIMAL_FIELDS:
+        return _normalize_optional_float(value)
+    if column in BOOL_FIELDS:
+        return _normalize_optional_bool(value)
+    if column in JSON_TEXT_FIELDS:
+        return _normalize_json_text(value)
+    return _normalize_optional_text(value)
+
+
+def _is_blank(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, tuple, set, dict)):
+        return len(value) == 0
+    return False
+
+
 def _extract_product_id_from_url(url: Optional[str]) -> Optional[str]:
     normalized_url = _normalize_optional_text(url)
     if normalized_url is None:
@@ -370,594 +367,41 @@ def _safe_fetchone(cursor, query: str, params: tuple[Any, ...]) -> Optional[dict
     return row
 
 
-def _fetch_latest_analysis_job(cursor, *, source: str, product_id: Optional[str], url: Optional[str], user_id: Optional[str]):
-    if product_id is None and url is None:
-        return None
-
-    if product_id is not None:
-        return _safe_fetchone(
-            cursor,
-            """
-            SELECT source, product_id, url, title, price_krw, sort_date, created_at
-            FROM analysis_jobs
-            WHERE source = %s
-              AND product_id = %s
-              AND (%s IS NULL OR user_id = %s)
-            ORDER BY created_at DESC, id DESC
-            LIMIT 1
-            """,
-            (source, product_id, user_id, user_id),
-        )
-
-    return _safe_fetchone(
-        cursor,
-        """
-        SELECT source, product_id, url, title, price_krw, sort_date, created_at
-        FROM analysis_jobs
-        WHERE source = %s
-          AND url = %s
-          AND (%s IS NULL OR user_id = %s)
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1
-        """,
-        (source, url, user_id, user_id),
-    )
-
-
-def _fetch_latest_search_result(cursor, *, product_id: Optional[str]):
-    if product_id is None:
-        return None
-
-    return _safe_fetchone(
-        cursor,
-        """
-        SELECT
-            product_id,
-            title,
-            price,
-            sort_date,
-            url,
-            seller_store_seq,
-            seller_store_name,
-            fetched_at
-        FROM search_results
-        WHERE product_id = %s
-        ORDER BY fetched_at DESC, id DESC
-        LIMIT 1
-        """,
-        (product_id,),
-    )
-
-
-def _fetch_latest_alert_event(cursor, *, source: str, product_id: Optional[str], url: Optional[str], user_id: Optional[str]):
-    if product_id is None and url is None:
-        return None
-
-    if product_id is not None:
-        return _safe_fetchone(
-            cursor,
-            """
-            SELECT
-                source,
-                product_id,
-                url,
-                title,
-                body_text,
-                price_krw,
-                fair_price_krw,
-                product_type,
-                chip,
-                screen_inch,
-                ram_gb,
-                ssd_gb,
-                risk_score,
-                risk_keywords,
-                seller_store_seq,
-                seller_store_name,
-                sort_date,
-                created_at
-            FROM alert_events
-            WHERE source = %s
-              AND product_id = %s
-              AND (%s IS NULL OR user_id = %s)
-            ORDER BY created_at DESC, id DESC
-            LIMIT 1
-            """,
-            (source, product_id, user_id, user_id),
-        )
-
-    return _safe_fetchone(
-        cursor,
-        """
-        SELECT
-            source,
-            product_id,
-            url,
-            title,
-            body_text,
-            price_krw,
-            fair_price_krw,
-            product_type,
-            chip,
-            screen_inch,
-            ram_gb,
-            ssd_gb,
-            risk_score,
-            risk_keywords,
-            seller_store_seq,
-            seller_store_name,
-            sort_date,
-            created_at
-        FROM alert_events
-        WHERE source = %s
-          AND url = %s
-          AND (%s IS NULL OR user_id = %s)
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1
-        """,
-        (source, url, user_id, user_id),
-    )
-
-
-def _fetch_latest_listing_analysis(cursor, *, source: str, product_id: Optional[str], url: Optional[str]):
-    if product_id is None and url is None:
-        return None
-
-    if product_id is not None:
-        return _safe_fetchone(
-            cursor,
-            """
-            SELECT
-                lar.body_text,
-                lar.product_type,
-                lar.chip,
-                lar.screen_inch,
-                lar.ram_gb,
-                lar.ssd_gb,
-                lar.fair_price_krw,
-                lar.listing_price_krw,
-                lar.created_at
-            FROM listing_analysis_results lar
-            INNER JOIN analysis_jobs aj ON aj.id = lar.analysis_job_id
-            WHERE aj.source = %s
-              AND aj.product_id = %s
-            ORDER BY lar.created_at DESC, lar.id DESC
-            LIMIT 1
-            """,
-            (source, product_id),
-        )
-
-    return _safe_fetchone(
-        cursor,
-        """
-        SELECT
-            lar.body_text,
-            lar.product_type,
-            lar.chip,
-            lar.screen_inch,
-            lar.ram_gb,
-            lar.ssd_gb,
-            lar.fair_price_krw,
-            lar.listing_price_krw,
-            lar.created_at
-        FROM listing_analysis_results lar
-        INNER JOIN analysis_jobs aj ON aj.id = lar.analysis_job_id
-        WHERE aj.source = %s
-          AND aj.url = %s
-        ORDER BY lar.created_at DESC, lar.id DESC
-        LIMIT 1
-        """,
-        (source, url),
-    )
-
-
-def _fetch_latest_seen_product(cursor, *, product_id: Optional[str]):
-    numeric_product_id = _normalize_optional_int(product_id)
-    if numeric_product_id is None:
-        return None
-
-    row = _safe_fetchone(
-        cursor,
-        """
-        SELECT
-            seq,
-            product_url,
-            image_url,
-            first_seen_at,
-            last_sort_date,
-            sort_date,
-            last_title,
-            title,
-            last_price_krw,
-            price
-        FROM joongna_seen_products
-        WHERE seq = %s
-        LIMIT 1
-        """,
-        (numeric_product_id,),
-    )
-    if row is not None:
-        return row
-
-    return _safe_fetchone(
-        cursor,
-        """
-        SELECT
-            seq,
-            product_url,
-            image_url,
-            first_seen_at,
-            sort_date,
-            title,
-            price
-        FROM joongna_seen_products
-        WHERE seq = %s
-        LIMIT 1
-        """,
-        (numeric_product_id,),
-    )
-
-
-def _build_seed_snapshot(cursor, *, source: str, product_id: Optional[str], url: Optional[str], user_id: Optional[str]):
-    snapshot: dict[str, Any] = {
-        "source": source,
-        "product_id": product_id,
-        "url": url,
-    }
-
-    analysis_job = _fetch_latest_analysis_job(
-        cursor,
-        source=source,
-        product_id=product_id,
-        url=url,
-        user_id=user_id,
-    ) or {}
-    search_result = _fetch_latest_search_result(cursor, product_id=product_id) or {}
-    alert_event = _fetch_latest_alert_event(
-        cursor,
-        source=source,
-        product_id=product_id,
-        url=url,
-        user_id=user_id,
-    ) or {}
-    listing_result = _fetch_latest_listing_analysis(
-        cursor,
-        source=source,
-        product_id=product_id,
-        url=url,
-    ) or {}
-    seen_product = _fetch_latest_seen_product(cursor, product_id=product_id) or {}
-
-    resolved_product_id = _normalize_optional_text(
-        snapshot.get("product_id")
-        or analysis_job.get("product_id")
-        or search_result.get("product_id")
-        or alert_event.get("product_id")
-        or seen_product.get("seq")
-        or _extract_product_id_from_url(snapshot.get("url"))
-    )
-    if resolved_product_id is not None:
-        snapshot["product_id"] = resolved_product_id
-
-    resolved_url = _normalize_optional_text(
-        snapshot.get("url")
-        or analysis_job.get("url")
-        or search_result.get("url")
-        or alert_event.get("url")
-        or seen_product.get("product_url")
-    )
-    if resolved_url is None and resolved_product_id is not None and source == DEFAULT_SOURCE:
-        resolved_url = f"https://web.joongna.com/product/{resolved_product_id}"
-    snapshot["url"] = resolved_url
-
-    snapshot["title"] = _normalize_optional_text(
-        analysis_job.get("title")
-        or search_result.get("title")
-        or alert_event.get("title")
-        or seen_product.get("last_title")
-        or seen_product.get("title")
-    )
-
-    snapshot["listing_price_krw"] = _normalize_optional_int(
-        search_result.get("price")
-        or alert_event.get("price_krw")
-        or analysis_job.get("price_krw")
-        or listing_result.get("listing_price_krw")
-        or seen_product.get("last_price_krw")
-        or seen_product.get("price")
-    )
-
-    listing_created_at = (
-        _normalize_optional_datetime(search_result.get("sort_date"))
-        or _normalize_optional_datetime(alert_event.get("sort_date"))
-        or _normalize_optional_datetime(analysis_job.get("sort_date"))
-        or _normalize_optional_datetime(seen_product.get("last_sort_date"))
-        or _normalize_optional_datetime(seen_product.get("sort_date"))
-    )
-    if listing_created_at is not None:
-        snapshot["listing_created_at"] = listing_created_at
-
-    discovered_at = (
-        _normalize_optional_datetime(analysis_job.get("created_at"))
-        or _normalize_optional_datetime(alert_event.get("created_at"))
-        or _normalize_optional_datetime(search_result.get("fetched_at"))
-        or _normalize_optional_datetime(seen_product.get("first_seen_at"))
-        or datetime.utcnow().replace(microsecond=0)
-    )
-    snapshot["discovered_at"] = discovered_at
-
-    seller_store_seq = _normalize_optional_text(
-        search_result.get("seller_store_seq")
-        or alert_event.get("seller_store_seq")
-    )
-    if seller_store_seq is not None:
-        snapshot["seller_shop_id"] = seller_store_seq
-
-    seller_name = _normalize_optional_text(
-        search_result.get("seller_store_name")
-        or alert_event.get("seller_store_name")
-    )
-    if seller_name is not None:
-        snapshot["seller_nickname"] = seller_name
-
-    image_url = _normalize_optional_text(seen_product.get("image_url"))
-    if image_url is not None:
-        snapshot["image_urls"] = _normalize_json_text([image_url])
-
-    snapshot["body_text"] = _normalize_optional_text(
-        alert_event.get("body_text")
-        or listing_result.get("body_text")
-    )
-
-    snapshot["product_type"] = _normalize_optional_text(
-        alert_event.get("product_type")
-        or listing_result.get("product_type")
-    )
-    snapshot["chip"] = _normalize_optional_text(
-        alert_event.get("chip")
-        or listing_result.get("chip")
-    )
-    snapshot["screen_inch"] = _normalize_optional_int(
-        alert_event.get("screen_inch")
-        or listing_result.get("screen_inch")
-    )
-    snapshot["ram_gb"] = _normalize_optional_int(
-        alert_event.get("ram_gb")
-        or listing_result.get("ram_gb")
-    )
-    snapshot["ssd_gb"] = _normalize_optional_int(
-        alert_event.get("ssd_gb")
-        or listing_result.get("ssd_gb")
-    )
-    snapshot["fair_price_krw"] = _normalize_optional_int(
-        alert_event.get("fair_price_krw")
-        or listing_result.get("fair_price_krw")
-    )
-
-    risk_score = _normalize_optional_int(alert_event.get("risk_score"))
-    if risk_score is not None:
-        snapshot["risk_score"] = risk_score
-
-    reason_tags = _normalize_json_text(alert_event.get("risk_keywords"))
-    if reason_tags is not None:
-        snapshot["reason_tags"] = reason_tags
-
-    fair_price_krw = _normalize_optional_int(snapshot.get("fair_price_krw"))
-    listing_price_krw = _normalize_optional_int(snapshot.get("listing_price_krw"))
-
-    if fair_price_krw is not None and listing_price_krw is not None and fair_price_krw > 0:
-        snapshot["discount_rate_percent"] = round(
-            ((fair_price_krw - listing_price_krw) / fair_price_krw) * 100,
-            2,
-        )
-        snapshot["expected_profit_krw"] = fair_price_krw - listing_price_krw
-
-    snapshot["current_stage"] = (
-        "AUTO_ANALYZED"
-        if snapshot.get("product_type") and snapshot.get("fair_price_krw") is not None
-        else "DISCOVERED"
-    )
-
-    return snapshot
-
-
-def _normalize_for_column(column: str, value: Any) -> Any:
-    if column in DATETIME_FIELDS:
-        return _normalize_optional_datetime(value)
-    if column in INT_FIELDS:
-        return _normalize_optional_int(value)
-    if column in DECIMAL_FIELDS:
-        return _normalize_optional_float(value)
-    if column in BOOL_FIELDS:
-        return _normalize_optional_bool(value)
-    if column in JSON_TEXT_FIELDS:
-        return _normalize_json_text(value)
-    if column in TEXT_FIELDS:
-        return _normalize_optional_text(value)
-    return value
-
-
-def _find_row(cursor, *, source: str, product_id: Optional[str], url: Optional[str]) -> Optional[dict[str, Any]]:
-    if product_id is not None:
-        row = _safe_fetchone(
-            cursor,
-            """
-            SELECT id, current_stage, source, product_id, url
-            FROM resale_trade_journeys
-            WHERE source = %s
-              AND product_id = %s
-            LIMIT 1
-            """,
-            (source, product_id),
-        )
-        if row is not None:
-            return row
-
-    if url is None:
-        return None
-
-    return _safe_fetchone(
-        cursor,
-        """
-        SELECT id, current_stage, source, product_id, url
-        FROM resale_trade_journeys
-        WHERE source = %s
-          AND url = %s
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (source, url),
-    )
-
-
-def _upsert_seed_row(cursor, seed: dict[str, Any]) -> dict[str, Any]:
-    columns = [column for column in SEED_COLUMNS if seed.get(column) is not None]
-    if not columns:
-        columns = ["source"]
-        seed = {"source": DEFAULT_SOURCE}
-
-    placeholders = ", ".join(["%s"] * len(columns))
-    column_sql = ", ".join(columns)
-    update_sql = ", ".join([f"{column} = COALESCE(VALUES({column}), {column})" for column in columns])
-
-    query = (
-        f"INSERT INTO resale_trade_journeys ({column_sql}) VALUES ({placeholders}) "
-        f"ON DUPLICATE KEY UPDATE {update_sql}"
-    )
-    values = tuple(seed.get(column) for column in columns)
-    cursor.execute(query, values)
-
-    row = _find_row(
-        cursor,
-        source=seed.get("source") or DEFAULT_SOURCE,
-        product_id=_normalize_optional_text(seed.get("product_id")),
-        url=_normalize_optional_text(seed.get("url")),
-    )
-    if row is None:
-        raise RuntimeError("seed_row_not_found")
-
-    return row
-
-
-def _resolve_stage(existing_stage: Optional[str], candidate_stage: Optional[str]) -> Optional[str]:
-    normalized_existing = _normalize_optional_text(existing_stage)
-    normalized_candidate = _normalize_optional_text(candidate_stage)
-
-    if normalized_candidate is None:
-        return normalized_existing
-    if normalized_existing is None:
-        return normalized_candidate
-
-    existing_rank = STAGE_ORDER.get(normalized_existing, 0)
-    candidate_rank = STAGE_ORDER.get(normalized_candidate, 0)
-
-    if candidate_rank >= existing_rank:
-        return normalized_candidate
-    return normalized_existing
-
-
-def _derive_purchase_stage(update_values: dict[str, Any]) -> Optional[str]:
-    if any(
-        field in update_values
-        for field in (
-            "resale_listing_created_at",
-            "resale_url",
-            "resale_product_id",
-            "initial_resale_price_krw",
-        )
-    ):
-        return "LISTED"
-
-    if any(
-        field in update_values
-        for field in (
-            "cleaned_at",
-            "photo_taken_at",
-            "resale_title",
-            "resale_listing_price_krw",
-        )
-    ):
-        return "READY_FOR_RESALE"
-
-    if any(
-        field in update_values
-        for field in (
-            "serial_number",
-            "model_number",
-            "cpu_core_count",
-            "gpu_core_count",
-            "battery_health_percent",
-            "display_condition",
-            "repair_suspected",
-        )
-    ):
-        return "INSPECTED"
-
-    if any(
-        field in update_values
-        for field in (
-            "purchased_at",
-            "purchase_price_krw",
-            "purchase_method",
-            "purchase_location",
-        )
-    ):
-        return "PURCHASED"
-
-    if any(
-        field in update_values
-        for field in (
-            "decision_at",
-            "decision_result",
-            "target_purchase_price_krw",
-        )
-    ):
-        return "DECIDED"
-
-    if any(
-        field in update_values
-        for field in (
-            "contacted_at",
-            "seller_response_at",
-            "confirmed_price_krw",
-        )
-    ):
-        return "CONTACTED"
-
-    return None
-
-
-def _derive_sale_stage(update_values: dict[str, Any]) -> Optional[str]:
-    if any(
-        field in update_values
-        for field in (
-            "sold_at",
-            "sale_price_krw",
-            "buyer_nickname",
-            "sale_method",
-            "final_shipping_cost_krw",
-            "platform_fee_krw",
-        )
-    ):
-        return "FINALIZED"
-
-    if any(
-        field in update_values
-        for field in (
-            "view_count",
-            "favorite_count",
-            "inquiry_count",
-            "first_inquiry_at",
-            "negotiation_count",
-            "price_drop_count",
-        )
-    ):
-        return "LIVE_RESALE"
-
-    return None
-
-
-def _build_update_values(payload: dict[str, Any], *, allowed_fields: set[str]) -> dict[str, Any]:
+def _safe_fetchall(cursor, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+    try:
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+    except Exception as exc:
+        lowered = str(exc).lower()
+        if "unknown column" in lowered or "doesn't exist" in lowered or "unknown table" in lowered:
+            return []
+        raise
+
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def _get_resale_columns(cursor) -> tuple[set[str], set[str]]:
+    rows = _safe_fetchall(cursor, "SHOW COLUMNS FROM resale_trade_journeys", ())
+    all_columns: set[str] = set()
+    writable_columns: set[str] = set()
+    for row in rows:
+        name = _normalize_optional_text(row.get("Field"))
+        if name is None:
+            continue
+        all_columns.add(name)
+        extra = (_normalize_optional_text(row.get("Extra")) or "").lower()
+        if "generated" not in extra:
+            writable_columns.add(name)
+    return all_columns, writable_columns
+
+
+def _filter_writable_updates(updates: dict[str, Any], writable_columns: set[str]) -> dict[str, Any]:
+    return {key: value for key, value in updates.items() if key in writable_columns}
+
+
+def _prepare_sparse_updates(payload: dict[str, Any], allowed_fields: set[str], writable_columns: set[str]) -> dict[str, Any]:
     updates: dict[str, Any] = {}
     for field in allowed_fields:
         if field not in payload:
@@ -966,54 +410,441 @@ def _build_update_values(payload: dict[str, Any], *, allowed_fields: set[str]) -
         if normalized is None:
             continue
         updates[field] = normalized
+    return _filter_writable_updates(updates, writable_columns)
+
+
+def _fetch_journey_by_id(cursor, row_id: int, *, user_id: Optional[str] = None, for_update: bool = False) -> Optional[dict[str, Any]]:
+    lock_sql = " FOR UPDATE" if for_update else ""
+    if user_id is None:
+        return _safe_fetchone(
+            cursor,
+            f"""
+            SELECT *
+            FROM resale_trade_journeys
+            WHERE id = %s
+            LIMIT 1{lock_sql}
+            """,
+            (row_id,),
+        )
+
+    return _safe_fetchone(
+        cursor,
+        f"""
+        SELECT *
+        FROM resale_trade_journeys
+        WHERE id = %s
+          AND user_id = %s
+        LIMIT 1{lock_sql}
+        """,
+        (row_id, user_id),
+    )
+
+
+def _fetch_journey_by_key(
+    cursor,
+    *,
+    user_id: str,
+    source: str,
+    product_id: str,
+    for_update: bool = False,
+) -> Optional[dict[str, Any]]:
+    lock_sql = " FOR UPDATE" if for_update else ""
+    return _safe_fetchone(
+        cursor,
+        f"""
+        SELECT *
+        FROM resale_trade_journeys
+        WHERE user_id = %s
+          AND source = %s
+          AND product_id = %s
+        ORDER BY id DESC
+        LIMIT 1{lock_sql}
+        """,
+        (user_id, source, product_id),
+    )
+
+
+def _insert_or_get_journey_id(cursor, *, user_id: str, source: str, product_id: str, writable_columns: set[str]) -> int:
+    existing_row = _fetch_journey_by_key(
+        cursor,
+        user_id=user_id,
+        source=source,
+        product_id=product_id,
+        for_update=True,
+    )
+    if existing_row:
+        existing_id = _normalize_optional_int(existing_row.get("id"))
+        if existing_id is not None and existing_id > 0:
+            return existing_id
+
+    insert_columns = ["user_id", "source", "product_id"]
+    if "current_stage" in writable_columns:
+        insert_columns.append("current_stage")
+    placeholders = ", ".join(["%s"] * len(insert_columns))
+    column_sql = ", ".join(insert_columns)
+
+    values: list[Any] = [user_id, source, product_id]
+    if "current_stage" in writable_columns:
+        values.append(STAGE_DISCOVERED)
+
+    update_sql = "id = LAST_INSERT_ID(id), updated_at = CURRENT_TIMESTAMP"
+
+    cursor.execute(
+        f"""
+        INSERT INTO resale_trade_journeys ({column_sql})
+        VALUES ({placeholders})
+        ON DUPLICATE KEY UPDATE {update_sql}
+        """,
+        tuple(values),
+    )
+
+    row_id = _normalize_optional_int(cursor.lastrowid)
+    if row_id is None or row_id <= 0:
+        row = _fetch_journey_by_key(
+            cursor,
+            user_id=user_id,
+            source=source,
+            product_id=product_id,
+            for_update=True,
+        )
+        if not row:
+            raise RuntimeError("journey_insert_failed")
+        row_id = _normalize_optional_int(row.get("id"))
+    if row_id is None or row_id <= 0:
+        raise RuntimeError("journey_insert_failed")
+    return row_id
+
+
+def _safe_order_query(base_sql: str, order_candidates: list[str]) -> str:
+    for order_clause in order_candidates:
+        query = f"{base_sql} ORDER BY {order_clause} LIMIT 1"
+        if query:
+            return query
+    return f"{base_sql} LIMIT 1"
+
+
+def _fetch_latest_alert_event(cursor, *, user_id: str, source: str, product_id: str) -> dict[str, Any]:
+    base = """
+        SELECT *
+        FROM alert_events
+        WHERE source = %s
+          AND product_id = %s
+          AND (%s IS NULL OR user_id = %s)
+    """
+    query = _safe_order_query(
+        base,
+        [
+            "COALESCE(sort_date, analyzed_at, created_at) DESC, id DESC",
+            "created_at DESC, id DESC",
+            "id DESC",
+        ],
+    )
+    return _safe_fetchone(cursor, query, (source, product_id, user_id, user_id)) or {}
+
+
+def _fetch_latest_analysis_job(cursor, *, user_id: str, source: str, product_id: str) -> dict[str, Any]:
+    base = """
+        SELECT *
+        FROM analysis_jobs
+        WHERE source = %s
+          AND product_id = %s
+          AND (%s IS NULL OR user_id = %s)
+    """
+    query = _safe_order_query(
+        base,
+        [
+            "COALESCE(sort_date, processed_at, started_at, created_at) DESC, id DESC",
+            "created_at DESC, id DESC",
+            "id DESC",
+        ],
+    )
+    return _safe_fetchone(cursor, query, (source, product_id, user_id, user_id)) or {}
+
+
+def _fetch_latest_seen_product(cursor, *, product_id: str) -> dict[str, Any]:
+    numeric_product_id = _normalize_optional_int(product_id)
+    if numeric_product_id is None:
+        return {}
+
+    base = """
+        SELECT *
+        FROM joongna_seen_products
+        WHERE seq = %s
+    """
+    query = _safe_order_query(
+        base,
+        [
+            "COALESCE(last_sort_date, sort_date, first_seen_at) DESC",
+            "first_seen_at DESC",
+        ],
+    )
+    return _safe_fetchone(cursor, query, (numeric_product_id,)) or {}
+
+
+def _fetch_latest_search_result(cursor, *, product_id: str) -> dict[str, Any]:
+    base = """
+        SELECT *
+        FROM search_results
+        WHERE product_id = %s
+    """
+    query = _safe_order_query(
+        base,
+        [
+            "COALESCE(sort_date, fetched_at, created_at) DESC, id DESC",
+            "fetched_at DESC, id DESC",
+            "id DESC",
+        ],
+    )
+    return _safe_fetchone(cursor, query, (product_id,)) or {}
+
+
+def _fetch_latest_listing_analysis(cursor, *, source: str, product_id: str) -> dict[str, Any]:
+    joined = _safe_fetchone(
+        cursor,
+        """
+        SELECT lar.*, aj.source AS analysis_source, aj.product_id AS analysis_product_id, aj.created_at AS analysis_job_created_at
+        FROM listing_analysis_results lar
+        INNER JOIN analysis_jobs aj ON aj.id = lar.analysis_job_id
+        WHERE aj.source = %s
+          AND aj.product_id = %s
+        ORDER BY COALESCE(lar.created_at, aj.created_at) DESC, lar.id DESC
+        LIMIT 1
+        """,
+        (source, product_id),
+    )
+    if joined:
+        return joined
+
+    direct = _safe_fetchone(
+        cursor,
+        """
+        SELECT *
+        FROM listing_analysis_results
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        (),
+    )
+    return direct or {}
+
+
+def _first_non_blank(*values: Any) -> Any:
+    for value in values:
+        if not _is_blank(value):
+            return value
+    return None
+
+
+def _build_alert_mapping(row: dict[str, Any]) -> dict[str, Any]:
+    if not row:
+        return {}
+
+    listing_price = _normalize_optional_int(row.get("price_krw"))
+    fair_price = _normalize_optional_int(row.get("fair_price_krw"))
+    target_price = _normalize_optional_int(row.get("target_price_krw"))
+
+    expected_profit = None
+    if target_price is not None:
+        expected_profit = target_price
+    elif fair_price is not None and listing_price is not None:
+        expected_profit = fair_price - listing_price
+
+    image_value = _first_non_blank(row.get("listing_image_url"), row.get("image_url"))
+    image_urls = None
+    if not _is_blank(image_value):
+        image_urls = _normalize_json_text([_normalize_optional_text(image_value)])
+
+    return {
+        "source": _normalize_optional_text(row.get("source")),
+        "product_id": _normalize_optional_text(row.get("product_id")),
+        "url": _normalize_optional_text(row.get("url")),
+        "title": _normalize_optional_text(row.get("title")),
+        "listing_created_at": _normalize_optional_datetime(row.get("sort_date")),
+        "discovered_at": _normalize_optional_datetime(_first_non_blank(row.get("analyzed_at"), row.get("created_at"))),
+        "listing_price_krw": listing_price,
+        "product_type": _normalize_optional_text(row.get("product_type")),
+        "chip": _normalize_optional_text(row.get("chip")),
+        "screen_inch": _normalize_optional_int(row.get("screen_inch")),
+        "ram_gb": _normalize_optional_int(row.get("ram_gb")),
+        "ssd_gb": _normalize_optional_int(row.get("ssd_gb")),
+        "fair_price_krw": fair_price,
+        "discount_rate_percent": _normalize_optional_float(row.get("drop_rate_percent")),
+        "expected_profit_krw": expected_profit,
+        "risk_score": _normalize_optional_int(row.get("risk_score")),
+        "reason_tags": _normalize_json_text(row.get("risk_keywords")),
+        "body_text": _normalize_optional_text(_first_non_blank(row.get("body_text"), row.get("body_excerpt"))),
+        "image_urls": image_urls,
+        "seller_nickname": _normalize_optional_text(row.get("seller_store_name")),
+        "seller_shop_id": _normalize_optional_text(row.get("seller_store_seq")),
+        "watch_rule_id": _normalize_optional_int(row.get("watch_rule_id")),
+        "analysis_job_id": _normalize_optional_int(row.get("analysis_job_id")),
+    }
+
+
+def _build_analysis_job_mapping(row: dict[str, Any]) -> dict[str, Any]:
+    if not row:
+        return {}
+
+    return {
+        "source": _normalize_optional_text(row.get("source")),
+        "product_id": _normalize_optional_text(row.get("product_id")),
+        "url": _normalize_optional_text(row.get("url")),
+        "title": _normalize_optional_text(row.get("title")),
+        "listing_created_at": _normalize_optional_datetime(row.get("sort_date")),
+        "discovered_at": _normalize_optional_datetime(_first_non_blank(row.get("analyzed_at"), row.get("created_at"))),
+        "listing_price_krw": _normalize_optional_int(row.get("price_krw")),
+        "product_type": _normalize_optional_text(row.get("product_type")),
+        "chip": _normalize_optional_text(row.get("chip")),
+        "screen_inch": _normalize_optional_int(row.get("screen_inch")),
+        "ram_gb": _normalize_optional_int(row.get("ram_gb")),
+        "ssd_gb": _normalize_optional_int(row.get("ssd_gb")),
+        "fair_price_krw": _normalize_optional_int(row.get("fair_price_krw")),
+        "discount_rate_percent": _normalize_optional_float(row.get("drop_rate_percent")),
+        "risk_score": _normalize_optional_int(row.get("risk_score")),
+        "reason_tags": _normalize_json_text(row.get("risk_keywords")),
+        "body_text": _normalize_optional_text(row.get("body_text")),
+    }
+
+
+def _build_seen_product_mapping(row: dict[str, Any]) -> dict[str, Any]:
+    if not row:
+        return {}
+
+    image_urls = None
+    image_url = _normalize_optional_text(row.get("image_url"))
+    if image_url:
+        image_urls = _normalize_json_text([image_url])
+
+    return {
+        "source": DEFAULT_SOURCE,
+        "product_id": _normalize_optional_text(row.get("seq")),
+        "url": _normalize_optional_text(row.get("product_url")),
+        "title": _normalize_optional_text(_first_non_blank(row.get("last_title"), row.get("title"))),
+        "listing_created_at": _normalize_optional_datetime(_first_non_blank(row.get("last_sort_date"), row.get("sort_date"))),
+        "discovered_at": _normalize_optional_datetime(_first_non_blank(row.get("discovered_at"), row.get("created_at"), row.get("first_seen_at"))),
+        "listing_price_krw": _normalize_optional_int(_first_non_blank(row.get("last_price_krw"), row.get("price_krw"), row.get("price"))),
+        "seller_nickname": _normalize_optional_text(_first_non_blank(row.get("seller_nickname"), row.get("seller_store_name"))),
+        "seller_shop_id": _normalize_optional_text(_first_non_blank(row.get("seller_shop_id"), row.get("seller_store_seq"))),
+        "seller_location": _normalize_optional_text(row.get("seller_location")),
+        "image_urls": image_urls,
+        "body_text": _normalize_optional_text(row.get("body_text")),
+    }
+
+
+def _build_search_result_mapping(row: dict[str, Any], *, source: str) -> dict[str, Any]:
+    if not row:
+        return {}
+
+    return {
+        "source": source,
+        "product_id": _normalize_optional_text(row.get("product_id")),
+        "url": _normalize_optional_text(row.get("url")),
+        "title": _normalize_optional_text(row.get("title")),
+        "listing_price_krw": _normalize_optional_int(_first_non_blank(row.get("price_krw"), row.get("price"))),
+        "seller_nickname": _normalize_optional_text(_first_non_blank(row.get("seller_nickname"), row.get("seller_store_name"))),
+        "seller_shop_id": _normalize_optional_text(_first_non_blank(row.get("seller_shop_id"), row.get("seller_store_seq"))),
+        "seller_location": _normalize_optional_text(row.get("seller_location")),
+        "image_urls": _normalize_json_text(_first_non_blank(row.get("image_urls"), row.get("image_url"))),
+        "body_text": _normalize_optional_text(row.get("body_text")),
+        "discovered_at": _normalize_optional_datetime(_first_non_blank(row.get("created_at"), row.get("fetched_at"))),
+    }
+
+
+def _build_listing_analysis_mapping(row: dict[str, Any]) -> dict[str, Any]:
+    if not row:
+        return {}
+
+    return {
+        "product_type": _normalize_optional_text(row.get("product_type")),
+        "chip": _normalize_optional_text(row.get("chip")),
+        "screen_inch": _normalize_optional_int(row.get("screen_inch")),
+        "ram_gb": _normalize_optional_int(row.get("ram_gb")),
+        "ssd_gb": _normalize_optional_int(row.get("ssd_gb")),
+        "fair_price_krw": _normalize_optional_int(row.get("fair_price_krw")),
+        "listing_price_krw": _normalize_optional_int(row.get("listing_price_krw")),
+        "discount_rate_percent": _normalize_optional_float(_first_non_blank(row.get("discount_rate_percent"), row.get("diff_ratio"))),
+        "expected_profit_krw": _normalize_optional_int(_first_non_blank(row.get("expected_profit_krw"), row.get("diff_amount_krw"))),
+        "discovered_at": _normalize_optional_datetime(_first_non_blank(row.get("analyzed_at"), row.get("created_at"))),
+        "body_text": _normalize_optional_text(row.get("body_text")),
+    }
+
+
+def _merge_by_priority(
+    *,
+    user_values: dict[str, Any],
+    existing_row: dict[str, Any],
+    source_candidates: list[dict[str, Any]],
+    writable_columns: set[str],
+) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
+
+    for field in AUTO_HYDRATE_FIELDS:
+        if field not in writable_columns:
+            continue
+
+        user_value = user_values.get(field)
+        if not _is_blank(user_value):
+            normalized_user = _normalize_for_column(field, user_value)
+            if normalized_user is not None and normalized_user != existing_row.get(field):
+                updates[field] = normalized_user
+            continue
+
+        existing_value = existing_row.get(field)
+        if not _is_blank(existing_value):
+            continue
+
+        for candidate in source_candidates:
+            candidate_value = candidate.get(field)
+            if _is_blank(candidate_value):
+                continue
+            normalized_candidate = _normalize_for_column(field, candidate_value)
+            if normalized_candidate is None:
+                continue
+            updates[field] = normalized_candidate
+            break
+
+    resolved_fair = _normalize_optional_int(
+        updates.get("fair_price_krw") if "fair_price_krw" in updates else existing_row.get("fair_price_krw")
+    )
+    resolved_listing = _normalize_optional_int(
+        updates.get("listing_price_krw") if "listing_price_krw" in updates else existing_row.get("listing_price_krw")
+    )
+
+    if (
+        "discount_rate_percent" in writable_columns
+        and _is_blank(existing_row.get("discount_rate_percent"))
+        and "discount_rate_percent" not in updates
+        and resolved_fair is not None
+        and resolved_fair > 0
+        and resolved_listing is not None
+    ):
+        updates["discount_rate_percent"] = round(((resolved_fair - resolved_listing) / resolved_fair) * 100.0, 2)
+
+    if (
+        "expected_profit_krw" in writable_columns
+        and _is_blank(existing_row.get("expected_profit_krw"))
+        and "expected_profit_krw" not in updates
+        and resolved_fair is not None
+        and resolved_listing is not None
+    ):
+        updates["expected_profit_krw"] = resolved_fair - resolved_listing
+
     return updates
 
 
-def _update_row_by_id(cursor, row_id: int, updates: dict[str, Any]):
+def _apply_updates(cursor, *, row_id: int, updates: dict[str, Any]):
     if not updates:
         return
-
     assignments = ", ".join([f"{column} = %s" for column in updates.keys()])
-    query = f"UPDATE resale_trade_journeys SET {assignments} WHERE id = %s"
     values = tuple(updates.values()) + (row_id,)
-    cursor.execute(query, values)
+    cursor.execute(f"UPDATE resale_trade_journeys SET {assignments} WHERE id = %s", values)
 
 
-def _prepare_identity(payload: dict[str, Any]):
-    source = _normalize_source(payload.get("source"))
-    user_id = _normalize_optional_text(payload.get("user_id"))
-    url = _normalize_optional_text(payload.get("url"))
-
-    product_id = _normalize_optional_text(payload.get("product_id"))
-    if product_id is None:
-        product_id = _extract_product_id_from_url(url)
-
-    if product_id is None and url is None:
-        raise ValueError("invalid_identity")
-
-    if url is None and product_id is not None and source == DEFAULT_SOURCE:
-        url = f"https://web.joongna.com/product/{product_id}"
-
-    return source, product_id, url, user_id
-
-
-def _load_row_summary(cursor, row_id: int) -> dict[str, Any]:
+def _load_row_detail(cursor, row_id: int) -> dict[str, Any]:
     row = _safe_fetchone(
         cursor,
         """
-        SELECT
-            id,
-            user_id,
-            source,
-            product_id,
-            url,
-            current_stage,
-            purchased_at,
-            sold_at,
-            net_profit_krw,
-            roi_percent,
-            created_at,
-            updated_at
+        SELECT *
         FROM resale_trade_journeys
         WHERE id = %s
         LIMIT 1
@@ -1023,59 +854,224 @@ def _load_row_summary(cursor, row_id: int) -> dict[str, Any]:
     return row or {"id": row_id}
 
 
-def _upsert_common(payload: dict[str, Any], *, allowed_fields: set[str], stage_deriver) -> dict[str, Any]:
-    source, product_id, url, user_id = _prepare_identity(payload)
+def _derive_stage_after_purchase(row: dict[str, Any], payload_updates: dict[str, Any]) -> Optional[str]:
+    inspection_keys = {
+        "purchased_at",
+        "purchase_price_krw",
+        "battery_health_percent",
+        "battery_cycle_count",
+        "exterior_grade",
+        "included_items",
+        "inspection_notes",
+        "truetone_ok",
+        "purchase_method",
+        "purchase_location",
+        "transport_cost_krw",
+        "shipping_cost_krw",
+        "payment_method",
+        "serial_number",
+        "model_number",
+        "applecare_status",
+        "activation_lock_off",
+        "mdm_lock_none",
+        "battery_condition",
+        "display_condition",
+        "keyboard_condition",
+        "trackpad_condition",
+        "speaker_condition",
+        "camera_condition",
+        "wifi_bluetooth_ok",
+        "repair_suspected",
+        "cpu_core_count",
+        "gpu_core_count",
+    }
+
+    if any(field in payload_updates for field in inspection_keys):
+        return STAGE_INSPECTED
+
+    current_stage = _normalize_optional_text(row.get("current_stage"))
+    return current_stage or STAGE_DISCOVERED
+
+
+def _derive_stage_after_resale_or_sold(row: dict[str, Any]) -> str:
+    sale_price = _normalize_optional_int(row.get("sale_price_krw"))
+    sold_at = _normalize_optional_datetime(row.get("sold_at"))
+    if sale_price is not None or sold_at is not None:
+        return STAGE_SOLD
+
+    has_resale_listing = any(
+        not _is_blank(row.get(field))
+        for field in (
+            "resale_listing_price_krw",
+            "resale_platform",
+            "resale_url",
+            "resale_listing_created_at",
+        )
+    )
+    if has_resale_listing:
+        return STAGE_RESALE_LISTED
+
+    current_stage = _normalize_optional_text(row.get("current_stage"))
+    return current_stage or STAGE_DISCOVERED
+
+
+def _build_purchase_calculated_updates(row: dict[str, Any], writable_columns: set[str]) -> dict[str, Any]:
+    calculated: dict[str, Any] = {}
+
+    fair_price = _normalize_optional_int(row.get("fair_price_krw"))
+    purchase_price = _normalize_optional_int(row.get("purchase_price_krw"))
+    total_cost = _normalize_optional_int(row.get("total_cost_krw"))
+
+    if fair_price is not None and fair_price > 0 and purchase_price is not None and "discount_rate_percent" in writable_columns:
+        calculated["discount_rate_percent"] = round(((fair_price - purchase_price) / fair_price) * 100.0, 2)
+
+    if fair_price is not None and total_cost is not None and "expected_profit_krw" in writable_columns:
+        calculated["expected_profit_krw"] = fair_price - total_cost
+
+    return calculated
+
+
+def _build_sold_calculated_updates(row: dict[str, Any], writable_columns: set[str]) -> dict[str, Any]:
+    calculated: dict[str, Any] = {}
+
+    sale_price = _normalize_optional_int(row.get("sale_price_krw"))
+    purchase_price = _normalize_optional_int(row.get("purchase_price_krw"))
+    total_cost = _normalize_optional_int(row.get("total_cost_krw"))
+    final_shipping = _normalize_optional_int(row.get("final_shipping_cost_krw")) or 0
+    platform_fee = _normalize_optional_int(row.get("platform_fee_krw")) or 0
+
+    if sale_price is not None and purchase_price is not None and "gross_profit_krw" in writable_columns:
+        calculated["gross_profit_krw"] = sale_price - purchase_price
+
+    if sale_price is not None and total_cost is not None and "net_profit_krw" in writable_columns:
+        calculated["net_profit_krw"] = sale_price - total_cost - final_shipping - platform_fee
+
+    if total_cost is not None and total_cost > 0 and sale_price is not None and "roi_percent" in writable_columns:
+        net = sale_price - total_cost - final_shipping - platform_fee
+        calculated["roi_percent"] = round((net / total_cost) * 100.0, 2)
+
+    resale_created_at = _normalize_optional_datetime(row.get("resale_listing_created_at"))
+    sold_at = _normalize_optional_datetime(row.get("sold_at"))
+    purchased_at = _normalize_optional_datetime(row.get("purchased_at"))
+
+    if resale_created_at and sold_at and "sale_duration_hours" in writable_columns:
+        calculated["sale_duration_hours"] = int((sold_at - resale_created_at).total_seconds() // 3600)
+
+    if purchased_at and sold_at and "total_holding_time_hours" in writable_columns:
+        holding_hours = int((sold_at - purchased_at).total_seconds() // 3600)
+        calculated["total_holding_time_hours"] = holding_hours
+        net_profit = _normalize_optional_int(_first_non_blank(calculated.get("net_profit_krw"), row.get("net_profit_krw")))
+        if net_profit is not None and holding_hours > 0 and "profit_per_day_krw" in writable_columns:
+            calculated["profit_per_day_krw"] = int(round(net_profit / (holding_hours / 24.0), 0))
+
+    return calculated
+
+
+def _normalize_identity(*, user_id: str, source: Any, product_id: Any) -> tuple[str, str, str]:
+    normalized_user_id = _normalize_optional_text(user_id)
+    if normalized_user_id is None:
+        raise ValueError("invalid_user_id")
+
+    normalized_source = _normalize_source(source)
+
+    normalized_product_id = _normalize_optional_text(product_id)
+    if normalized_product_id is None:
+        raise ValueError("invalid_product_id")
+
+    return normalized_user_id, normalized_source, normalized_product_id
+
+
+def _hydrate_row_by_product(
+    cursor,
+    *,
+    row: dict[str, Any],
+    user_id: str,
+    source: str,
+    product_id: str,
+    user_values: Optional[dict[str, Any]],
+    writable_columns: set[str],
+) -> dict[str, Any]:
+    alert_event = _build_alert_mapping(_fetch_latest_alert_event(cursor, user_id=user_id, source=source, product_id=product_id))
+    analysis_job = _build_analysis_job_mapping(_fetch_latest_analysis_job(cursor, user_id=user_id, source=source, product_id=product_id))
+    seen_product = _build_seen_product_mapping(_fetch_latest_seen_product(cursor, product_id=product_id))
+    search_result = _build_search_result_mapping(_fetch_latest_search_result(cursor, product_id=product_id), source=source)
+    listing_analysis = _build_listing_analysis_mapping(_fetch_latest_listing_analysis(cursor, source=source, product_id=product_id))
+
+    merged_updates = _merge_by_priority(
+        user_values=user_values or {},
+        existing_row=row,
+        source_candidates=[
+            alert_event,
+            analysis_job,
+            seen_product,
+            search_result,
+            listing_analysis,
+        ],
+        writable_columns=writable_columns,
+    )
+
+    row_id = _normalize_optional_int(row.get("id"))
+    if row_id is None:
+        return row
+
+    updates_to_apply = _filter_writable_updates(merged_updates, writable_columns)
+    _apply_updates(cursor, row_id=row_id, updates=updates_to_apply)
+    return _load_row_detail(cursor, row_id)
+
+
+def hydrate_resale_trade_journey_by_product(
+    user_id: str,
+    source: str,
+    product_id: str,
+    *,
+    row_id: Optional[int] = None,
+    user_values: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    normalized_user_id, normalized_source, normalized_product_id = _normalize_identity(
+        user_id=user_id,
+        source=source,
+        product_id=product_id,
+    )
 
     connection = None
     cursor = None
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
+        _, writable_columns = _get_resale_columns(cursor)
 
-        seed = _build_seed_snapshot(
+        if row_id is not None:
+            row = _fetch_journey_by_id(cursor, row_id, user_id=normalized_user_id, for_update=True)
+        else:
+            row = _fetch_journey_by_key(
+                cursor,
+                user_id=normalized_user_id,
+                source=normalized_source,
+                product_id=normalized_product_id,
+                for_update=True,
+            )
+
+        if not row:
+            return {"ok": False, "reason": "not_found"}
+
+        hydrated_row = _hydrate_row_by_product(
             cursor,
-            source=source,
-            product_id=product_id,
-            url=url,
-            user_id=user_id,
+            row=row,
+            user_id=normalized_user_id,
+            source=normalized_source,
+            product_id=normalized_product_id,
+            user_values=user_values,
+            writable_columns=writable_columns,
         )
 
-        if user_id is not None:
-            seed["user_id"] = user_id
-        seed["source"] = source
-        seed["product_id"] = product_id
-        seed["url"] = url
-
-        seeded_row = _upsert_seed_row(cursor, seed)
-        row_id = int(seeded_row.get("id"))
-
-        updates = _build_update_values(payload, allowed_fields=allowed_fields)
-        updates["source"] = source
-        if product_id is not None:
-            updates["product_id"] = product_id
-        if url is not None:
-            updates["url"] = url
-        if user_id is not None:
-            updates["user_id"] = user_id
-
-        candidate_stage = stage_deriver(updates)
-        next_stage = _resolve_stage(seeded_row.get("current_stage"), candidate_stage)
-        if next_stage is not None:
-            updates["current_stage"] = next_stage
-
-        _update_row_by_id(cursor, row_id=row_id, updates=updates)
-
         connection.commit()
-
-        row_summary = _load_row_summary(cursor, row_id)
         return {
             "ok": True,
-            "id": row_id,
-            "source": source,
-            "product_id": product_id,
-            "url": url,
-            "current_stage": row_summary.get("current_stage"),
-            "row": row_summary,
+            "id": hydrated_row.get("id"),
+            "source": hydrated_row.get("source"),
+            "product_id": hydrated_row.get("product_id"),
+            "current_stage": hydrated_row.get("current_stage"),
+            "row": hydrated_row,
         }
     finally:
         if cursor is not None:
@@ -1084,17 +1080,380 @@ def _upsert_common(payload: dict[str, Any], *, allowed_fields: set[str], stage_d
             connection.close()
 
 
+def create_or_hydrate_resale_trade_journey_from_product(
+    *,
+    user_id: str,
+    source: str,
+    product_id: str,
+) -> dict[str, Any]:
+    normalized_user_id, normalized_source, normalized_product_id = _normalize_identity(
+        user_id=user_id,
+        source=source,
+        product_id=product_id,
+    )
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        _, writable_columns = _get_resale_columns(cursor)
+
+        row_id = _insert_or_get_journey_id(
+            cursor,
+            user_id=normalized_user_id,
+            source=normalized_source,
+            product_id=normalized_product_id,
+            writable_columns=writable_columns,
+        )
+
+        row = _fetch_journey_by_id(cursor, row_id, user_id=normalized_user_id, for_update=True)
+        if not row:
+            raise RuntimeError("journey_not_found_after_upsert")
+
+        user_values = {
+            "user_id": normalized_user_id,
+            "source": normalized_source,
+            "product_id": normalized_product_id,
+        }
+
+        hydrated_row = _hydrate_row_by_product(
+            cursor,
+            row=row,
+            user_id=normalized_user_id,
+            source=normalized_source,
+            product_id=normalized_product_id,
+            user_values=user_values,
+            writable_columns=writable_columns,
+        )
+
+        if "current_stage" in writable_columns and _is_blank(hydrated_row.get("current_stage")):
+            _apply_updates(cursor, row_id=row_id, updates={"current_stage": STAGE_DISCOVERED})
+            hydrated_row = _load_row_detail(cursor, row_id)
+
+        connection.commit()
+
+        return {
+            "ok": True,
+            "id": row_id,
+            "source": normalized_source,
+            "product_id": normalized_product_id,
+            "current_stage": hydrated_row.get("current_stage"),
+            "row": hydrated_row,
+        }
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def patch_resale_trade_journey_purchase(*, user_id: str, journey_id: int, updates: dict[str, Any]) -> dict[str, Any]:
+    normalized_user_id = _normalize_optional_text(user_id)
+    if normalized_user_id is None:
+        raise ValueError("invalid_user_id")
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        _, writable_columns = _get_resale_columns(cursor)
+
+        row = _fetch_journey_by_id(cursor, journey_id, user_id=normalized_user_id, for_update=True)
+        if not row:
+            return {"ok": False, "reason": "not_found"}
+
+        sparse_updates = _prepare_sparse_updates(updates or {}, PURCHASE_PATCH_FIELDS, writable_columns)
+        _apply_updates(cursor, row_id=journey_id, updates=sparse_updates)
+
+        row_after_update = _load_row_detail(cursor, journey_id)
+        source = _normalize_optional_text(row_after_update.get("source"))
+        product_id = _normalize_optional_text(row_after_update.get("product_id"))
+
+        if source and product_id:
+            row_after_update = _hydrate_row_by_product(
+                cursor,
+                row=row_after_update,
+                user_id=normalized_user_id,
+                source=source,
+                product_id=product_id,
+                user_values={},
+                writable_columns=writable_columns,
+            )
+
+        calculated_updates = _build_purchase_calculated_updates(row_after_update, writable_columns)
+
+        next_stage = _derive_stage_after_purchase(row_after_update, sparse_updates)
+        if "current_stage" in writable_columns and next_stage:
+            calculated_updates["current_stage"] = next_stage
+
+        _apply_updates(cursor, row_id=journey_id, updates=_filter_writable_updates(calculated_updates, writable_columns))
+
+        connection.commit()
+
+        final_row = _load_row_detail(cursor, journey_id)
+        return {
+            "ok": True,
+            "id": journey_id,
+            "source": final_row.get("source"),
+            "product_id": final_row.get("product_id"),
+            "current_stage": final_row.get("current_stage"),
+            "row": final_row,
+        }
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def _patch_resale_or_sold(*, user_id: str, journey_id: int, updates: dict[str, Any], allowed_fields: set[str]) -> dict[str, Any]:
+    normalized_user_id = _normalize_optional_text(user_id)
+    if normalized_user_id is None:
+        raise ValueError("invalid_user_id")
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        _, writable_columns = _get_resale_columns(cursor)
+
+        row = _fetch_journey_by_id(cursor, journey_id, user_id=normalized_user_id, for_update=True)
+        if not row:
+            return {"ok": False, "reason": "not_found"}
+
+        sparse_updates = _prepare_sparse_updates(updates or {}, allowed_fields, writable_columns)
+        _apply_updates(cursor, row_id=journey_id, updates=sparse_updates)
+
+        row_after_update = _load_row_detail(cursor, journey_id)
+        source = _normalize_optional_text(row_after_update.get("source"))
+        product_id = _normalize_optional_text(row_after_update.get("product_id"))
+
+        if source and product_id:
+            row_after_update = _hydrate_row_by_product(
+                cursor,
+                row=row_after_update,
+                user_id=normalized_user_id,
+                source=source,
+                product_id=product_id,
+                user_values={},
+                writable_columns=writable_columns,
+            )
+
+        calculated_updates = _build_sold_calculated_updates(row_after_update, writable_columns)
+        if "current_stage" in writable_columns:
+            calculated_updates["current_stage"] = _derive_stage_after_resale_or_sold(row_after_update)
+
+        _apply_updates(cursor, row_id=journey_id, updates=_filter_writable_updates(calculated_updates, writable_columns))
+
+        connection.commit()
+
+        final_row = _load_row_detail(cursor, journey_id)
+        return {
+            "ok": True,
+            "id": journey_id,
+            "source": final_row.get("source"),
+            "product_id": final_row.get("product_id"),
+            "current_stage": final_row.get("current_stage"),
+            "row": final_row,
+        }
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def patch_resale_trade_journey_resale(*, user_id: str, journey_id: int, updates: dict[str, Any]) -> dict[str, Any]:
+    return _patch_resale_or_sold(
+        user_id=user_id,
+        journey_id=journey_id,
+        updates=updates,
+        allowed_fields=RESALE_PATCH_FIELDS,
+    )
+
+
+def patch_resale_trade_journey_sold(*, user_id: str, journey_id: int, updates: dict[str, Any]) -> dict[str, Any]:
+    return _patch_resale_or_sold(
+        user_id=user_id,
+        journey_id=journey_id,
+        updates=updates,
+        allowed_fields=SOLD_PATCH_FIELDS,
+    )
+
+
+def list_completed_resale_trade_journeys(*, user_id: str, limit: int = 200) -> dict[str, Any]:
+    normalized_user_id = _normalize_optional_text(user_id)
+    if normalized_user_id is None:
+        raise ValueError("invalid_user_id")
+
+    safe_limit = 200 if limit <= 0 else min(limit, 1000)
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        rows = _safe_fetchall(
+            cursor,
+            """
+            SELECT *
+            FROM resale_trade_journeys
+            WHERE user_id = %s
+              AND current_stage = %s
+            ORDER BY COALESCE(sold_at, updated_at) DESC, id DESC
+            LIMIT %s
+            """,
+            (normalized_user_id, STAGE_SOLD, safe_limit),
+        )
+        return {"ok": True, "items": rows}
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def delete_completed_resale_trade_journeys(*, user_id: str, journey_ids: Optional[list[int]] = None, delete_all: bool = False) -> dict[str, Any]:
+    normalized_user_id = _normalize_optional_text(user_id)
+    if normalized_user_id is None:
+        raise ValueError("invalid_user_id")
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        if delete_all:
+            cursor.execute(
+                """
+                DELETE FROM resale_trade_journeys
+                WHERE user_id = %s
+                  AND current_stage = %s
+                """,
+                (normalized_user_id, STAGE_SOLD),
+            )
+            deleted = cursor.rowcount or 0
+        else:
+            normalized_ids = sorted({int(value) for value in (journey_ids or []) if _normalize_optional_int(value) is not None})
+            if not normalized_ids:
+                return {"ok": True, "deleted_count": 0}
+
+            placeholders = ", ".join(["%s"] * len(normalized_ids))
+            params: list[Any] = [normalized_user_id, STAGE_SOLD, *normalized_ids]
+            cursor.execute(
+                f"""
+                DELETE FROM resale_trade_journeys
+                WHERE user_id = %s
+                  AND current_stage = %s
+                  AND id IN ({placeholders})
+                """,
+                tuple(params),
+            )
+            deleted = cursor.rowcount or 0
+
+        connection.commit()
+        return {"ok": True, "deleted_count": int(deleted)}
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+# ------------------------------
+# Backward-compatible wrappers
+# ------------------------------
+
+def _legacy_prepare_identity(payload: dict[str, Any]) -> tuple[str, str, str]:
+    source = _normalize_source(payload.get("source"))
+
+    product_id = _normalize_optional_text(payload.get("product_id"))
+    if product_id is None:
+        product_id = _extract_product_id_from_url(_normalize_optional_text(payload.get("url")))
+
+    user_id = _normalize_optional_text(payload.get("user_id"))
+
+    if user_id is None:
+        raise ValueError("invalid_user_id")
+    if product_id is None:
+        raise ValueError("invalid_product_id")
+
+    return user_id, source, product_id
+
+
 def upsert_resale_trade_after_purchase(**payload):
-    return _upsert_common(
-        payload,
-        allowed_fields=PURCHASE_ALLOWED_FIELDS,
-        stage_deriver=_derive_purchase_stage,
+    user_id, source, product_id = _legacy_prepare_identity(payload)
+    created = create_or_hydrate_resale_trade_journey_from_product(
+        user_id=user_id,
+        source=source,
+        product_id=product_id,
+    )
+    if not created.get("ok"):
+        return created
+
+    row_id = _normalize_optional_int(created.get("id"))
+    if row_id is None:
+        return {"ok": False, "reason": "journey_create_failed"}
+
+    updates = {
+        key: value
+        for key, value in payload.items()
+        if key in LEGACY_PURCHASE_UPSERT_FIELDS
+    }
+
+    return patch_resale_trade_journey_purchase(
+        user_id=user_id,
+        journey_id=row_id,
+        updates=updates,
     )
 
 
 def upsert_resale_trade_after_resale(**payload):
-    return _upsert_common(
-        payload,
-        allowed_fields=SALE_ALLOWED_FIELDS,
-        stage_deriver=_derive_sale_stage,
+    user_id, source, product_id = _legacy_prepare_identity(payload)
+    created = create_or_hydrate_resale_trade_journey_from_product(
+        user_id=user_id,
+        source=source,
+        product_id=product_id,
+    )
+    if not created.get("ok"):
+        return created
+
+    row_id = _normalize_optional_int(created.get("id"))
+    if row_id is None:
+        return {"ok": False, "reason": "journey_create_failed"}
+
+    resale_updates = {
+        key: value
+        for key, value in payload.items()
+        if key in RESALE_PATCH_FIELDS
+    }
+    sold_updates = {
+        key: value
+        for key, value in payload.items()
+        if key in SOLD_PATCH_FIELDS
+    }
+
+    if resale_updates:
+        patch_resale_trade_journey_resale(
+            user_id=user_id,
+            journey_id=row_id,
+            updates=resale_updates,
+        )
+
+    if sold_updates:
+        return patch_resale_trade_journey_sold(
+            user_id=user_id,
+            journey_id=row_id,
+            updates=sold_updates,
+        )
+
+    return patch_resale_trade_journey_resale(
+        user_id=user_id,
+        journey_id=row_id,
+        updates={},
     )

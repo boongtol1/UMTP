@@ -162,6 +162,9 @@ fun MainTabScreen(
     val isRefreshingSettings by viewModel.isRefreshingSettings.collectAsState()
     val isApplyingBulkSettings by viewModel.isApplyingBulkSettings.collectAsState()
     val isSubmittingResaleTrade by viewModel.isSubmittingResaleTrade.collectAsState()
+    val selectedResaleJourney by viewModel.selectedResaleJourney.collectAsState()
+    val completedResaleJourneys by viewModel.completedResaleJourneys.collectAsState()
+    val isLoadingCompletedResaleJourneys by viewModel.isLoadingCompletedResaleJourneys.collectAsState()
     val settingsRefreshStatusMessage by viewModel.settingsRefreshStatusMessage.collectAsState()
     val lastSettingsRefreshLabel by viewModel.lastSettingsRefreshLabel.collectAsState()
     val refreshingRuleIds by viewModel.refreshingRuleIds.collectAsState()
@@ -210,7 +213,10 @@ fun MainTabScreen(
                 )
                 NavigationBarItem(
                     selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
+                    onClick = {
+                        selectedTab = 2
+                        viewModel.loadCompletedResaleJourneys()
+                    },
                     icon = { Icon(Icons.Default.Edit, contentDescription = "Resale Input") },
                     label = { Text("거래 입력") }
                 )
@@ -257,20 +263,33 @@ fun MainTabScreen(
                     },
                 )
                 2 -> ResaleTradeInputScreen(
+                    selectedJourney = selectedResaleJourney,
+                    completedJourneys = completedResaleJourneys,
                     isSubmitting = isSubmittingResaleTrade,
-                    onSubmitAfterPurchase = { productId, url, updates ->
-                        viewModel.upsertResaleTradeAfterPurchase(
+                    isLoadingCompleted = isLoadingCompletedResaleJourneys,
+                    onCreateFromProduct = { source, productId ->
+                        viewModel.createResaleTradeJourneyFromProduct(
+                            source = source,
                             productId = productId,
-                            url = url,
-                            updates = updates,
                         )
                     },
-                    onSubmitAfterResale = { productId, url, updates ->
-                        viewModel.upsertResaleTradeAfterResale(
-                            productId = productId,
-                            url = url,
-                            updates = updates,
-                        )
+                    onSubmitPurchase = { updates ->
+                        viewModel.patchSelectedResaleJourneyPurchase(updates)
+                    },
+                    onSubmitResale = { updates ->
+                        viewModel.patchSelectedResaleJourneyResale(updates)
+                    },
+                    onSubmitSold = { updates ->
+                        viewModel.patchSelectedResaleJourneySold(updates)
+                    },
+                    onLoadCompleted = {
+                        viewModel.loadCompletedResaleJourneys()
+                    },
+                    onDeleteSelectedCompleted = { selectedIds ->
+                        viewModel.deleteSelectedCompletedResaleJourneys(selectedIds)
+                    },
+                    onDeleteAllCompleted = {
+                        viewModel.deleteAllCompletedResaleJourneys()
                     },
                 )
                 3 -> SettingsNavigator(
