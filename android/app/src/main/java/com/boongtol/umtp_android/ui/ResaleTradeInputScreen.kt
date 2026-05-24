@@ -21,14 +21,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.boongtol.umtp_android.network.ResaleTradeJourneyRow
-import org.json.JSONArray
-import org.json.JSONException
-import org.json.JSONObject
 
 private enum class ResaleInputMode {
     PURCHASE,
@@ -55,49 +53,93 @@ private fun formatWon(value: Int?): String {
     return "%,d".format(value)
 }
 
-private fun jsonValueToKotlin(value: Any?): Any? {
-    return when (value) {
-        JSONObject.NULL -> null
-        is JSONObject -> {
-            val map = mutableMapOf<String, Any?>()
-            val iterator = value.keys()
-            while (iterator.hasNext()) {
-                val key = iterator.next()
-                map[key] = jsonValueToKotlin(value.opt(key))
-            }
-            map
-        }
-
-        is JSONArray -> {
-            val list = mutableListOf<Any?>()
-            for (index in 0 until value.length()) {
-                list.add(jsonValueToKotlin(value.opt(index)))
-            }
-            list
-        }
-
-        else -> value
+private fun formatAny(value: Any?): String {
+    if (value == null) {
+        return "-"
     }
+    if (value is String && value.isBlank()) {
+        return "-"
+    }
+    return value.toString()
 }
 
-private fun parseJsonObjectUpdates(raw: String): Pair<Map<String, Any?>, String?> {
-    val trimmed = raw.trim()
-    if (trimmed.isEmpty()) {
-        return emptyMap<String, Any?>() to null
-    }
+private val ADDITIONAL_COLUMN_INPUT_KEYS = listOf(
+    "url",
+    "title",
+    "listing_created_at",
+    "discovered_at",
+    "listing_price_krw",
+    "seller_nickname",
+    "seller_shop_id",
+    "seller_location",
+    "image_urls",
+    "body_text",
+    "product_type",
+    "chip",
+    "screen_inch",
+    "ram_gb",
+    "ssd_gb",
+    "color",
+    "keyboard_layout",
+    "fair_price_krw",
+    "discount_rate_percent",
+    "expected_profit_krw",
+    "risk_score",
+    "reason_tags",
+    "contacted_at",
+    "seller_response_at",
+    "seller_answer_text",
+    "negotiable",
+    "seller_tone",
+    "suspicious_points",
+    "confirmed_price_krw",
+    "decision_at",
+    "decision_result",
+    "decision_reason",
+    "target_purchase_price_krw",
+    "expected_sale_price_krw",
+    "expected_net_profit_krw",
+    "expected_sale_duration_days",
+    "cpu_core_count",
+    "gpu_core_count",
+    "cleaned_at",
+    "photo_taken_at",
+    "resale_title",
+    "resale_body_text",
+    "resale_photo_count",
+    "minimum_accept_price_krw",
+    "resale_strategy_notes",
+    "resale_product_id",
+    "initial_resale_price_krw",
+    "upload_time_slot",
+    "view_count",
+    "favorite_count",
+    "inquiry_count",
+    "first_inquiry_at",
+    "negotiation_count",
+    "price_drop_count",
+    "price_drop_history",
+    "buyer_questions",
+    "common_objections",
+    "buyer_nickname",
+    "sale_method",
+    "sale_location",
+    "sale_platform",
+    "refund_or_claim",
+    "current_stage",
+    "watch_rule_id",
+    "analysis_job_id",
+    "created_at",
+    "updated_at",
+)
 
-    return try {
-        val json = JSONObject(trimmed)
-        val map = mutableMapOf<String, Any?>()
-        val iterator = json.keys()
-        while (iterator.hasNext()) {
-            val key = iterator.next()
-            map[key] = jsonValueToKotlin(json.opt(key))
+private fun buildAdditionalColumnUpdates(values: Map<String, String>): Map<String, Any?> {
+    return ADDITIONAL_COLUMN_INPUT_KEYS
+        .mapNotNull { key ->
+            val text = values[key].toOptionalText() ?: return@mapNotNull null
+            key to text
         }
-        map to null
-    } catch (exc: JSONException) {
-        emptyMap<String, Any?>() to "JSON 형식 오류: ${exc.message}"
-    }
+        .toMap()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -160,10 +202,8 @@ fun ResaleTradeInputScreen(
     var platformFeeKrw by remember { mutableStateOf("") }
     var finalResultNotes by remember { mutableStateOf("") }
 
-    var purchaseExtraJson by remember { mutableStateOf("") }
-    var resaleExtraJson by remember { mutableStateOf("") }
-    var soldExtraJson by remember { mutableStateOf("") }
-    var jsonErrorMessage by remember { mutableStateOf<String?>(null) }
+    var showAdditionalInputs by remember { mutableStateOf(false) }
+    val additionalFieldValues = remember { mutableStateMapOf<String, String>() }
 
     var selectedCompletedIds by remember { mutableStateOf(setOf<Long>()) }
 
@@ -253,6 +293,38 @@ fun ResaleTradeInputScreen(
         Text(text = "seller_shop_id: ${selectedJourney?.seller_shop_id ?: "-"}")
         Text(text = "current_stage: ${selectedJourney?.current_stage ?: "-"}")
 
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+        Text(text = "구매/검수 저장값 조회", style = MaterialTheme.typography.titleSmall)
+        Text(text = "purchased_at: ${selectedJourney?.purchased_at ?: "-"}")
+        Text(text = "purchase_price_krw: ${formatWon(selectedJourney?.purchase_price_krw)}")
+        Text(text = "purchase_method: ${selectedJourney?.purchase_method ?: "-"}")
+        Text(text = "purchase_location: ${selectedJourney?.purchase_location ?: "-"}")
+        Text(text = "transport_cost_krw: ${formatWon(selectedJourney?.transport_cost_krw)}")
+        Text(text = "shipping_cost_krw: ${formatWon(selectedJourney?.shipping_cost_krw)}")
+        Text(text = "total_cost_krw: ${formatWon(selectedJourney?.total_cost_krw)}")
+        Text(text = "cpu_core_count: ${selectedJourney?.cpu_core_count ?: "-"}")
+        Text(text = "gpu_core_count: ${selectedJourney?.gpu_core_count ?: "-"}")
+        Text(text = "battery_health_percent: ${selectedJourney?.battery_health_percent ?: "-"}")
+        Text(text = "battery_cycle_count: ${selectedJourney?.battery_cycle_count ?: "-"}")
+        Text(text = "exterior_grade: ${selectedJourney?.exterior_grade ?: "-"}")
+        Text(text = "included_items: ${formatAny(selectedJourney?.included_items)}")
+        Text(text = "inspection_notes: ${selectedJourney?.inspection_notes ?: "-"}")
+        Text(text = "repair_suspected: ${formatAny(selectedJourney?.repair_suspected)}")
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+        Text(text = "되팔이/판매 저장값 조회", style = MaterialTheme.typography.titleSmall)
+        Text(text = "resale_listing_created_at: ${selectedJourney?.resale_listing_created_at ?: "-"}")
+        Text(text = "resale_listing_price_krw: ${formatWon(selectedJourney?.resale_listing_price_krw)}")
+        Text(text = "resale_platform: ${selectedJourney?.resale_platform ?: "-"}")
+        Text(text = "resale_url: ${selectedJourney?.resale_url ?: "-"}")
+        Text(text = "sold_at: ${selectedJourney?.sold_at ?: "-"}")
+        Text(text = "sale_price_krw: ${formatWon(selectedJourney?.sale_price_krw)}")
+        Text(text = "final_shipping_cost_krw: ${formatWon(selectedJourney?.final_shipping_cost_krw)}")
+        Text(text = "platform_fee_krw: ${formatWon(selectedJourney?.platform_fee_krw)}")
+        Text(text = "gross_profit_krw: ${formatWon(selectedJourney?.gross_profit_krw)}")
+        Text(text = "net_profit_krw: ${formatWon(selectedJourney?.net_profit_krw)}")
+        Text(text = "roi_percent: ${selectedJourney?.roi_percent ?: "-"}")
+
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
                 selected = inputMode == ResaleInputMode.PURCHASE,
@@ -264,6 +336,29 @@ fun ResaleTradeInputScreen(
                 onClick = { inputMode = ResaleInputMode.RESALE },
                 label = { Text("되팔이 후 기록하기") },
             )
+        }
+
+        FilterChip(
+            selected = showAdditionalInputs,
+            onClick = { showAdditionalInputs = !showAdditionalInputs },
+            label = { Text(if (showAdditionalInputs) "추가 컬럼 입력 접기" else "추가 컬럼 입력 열기") },
+        )
+
+        if (showAdditionalInputs) {
+            Text(
+                text = "추가 컬럼은 JSON 대신 개별 입력칸으로 입력됩니다. 빈칸은 전송되지 않습니다.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            ADDITIONAL_COLUMN_INPUT_KEYS.forEach { key ->
+                OutlinedTextField(
+                    value = additionalFieldValues[key] ?: "",
+                    onValueChange = { additionalFieldValues[key] = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isSubmitting,
+                    label = { Text(key) },
+                    singleLine = !key.endsWith("_text"),
+                )
+            }
         }
 
         if (inputMode == ResaleInputMode.PURCHASE) {
@@ -351,27 +446,10 @@ fun ResaleTradeInputScreen(
                 OutlinedTextField(value = repairSuspected, onValueChange = { repairSuspected = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("repair_suspected (true/false)") })
             }
 
-            OutlinedTextField(
-                value = purchaseExtraJson,
-                onValueChange = { purchaseExtraJson = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                minLines = 4,
-                maxLines = 12,
-                label = { Text("추가 JSON (모든 컬럼 키 입력 가능)") },
-                placeholder = { Text("예: {\"seller_location\":\"서울\",\"color\":\"starlight\"}") },
-            )
-
             Button(
                 onClick = {
-                    val (extraUpdates, parseError) = parseJsonObjectUpdates(purchaseExtraJson)
-                    if (parseError != null) {
-                        jsonErrorMessage = parseError
-                        return@Button
-                    }
-                    jsonErrorMessage = null
-
                     val mergedUpdates = mutableMapOf<String, Any?>()
+                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues))
                     mergedUpdates.putAll(
                         mapOf(
                             "purchase_price_krw" to purchasePriceKrw.toOptionalInt(),
@@ -402,7 +480,6 @@ fun ResaleTradeInputScreen(
                             "repair_suspected" to repairSuspected.toOptionalText(),
                         )
                     )
-                    mergedUpdates.putAll(extraUpdates)
 
                     onSubmitPurchase(
                         mergedUpdates
@@ -422,27 +499,11 @@ fun ResaleTradeInputScreen(
             OutlinedTextField(value = resalePlatform, onValueChange = { resalePlatform = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("resale_platform") })
             OutlinedTextField(value = resaleUrl, onValueChange = { resaleUrl = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("resale_url") })
             OutlinedTextField(value = resaleListingCreatedAt, onValueChange = { resaleListingCreatedAt = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("resale_listing_created_at") }, placeholder = { Text("YYYY-MM-DD HH:MM") })
-            OutlinedTextField(
-                value = resaleExtraJson,
-                onValueChange = { resaleExtraJson = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                minLines = 4,
-                maxLines = 12,
-                label = { Text("추가 JSON (모든 컬럼 키 입력 가능)") },
-                placeholder = { Text("예: {\"view_count\":120,\"favorite_count\":8}") },
-            )
 
             Button(
                 onClick = {
-                    val (extraUpdates, parseError) = parseJsonObjectUpdates(resaleExtraJson)
-                    if (parseError != null) {
-                        jsonErrorMessage = parseError
-                        return@Button
-                    }
-                    jsonErrorMessage = null
-
                     val mergedUpdates = mutableMapOf<String, Any?>()
+                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues))
                     mergedUpdates.putAll(
                         mapOf(
                             "resale_listing_price_krw" to resaleListingPriceKrw.toOptionalInt(),
@@ -451,7 +512,6 @@ fun ResaleTradeInputScreen(
                             "resale_listing_created_at" to resaleListingCreatedAt.toOptionalText(),
                         )
                     )
-                    mergedUpdates.putAll(extraUpdates)
 
                     onSubmitResale(
                         mergedUpdates
@@ -468,27 +528,11 @@ fun ResaleTradeInputScreen(
             OutlinedTextField(value = finalShippingCostKrw, onValueChange = { finalShippingCostKrw = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("final_shipping_cost_krw") })
             OutlinedTextField(value = platformFeeKrw, onValueChange = { platformFeeKrw = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, singleLine = true, label = { Text("platform_fee_krw") })
             OutlinedTextField(value = finalResultNotes, onValueChange = { finalResultNotes = it }, modifier = Modifier.fillMaxWidth(), enabled = !isSubmitting, label = { Text("final_result_notes") })
-            OutlinedTextField(
-                value = soldExtraJson,
-                onValueChange = { soldExtraJson = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                minLines = 4,
-                maxLines = 12,
-                label = { Text("추가 JSON (모든 컬럼 키 입력 가능)") },
-                placeholder = { Text("예: {\"buyer_nickname\":\"buyer1\",\"sale_platform\":\"joongna\"}") },
-            )
 
             Button(
                 onClick = {
-                    val (extraUpdates, parseError) = parseJsonObjectUpdates(soldExtraJson)
-                    if (parseError != null) {
-                        jsonErrorMessage = parseError
-                        return@Button
-                    }
-                    jsonErrorMessage = null
-
                     val mergedUpdates = mutableMapOf<String, Any?>()
+                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues))
                     mergedUpdates.putAll(
                         mapOf(
                             "sold_at" to soldAt.toOptionalText(),
@@ -498,7 +542,6 @@ fun ResaleTradeInputScreen(
                             "final_result_notes" to finalResultNotes.toOptionalText(),
                         )
                     )
-                    mergedUpdates.putAll(extraUpdates)
 
                     onSubmitSold(
                         mergedUpdates
@@ -557,14 +600,6 @@ fun ResaleTradeInputScreen(
                         "#${item.id} ${item.title ?: "(제목없음)"} / ${formatWon(item.sale_price_krw)} / ROI ${item.roi_percent ?: "-"}%"
                     )
                 },
-            )
-        }
-
-        if (jsonErrorMessage != null) {
-            Text(
-                text = jsonErrorMessage ?: "",
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
             )
         }
 
