@@ -59,6 +59,9 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private val _isApplyingBulkSettings = MutableStateFlow(false)
     val isApplyingBulkSettings: StateFlow<Boolean> = _isApplyingBulkSettings.asStateFlow()
 
+    private val _isSubmittingResaleTrade = MutableStateFlow(false)
+    val isSubmittingResaleTrade: StateFlow<Boolean> = _isSubmittingResaleTrade.asStateFlow()
+
     private val _isRefreshingAlerts = MutableStateFlow(false)
     val isRefreshingAlerts: StateFlow<Boolean> = _isRefreshingAlerts.asStateFlow()
 
@@ -851,6 +854,102 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
             } finally {
                 _isApplyingBulkSettings.value = false
+            }
+        }
+    }
+
+    fun upsertResaleTradeAfterPurchase(
+        productId: String?,
+        url: String?,
+        updates: Map<String, Any?>,
+    ) {
+        val uid = _userId.value ?: return
+        if (_isSubmittingResaleTrade.value) {
+            return
+        }
+
+        val normalizedProductId = productId?.trim()?.ifEmpty { null }
+        val normalizedUrl = url?.trim()?.ifEmpty { null }
+        if (normalizedProductId == null && normalizedUrl == null) {
+            _toastMessage.value = "product_id 또는 url 중 하나는 필요합니다."
+            return
+        }
+
+        viewModelScope.launch {
+            _isSubmittingResaleTrade.value = true
+            try {
+                val normalizedUpdates = updates.filterValues { value -> value != null }
+                val response = UmtpApiClient.apiService.upsertResaleTradeAfterPurchase(
+                    ResaleTradeAfterPurchaseUpsertRequest(
+                        user_id = uid,
+                        source = "joongna",
+                        product_id = normalizedProductId,
+                        url = normalizedUrl,
+                        updates = normalizedUpdates,
+                    )
+                )
+                if (response.ok) {
+                    val stage = response.current_stage?.takeIf { it.isNotBlank() } ?: "-"
+                    _toastMessage.value = "구매 후 데이터 저장 완료 (stage: $stage)"
+                } else {
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.SAVE,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+            } finally {
+                _isSubmittingResaleTrade.value = false
+            }
+        }
+    }
+
+    fun upsertResaleTradeAfterResale(
+        productId: String?,
+        url: String?,
+        updates: Map<String, Any?>,
+    ) {
+        val uid = _userId.value ?: return
+        if (_isSubmittingResaleTrade.value) {
+            return
+        }
+
+        val normalizedProductId = productId?.trim()?.ifEmpty { null }
+        val normalizedUrl = url?.trim()?.ifEmpty { null }
+        if (normalizedProductId == null && normalizedUrl == null) {
+            _toastMessage.value = "product_id 또는 url 중 하나는 필요합니다."
+            return
+        }
+
+        viewModelScope.launch {
+            _isSubmittingResaleTrade.value = true
+            try {
+                val normalizedUpdates = updates.filterValues { value -> value != null }
+                val response = UmtpApiClient.apiService.upsertResaleTradeAfterResale(
+                    ResaleTradeAfterResaleUpsertRequest(
+                        user_id = uid,
+                        source = "joongna",
+                        product_id = normalizedProductId,
+                        url = normalizedUrl,
+                        updates = normalizedUpdates,
+                    )
+                )
+                if (response.ok) {
+                    val stage = response.current_stage?.takeIf { it.isNotBlank() } ?: "-"
+                    _toastMessage.value = "되팔이 후 데이터 저장 완료 (stage: $stage)"
+                } else {
+                    _toastMessage.value = resolveSafeErrorMessage(
+                        context = ErrorContext.SAVE,
+                        rawMessage = response.message,
+                        rawReason = response.reason,
+                    )
+                }
+            } catch (e: Exception) {
+                _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
+            } finally {
+                _isSubmittingResaleTrade.value = false
             }
         }
     }

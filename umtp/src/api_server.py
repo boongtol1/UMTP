@@ -20,6 +20,10 @@ from src.notification_worker import (
     mark_all_alert_events_read_for_user,
 )
 from src.push_token_service import upsert_user_push_token
+from src.resale_trade_journeys import (
+    upsert_resale_trade_after_purchase,
+    upsert_resale_trade_after_resale,
+)
 from src.user_settings_service import (
     bulk_set_user_watch_rules_enabled,
     bulk_update_user_fair_price_drop_rate,
@@ -142,6 +146,22 @@ class UserFairPricesBulkDropRateRequest(BaseModel):
 class UserFairPricesResetToSystemRequest(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=100)
     product_type: Optional[str] = Field(default=None, min_length=1, max_length=100)
+
+
+class ResaleTradeAfterPurchaseUpsertRequest(BaseModel):
+    user_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    source: str = Field(default="joongna", min_length=1, max_length=50)
+    product_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    url: Optional[str] = Field(default=None, min_length=1, max_length=1000)
+    updates: dict = Field(default_factory=dict)
+
+
+class ResaleTradeAfterResaleUpsertRequest(BaseModel):
+    user_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    source: str = Field(default="joongna", min_length=1, max_length=50)
+    product_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    url: Optional[str] = Field(default=None, min_length=1, max_length=1000)
+    updates: dict = Field(default_factory=dict)
 
 
 @app.get("/health")
@@ -363,6 +383,75 @@ def user_fair_prices_reset_to_system_market_prices(request: UserFairPricesResetT
         return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
     except Exception as exc:
         return {"ok": False, "reason": f"시스템 기준 시장가 초기화 실패: {exc}"}
+
+
+def _prepare_resale_trade_payload(request):
+    if not isinstance(request.updates, dict):
+        raise ValueError("invalid_updates_payload")
+
+    payload = request.model_dump(exclude_none=True)
+    updates = payload.pop("updates", {}) or {}
+    if not isinstance(updates, dict):
+        raise ValueError("invalid_updates_payload")
+
+    payload.update(updates)
+    return payload
+
+
+@app.post("/resale-trades/after-purchase/upsert")
+def resale_trades_after_purchase_upsert(request: ResaleTradeAfterPurchaseUpsertRequest):
+    try:
+        payload = _prepare_resale_trade_payload(request)
+
+        raw_user_id = payload.get("user_id")
+        normalized_user_id = _normalize_user_id(raw_user_id)
+        if normalized_user_id:
+            resolved_user_id = _ensure_user_registered(
+                normalized_user_id,
+                source="api/resale-trades/after-purchase/upsert",
+            )
+            payload["user_id"] = resolved_user_id
+
+        return upsert_resale_trade_after_purchase(**payload)
+    except ValueError as exc:
+        reason = str(exc) or "invalid_payload"
+        if reason == "invalid_identity":
+            reason = "product_id 또는 url 중 하나는 필요합니다."
+        elif reason == "invalid_updates_payload":
+            reason = "updates는 JSON object 형태여야 합니다."
+        return {"ok": False, "reason": reason}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"구매 후 데이터 저장 실패: {exc}"}
+
+
+@app.post("/resale-trades/after-resale/upsert")
+def resale_trades_after_resale_upsert(request: ResaleTradeAfterResaleUpsertRequest):
+    try:
+        payload = _prepare_resale_trade_payload(request)
+
+        raw_user_id = payload.get("user_id")
+        normalized_user_id = _normalize_user_id(raw_user_id)
+        if normalized_user_id:
+            resolved_user_id = _ensure_user_registered(
+                normalized_user_id,
+                source="api/resale-trades/after-resale/upsert",
+            )
+            payload["user_id"] = resolved_user_id
+
+        return upsert_resale_trade_after_resale(**payload)
+    except ValueError as exc:
+        reason = str(exc) or "invalid_payload"
+        if reason == "invalid_identity":
+            reason = "product_id 또는 url 중 하나는 필요합니다."
+        elif reason == "invalid_updates_payload":
+            reason = "updates는 JSON object 형태여야 합니다."
+        return {"ok": False, "reason": reason}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"되팔이 후 데이터 저장 실패: {exc}"}
 
 
 @app.post("/users/{user_id}/rules/refresh")

@@ -35,6 +35,12 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 
 ## 주요 변경 요약
 
+- 되팔이 거래 추적용 `resale_trade_journeys` 테이블을 추가했습니다. (SQL: `sql/create_resale_trade_journeys.sql`)
+- 입력 흐름을 `구매 후 입력`과 `되팔이 후 입력`으로 분리했습니다.
+  - API: `POST /resale-trades/after-purchase/upsert`, `POST /resale-trades/after-resale/upsert`
+  - CLI: `python src/run_resale_after_purchase_umtp.py`, `python src/run_resale_after_resale_umtp.py`
+- 위 입력 경로는 `source + product_id` 또는 `url`만으로도 row를 만들고, 기존 `analysis_jobs/search_results/alert_events/joongna_seen_products` 기반으로 가능한 필드를 자동 채웁니다.
+
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
 - `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.
 - 0.5는 아직 실제 중고나라 크롤링을 하지 않고 CSV 샘플 데이터 기반으로만 분석합니다.

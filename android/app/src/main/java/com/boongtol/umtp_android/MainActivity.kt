@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -160,6 +161,7 @@ fun MainTabScreen(
     val lastAlertsRefreshLabel by viewModel.lastAlertsRefreshLabel.collectAsState()
     val isRefreshingSettings by viewModel.isRefreshingSettings.collectAsState()
     val isApplyingBulkSettings by viewModel.isApplyingBulkSettings.collectAsState()
+    val isSubmittingResaleTrade by viewModel.isSubmittingResaleTrade.collectAsState()
     val settingsRefreshStatusMessage by viewModel.settingsRefreshStatusMessage.collectAsState()
     val lastSettingsRefreshLabel by viewModel.lastSettingsRefreshLabel.collectAsState()
     val refreshingRuleIds by viewModel.refreshingRuleIds.collectAsState()
@@ -209,6 +211,12 @@ fun MainTabScreen(
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
+                    icon = { Icon(Icons.Default.Edit, contentDescription = "Resale Input") },
+                    label = { Text("거래 입력") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
                     label = { Text("설정") }
                 )
@@ -248,7 +256,24 @@ fun MainTabScreen(
                         viewModel.clearSelectedReadArchive(userId, alertIds)
                     },
                 )
-                2 -> SettingsNavigator(
+                2 -> ResaleTradeInputScreen(
+                    isSubmitting = isSubmittingResaleTrade,
+                    onSubmitAfterPurchase = { productId, url, updates ->
+                        viewModel.upsertResaleTradeAfterPurchase(
+                            productId = productId,
+                            url = url,
+                            updates = updates,
+                        )
+                    },
+                    onSubmitAfterResale = { productId, url, updates ->
+                        viewModel.upsertResaleTradeAfterResale(
+                            productId = productId,
+                            url = url,
+                            updates = updates,
+                        )
+                    },
+                )
+                3 -> SettingsNavigator(
                     userId = userId,
                     units = units,
                     userSettings = userSettings,

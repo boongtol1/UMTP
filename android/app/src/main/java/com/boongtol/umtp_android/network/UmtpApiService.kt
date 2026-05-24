@@ -41,6 +41,16 @@ interface UmtpApiService {
         @Body request: UserFairPricesResetToSystemRequest
     ): BulkOperationResponse
 
+    @POST("resale-trades/after-purchase/upsert")
+    suspend fun upsertResaleTradeAfterPurchase(
+        @Body request: ResaleTradeAfterPurchaseUpsertRequest
+    ): ResaleTradeUpsertResponse
+
+    @POST("resale-trades/after-resale/upsert")
+    suspend fun upsertResaleTradeAfterResale(
+        @Body request: ResaleTradeAfterResaleUpsertRequest
+    ): ResaleTradeUpsertResponse
+
     @POST("users/{user_id}/rules/refresh")
     suspend fun refreshUserRulesSavedAt(
         @Path("user_id") userId: String
