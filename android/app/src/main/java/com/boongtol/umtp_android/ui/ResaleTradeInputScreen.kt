@@ -542,7 +542,7 @@ fun ResaleTradeInputScreen(
             selectedSource.toOptionalText()
         }
         val hasSourceAndProductForHydrate = normalizedSourceForAdditional != null && productId.toOptionalText() != null
-        val additionalInputColumns = if (hasSourceAndProductForHydrate) {
+        val editableAdditionalColumns = if (hasSourceAndProductForHydrate) {
             ADDITIONAL_MANUAL_INPUT_COLUMNS
         } else {
             RESALE_JOURNEY_ALL_COLUMNS
@@ -557,19 +557,20 @@ fun ResaleTradeInputScreen(
         if (showAdditionalInputs) {
             Text(
                 text = if (hasSourceAndProductForHydrate) {
-                    "source/product_id 기준 자동 채움 컬럼을 제외한 나머지 컬럼만 입력합니다."
+                    "source/product_id 기준 자동 채움 컬럼은 비활성화됩니다."
                 } else {
                     "source/product_id 입력 전에는 전체 컬럼 입력이 가능합니다."
                 },
                 style = MaterialTheme.typography.bodySmall,
             )
-            additionalInputColumns.forEach { key ->
+            RESALE_JOURNEY_ALL_COLUMNS.forEach { key ->
+                val isAutoHydratedAndLocked = hasSourceAndProductForHydrate && key in AUTO_HYDRATE_COLUMNS
                 OutlinedTextField(
                     value = additionalFieldValues[key] ?: "",
                     onValueChange = { additionalFieldValues[key] = it },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !isSubmitting,
-                    label = { Text(key) },
+                    enabled = !isSubmitting && !isAutoHydratedAndLocked,
+                    label = { Text(if (isAutoHydratedAndLocked) "$key (자동채움)" else key) },
                     singleLine = !key.endsWith("_text"),
                 )
             }
@@ -655,7 +656,7 @@ fun ResaleTradeInputScreen(
             Button(
                 onClick = {
                     val mergedUpdates = mutableMapOf<String, Any?>()
-                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues, additionalInputColumns))
+                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues, editableAdditionalColumns))
                     mergedUpdates.putAll(
                         mapOf(
                             "purchase_price_krw" to purchasePriceKrw.toOptionalInt(),
@@ -709,7 +710,7 @@ fun ResaleTradeInputScreen(
             Button(
                 onClick = {
                     val mergedUpdates = mutableMapOf<String, Any?>()
-                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues, additionalInputColumns))
+                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues, editableAdditionalColumns))
                     mergedUpdates.putAll(
                         mapOf(
                             "resale_listing_price_krw" to resaleListingPriceKrw.toOptionalInt(),
@@ -738,7 +739,7 @@ fun ResaleTradeInputScreen(
             Button(
                 onClick = {
                     val mergedUpdates = mutableMapOf<String, Any?>()
-                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues, additionalInputColumns))
+                    mergedUpdates.putAll(buildAdditionalColumnUpdates(additionalFieldValues, editableAdditionalColumns))
                     mergedUpdates.putAll(
                         mapOf(
                             "sold_at" to soldAt.toOptionalText(),
