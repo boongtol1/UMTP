@@ -141,6 +141,8 @@ PURCHASE_PATCH_FIELDS = {
     "purchase_location",
     "transport_cost_krw",
     "shipping_cost_krw",
+    "cleaned_at",
+    "photo_taken_at",
     "payment_method",
     "serial_number",
     "model_number",
@@ -163,11 +165,11 @@ PURCHASE_PATCH_FIELDS = {
     "included_items",
     "repair_suspected",
     "inspection_notes",
+    "current_stage",
+    "final_result_notes",
 }
 
 RESALE_PATCH_FIELDS = {
-    "cleaned_at",
-    "photo_taken_at",
     "resale_title",
     "resale_body_text",
     "resale_photo_count",
@@ -189,6 +191,7 @@ RESALE_PATCH_FIELDS = {
     "price_drop_history",
     "buyer_questions",
     "common_objections",
+    "current_stage",
 }
 
 SOLD_PATCH_FIELDS = {
@@ -211,6 +214,7 @@ BLOCKED_PATCH_FIELDS = {
 
 LEGACY_PURCHASE_UPSERT_FIELDS = PURCHASE_PATCH_FIELDS | RESALE_PATCH_FIELDS
 LEGACY_RESALE_UPSERT_FIELDS = RESALE_PATCH_FIELDS | SOLD_PATCH_FIELDS
+RESALE_RECORD_PATCH_FIELDS = RESALE_PATCH_FIELDS | SOLD_PATCH_FIELDS
 
 
 def _normalize_optional_text(value: Any) -> Optional[str]:
@@ -868,6 +872,10 @@ def _load_row_detail(cursor, row_id: int) -> dict[str, Any]:
 
 
 def _derive_stage_after_purchase(row: dict[str, Any], payload_updates: dict[str, Any]) -> Optional[str]:
+    manual_stage = _normalize_optional_text(payload_updates.get("current_stage"))
+    if manual_stage:
+        return manual_stage
+
     inspection_keys = {
         "purchased_at",
         "purchase_price_krw",
@@ -906,7 +914,11 @@ def _derive_stage_after_purchase(row: dict[str, Any], payload_updates: dict[str,
     return current_stage or STAGE_DISCOVERED
 
 
-def _derive_stage_after_resale_or_sold(row: dict[str, Any]) -> str:
+def _derive_stage_after_resale_or_sold(row: dict[str, Any], payload_updates: Optional[dict[str, Any]] = None) -> str:
+    manual_stage = _normalize_optional_text((payload_updates or {}).get("current_stage"))
+    if manual_stage:
+        return manual_stage
+
     sale_price = _normalize_optional_int(row.get("sale_price_krw"))
     sold_at = _normalize_optional_datetime(row.get("sold_at"))
     if sale_price is not None or sold_at is not None:
@@ -1180,7 +1192,7 @@ def patch_resale_trade_journey_purchase(*, user_id: str, journey_id: int, update
 
         sparse_updates = _prepare_sparse_updates(
             updates or {},
-            None,
+            PURCHASE_PATCH_FIELDS,
             writable_columns,
         )
         _apply_updates(cursor, row_id=journey_id, updates=sparse_updates)
@@ -1244,7 +1256,7 @@ def _patch_resale_or_sold(*, user_id: str, journey_id: int, updates: dict[str, A
 
         sparse_updates = _prepare_sparse_updates(
             updates or {},
-            None,
+            RESALE_RECORD_PATCH_FIELDS,
             writable_columns,
         )
         _apply_updates(cursor, row_id=journey_id, updates=sparse_updates)
@@ -1266,7 +1278,10 @@ def _patch_resale_or_sold(*, user_id: str, journey_id: int, updates: dict[str, A
 
         calculated_updates = _build_sold_calculated_updates(row_after_update, writable_columns)
         if "current_stage" in writable_columns:
-            calculated_updates["current_stage"] = _derive_stage_after_resale_or_sold(row_after_update)
+            calculated_updates["current_stage"] = _derive_stage_after_resale_or_sold(
+                row_after_update,
+                sparse_updates,
+            )
 
         _apply_updates(cursor, row_id=journey_id, updates=_filter_writable_updates(calculated_updates, writable_columns))
 

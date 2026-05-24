@@ -99,6 +99,46 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             },
         )
 
+    def test_prepare_sparse_updates_purchase_fields_are_enforced(self):
+        updates = journeys._prepare_sparse_updates(
+            {
+                "purchase_price_krw": "650000",
+                "final_result_notes": "memo",
+                "sale_price_krw": "820000",
+                "listing_price_krw": "700000",
+            },
+            journeys.PURCHASE_PATCH_FIELDS,
+            {"purchase_price_krw", "final_result_notes", "sale_price_krw", "listing_price_krw"},
+        )
+
+        self.assertEqual(
+            updates,
+            {
+                "purchase_price_krw": 650000,
+                "final_result_notes": "memo",
+            },
+        )
+
+    def test_prepare_sparse_updates_resale_record_allows_sold_fields(self):
+        updates = journeys._prepare_sparse_updates(
+            {
+                "resale_listing_price_krw": "790000",
+                "sale_price_krw": "810000",
+                "current_stage": "SOLD",
+            },
+            journeys.RESALE_RECORD_PATCH_FIELDS,
+            {"resale_listing_price_krw", "sale_price_krw", "current_stage"},
+        )
+
+        self.assertEqual(
+            updates,
+            {
+                "resale_listing_price_krw": 790000,
+                "sale_price_krw": 810000,
+                "current_stage": "SOLD",
+            },
+        )
+
     def test_alert_event_mapping_hydrates_core_fields(self):
         mapped = journeys._build_alert_mapping(
             {
@@ -151,6 +191,13 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         )
         self.assertEqual(stage, journeys.STAGE_INSPECTED)
 
+    def test_stage_after_purchase_prefers_manual_stage(self):
+        stage = journeys._derive_stage_after_purchase(
+            {"current_stage": journeys.STAGE_DISCOVERED},
+            {"purchased_at": "2026-05-24 10:00:00", "current_stage": "RESALE_LISTED"},
+        )
+        self.assertEqual(stage, "RESALE_LISTED")
+
     def test_stage_after_resale_or_sold(self):
         stage_listed = journeys._derive_stage_after_resale_or_sold(
             {
@@ -173,6 +220,17 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             }
         )
         self.assertEqual(stage_sold, journeys.STAGE_SOLD)
+
+    def test_stage_after_resale_or_sold_prefers_manual_stage(self):
+        stage = journeys._derive_stage_after_resale_or_sold(
+            {
+                "sale_price_krw": None,
+                "sold_at": None,
+                "current_stage": journeys.STAGE_RESALE_LISTED,
+            },
+            {"current_stage": "INSPECTED"},
+        )
+        self.assertEqual(stage, "INSPECTED")
 
     @patch("src.resale_trade_journeys._fetch_journey_by_key", return_value={"id": 99})
     def test_insert_or_get_journey_id_reuses_existing_row(self, _mock_fetch):
