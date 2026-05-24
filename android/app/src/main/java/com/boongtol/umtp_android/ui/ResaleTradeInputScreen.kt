@@ -27,6 +27,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.boongtol.umtp_android.network.ResaleTradeJourneyRow
+import com.google.gson.Gson
+import com.google.gson.JsonElement
 
 private enum class ResaleInputMode {
     PURCHASE,
@@ -53,18 +55,13 @@ private fun formatWon(value: Int?): String {
     return "%,d".format(value)
 }
 
-private fun formatAny(value: Any?): String {
-    if (value == null) {
-        return "-"
-    }
-    if (value is String && value.isBlank()) {
-        return "-"
-    }
-    return value.toString()
-}
-
-private val ADDITIONAL_COLUMN_INPUT_KEYS = listOf(
+private val RESALE_JOURNEY_ALL_COLUMNS = listOf(
+    "id",
+    "user_id",
+    "source",
+    "product_id",
     "url",
+    "url_digest",
     "title",
     "listing_created_at",
     "discovered_at",
@@ -88,6 +85,7 @@ private val ADDITIONAL_COLUMN_INPUT_KEYS = listOf(
     "reason_tags",
     "contacted_at",
     "seller_response_at",
+    "response_time_minutes",
     "seller_answer_text",
     "negotiable",
     "seller_tone",
@@ -100,15 +98,46 @@ private val ADDITIONAL_COLUMN_INPUT_KEYS = listOf(
     "expected_sale_price_krw",
     "expected_net_profit_krw",
     "expected_sale_duration_days",
+    "purchased_at",
+    "purchase_price_krw",
+    "purchase_method",
+    "purchase_location",
+    "transport_cost_krw",
+    "shipping_cost_krw",
+    "total_cost_krw",
+    "payment_method",
+    "serial_number",
+    "model_number",
+    "applecare_status",
+    "activation_lock_off",
+    "mdm_lock_none",
     "cpu_core_count",
     "gpu_core_count",
+    "battery_health_percent",
+    "battery_cycle_count",
+    "battery_condition",
+    "truetone_ok",
+    "display_condition",
+    "keyboard_condition",
+    "trackpad_condition",
+    "speaker_condition",
+    "camera_condition",
+    "wifi_bluetooth_ok",
+    "exterior_grade",
+    "included_items",
+    "repair_suspected",
+    "inspection_notes",
     "cleaned_at",
     "photo_taken_at",
     "resale_title",
     "resale_body_text",
     "resale_photo_count",
+    "resale_listing_price_krw",
     "minimum_accept_price_krw",
+    "resale_platform",
     "resale_strategy_notes",
+    "resale_listing_created_at",
+    "resale_url",
     "resale_product_id",
     "initial_resale_price_krw",
     "upload_time_slot",
@@ -116,30 +145,67 @@ private val ADDITIONAL_COLUMN_INPUT_KEYS = listOf(
     "favorite_count",
     "inquiry_count",
     "first_inquiry_at",
+    "first_inquiry_delay_minutes",
     "negotiation_count",
     "price_drop_count",
     "price_drop_history",
     "buyer_questions",
     "common_objections",
+    "sold_at",
+    "sale_price_krw",
     "buyer_nickname",
     "sale_method",
     "sale_location",
     "sale_platform",
+    "final_shipping_cost_krw",
+    "platform_fee_krw",
     "refund_or_claim",
+    "gross_profit_krw",
+    "net_profit_krw",
+    "roi_percent",
+    "purchase_speed_minutes",
+    "sale_duration_hours",
+    "total_holding_time_hours",
+    "profit_per_day_krw",
+    "final_result_notes",
     "current_stage",
-    "watch_rule_id",
-    "analysis_job_id",
     "created_at",
     "updated_at",
 )
 
 private fun buildAdditionalColumnUpdates(values: Map<String, String>): Map<String, Any?> {
-    return ADDITIONAL_COLUMN_INPUT_KEYS
+    return RESALE_JOURNEY_ALL_COLUMNS
         .mapNotNull { key ->
-            val text = values[key].toOptionalText() ?: return@mapNotNull null
+            val text = values[key]?.toOptionalText() ?: return@mapNotNull null
             key to text
         }
         .toMap()
+}
+
+private fun formatStoredElement(element: JsonElement): String? {
+    if (element.isJsonNull) {
+        return null
+    }
+    if (element.isJsonPrimitive) {
+        val primitive = element.asJsonPrimitive
+        val value = if (primitive.isString) primitive.asString else primitive.toString()
+        val normalized = value.trim()
+        return if (normalized.isEmpty()) null else normalized
+    }
+    val normalized = element.toString().trim()
+    return if (normalized.isEmpty() || normalized == "[]" || normalized == "{}") null else normalized
+}
+
+private fun buildStoredJourneyRows(row: ResaleTradeJourneyRow?): List<Pair<String, String>> {
+    if (row == null) {
+        return emptyList()
+    }
+    val jsonObject = Gson().toJsonTree(row).asJsonObject
+    return RESALE_JOURNEY_ALL_COLUMNS.mapNotNull { key ->
+        val element = jsonObject.get(key) ?: return@mapNotNull null
+        val text = formatStoredElement(element) ?: return@mapNotNull null
+        key to text
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -276,54 +342,15 @@ fun ResaleTradeInputScreen(
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-        Text(text = "거래 상세", style = MaterialTheme.typography.titleMedium)
-        Text(text = "title: ${selectedJourney?.title ?: "-"}")
-        Text(text = "source: ${selectedJourney?.source ?: "-"}")
-        Text(text = "product_id: ${selectedJourney?.product_id ?: "-"}")
-        Text(text = "url: ${selectedJourney?.url ?: "-"}")
-        Text(text = "listing_price_krw: ${formatWon(selectedJourney?.listing_price_krw)}")
-        Text(text = "fair_price_krw: ${formatWon(selectedJourney?.fair_price_krw)}")
-        Text(text = "discount_rate_percent: ${selectedJourney?.discount_rate_percent ?: "-"}")
-        Text(text = "product_type: ${selectedJourney?.product_type ?: "-"}")
-        Text(text = "chip: ${selectedJourney?.chip ?: "-"}")
-        Text(text = "screen_inch: ${selectedJourney?.screen_inch ?: "-"}")
-        Text(text = "ram_gb: ${selectedJourney?.ram_gb ?: "-"}")
-        Text(text = "ssd_gb: ${selectedJourney?.ssd_gb ?: "-"}")
-        Text(text = "seller_nickname: ${selectedJourney?.seller_nickname ?: "-"}")
-        Text(text = "seller_shop_id: ${selectedJourney?.seller_shop_id ?: "-"}")
-        Text(text = "current_stage: ${selectedJourney?.current_stage ?: "-"}")
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-        Text(text = "구매/검수 저장값 조회", style = MaterialTheme.typography.titleSmall)
-        Text(text = "purchased_at: ${selectedJourney?.purchased_at ?: "-"}")
-        Text(text = "purchase_price_krw: ${formatWon(selectedJourney?.purchase_price_krw)}")
-        Text(text = "purchase_method: ${selectedJourney?.purchase_method ?: "-"}")
-        Text(text = "purchase_location: ${selectedJourney?.purchase_location ?: "-"}")
-        Text(text = "transport_cost_krw: ${formatWon(selectedJourney?.transport_cost_krw)}")
-        Text(text = "shipping_cost_krw: ${formatWon(selectedJourney?.shipping_cost_krw)}")
-        Text(text = "total_cost_krw: ${formatWon(selectedJourney?.total_cost_krw)}")
-        Text(text = "cpu_core_count: ${selectedJourney?.cpu_core_count ?: "-"}")
-        Text(text = "gpu_core_count: ${selectedJourney?.gpu_core_count ?: "-"}")
-        Text(text = "battery_health_percent: ${selectedJourney?.battery_health_percent ?: "-"}")
-        Text(text = "battery_cycle_count: ${selectedJourney?.battery_cycle_count ?: "-"}")
-        Text(text = "exterior_grade: ${selectedJourney?.exterior_grade ?: "-"}")
-        Text(text = "included_items: ${formatAny(selectedJourney?.included_items)}")
-        Text(text = "inspection_notes: ${selectedJourney?.inspection_notes ?: "-"}")
-        Text(text = "repair_suspected: ${formatAny(selectedJourney?.repair_suspected)}")
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-        Text(text = "되팔이/판매 저장값 조회", style = MaterialTheme.typography.titleSmall)
-        Text(text = "resale_listing_created_at: ${selectedJourney?.resale_listing_created_at ?: "-"}")
-        Text(text = "resale_listing_price_krw: ${formatWon(selectedJourney?.resale_listing_price_krw)}")
-        Text(text = "resale_platform: ${selectedJourney?.resale_platform ?: "-"}")
-        Text(text = "resale_url: ${selectedJourney?.resale_url ?: "-"}")
-        Text(text = "sold_at: ${selectedJourney?.sold_at ?: "-"}")
-        Text(text = "sale_price_krw: ${formatWon(selectedJourney?.sale_price_krw)}")
-        Text(text = "final_shipping_cost_krw: ${formatWon(selectedJourney?.final_shipping_cost_krw)}")
-        Text(text = "platform_fee_krw: ${formatWon(selectedJourney?.platform_fee_krw)}")
-        Text(text = "gross_profit_krw: ${formatWon(selectedJourney?.gross_profit_krw)}")
-        Text(text = "net_profit_krw: ${formatWon(selectedJourney?.net_profit_krw)}")
-        Text(text = "roi_percent: ${selectedJourney?.roi_percent ?: "-"}")
+        val storedRows = buildStoredJourneyRows(selectedJourney)
+        Text(text = "저장값 조회 (실제 저장된 값만)", style = MaterialTheme.typography.titleMedium)
+        if (storedRows.isEmpty()) {
+            Text(text = "저장된 값이 없습니다.")
+        } else {
+            storedRows.forEach { (key, value) ->
+                Text(text = "$key: $value")
+            }
+        }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
@@ -346,10 +373,10 @@ fun ResaleTradeInputScreen(
 
         if (showAdditionalInputs) {
             Text(
-                text = "추가 컬럼은 JSON 대신 개별 입력칸으로 입력됩니다. 빈칸은 전송되지 않습니다.",
+                text = "전체 컬럼을 개별 입력칸으로 입력합니다. 빈칸은 전송되지 않습니다.",
                 style = MaterialTheme.typography.bodySmall,
             )
-            ADDITIONAL_COLUMN_INPUT_KEYS.forEach { key ->
+            RESALE_JOURNEY_ALL_COLUMNS.forEach { key ->
                 OutlinedTextField(
                     value = additionalFieldValues[key] ?: "",
                     onValueChange = { additionalFieldValues[key] = it },
