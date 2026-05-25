@@ -44,8 +44,10 @@ class ApiServerResaleTradeEndpointsTest(unittest.TestCase):
             3,
             {
                 "purchase_price_krw": 650000,
+                "contact_record": "010-1111-2222",
                 "updates": {
                     "battery_health_percent": 92,
+                    "money_sent_at": "2026-05-25 12:30:00",
                 },
             },
         )
@@ -56,7 +58,9 @@ class ApiServerResaleTradeEndpointsTest(unittest.TestCase):
         self.assertEqual(kwargs.get("journey_id"), 3)
         self.assertEqual(kwargs.get("user_id"), "boongtol")
         self.assertEqual(kwargs.get("updates", {}).get("purchase_price_krw"), 650000)
+        self.assertEqual(kwargs.get("updates", {}).get("contact_record"), "010-1111-2222")
         self.assertEqual(kwargs.get("updates", {}).get("battery_health_percent"), 92)
+        self.assertEqual(kwargs.get("updates", {}).get("money_sent_at"), "2026-05-25 12:30:00")
 
     @patch(
         "src.api_server.upsert_resale_trade_after_purchase",

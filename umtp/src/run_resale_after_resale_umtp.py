@@ -36,6 +36,11 @@ def main():
     source = _ask_optional_text("source(기본 joongna)") or "joongna"
     product_id = _ask_optional_text("product_id(없으면 URL에서 추출)")
     url = _ask_optional_text("url(옵션)")
+    contact_record = _ask_optional_text("연락처 기록")
+    conversation_text = _ask_optional_text("대화내용 기록")
+    money_sent_at = _ask_optional_datetime("돈 보낸 시각")
+    money_received_at = _ask_optional_datetime("돈 들어온 시각")
+    account_number = _ask_optional_text("계좌번호")
 
     view_count = _ask_optional_int("조회수")
     favorite_count = _ask_optional_int("찜수")
@@ -58,6 +63,11 @@ def main():
         "source": source,
         "product_id": product_id,
         "url": url,
+        "contact_record": contact_record,
+        "conversation_text": conversation_text,
+        "money_sent_at": money_sent_at,
+        "money_received_at": money_received_at,
+        "account_number": account_number,
         "view_count": view_count,
         "favorite_count": favorite_count,
         "inquiry_count": inquiry_count,

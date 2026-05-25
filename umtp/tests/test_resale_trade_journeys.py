@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 
@@ -104,11 +105,26 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             {
                 "purchase_price_krw": "650000",
                 "final_result_notes": "memo",
+                "contact_record": "010-1111-2222",
+                "conversation_text": "상태 좋다고 답변받음",
+                "money_sent_at": "2026-05-25 12:30",
+                "money_received_at": "2026-05-26 09:10:00",
+                "account_number": " 123-456-7890 ",
                 "sale_price_krw": "820000",
                 "listing_price_krw": "700000",
             },
             journeys.PURCHASE_PATCH_FIELDS,
-            {"purchase_price_krw", "final_result_notes", "sale_price_krw", "listing_price_krw"},
+            {
+                "purchase_price_krw",
+                "final_result_notes",
+                "contact_record",
+                "conversation_text",
+                "money_sent_at",
+                "money_received_at",
+                "account_number",
+                "sale_price_krw",
+                "listing_price_krw",
+            },
         )
 
         self.assertEqual(
@@ -116,6 +132,11 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             {
                 "purchase_price_krw": 650000,
                 "final_result_notes": "memo",
+                "contact_record": "010-1111-2222",
+                "conversation_text": "상태 좋다고 답변받음",
+                "money_sent_at": datetime(2026, 5, 25, 12, 30, 0),
+                "money_received_at": datetime(2026, 5, 26, 9, 10, 0),
+                "account_number": "123-456-7890",
             },
         )
 
@@ -139,17 +160,38 @@ class ResaleTradeJourneysTest(unittest.TestCase):
     def test_prepare_sparse_updates_resale_record_allows_sold_fields(self):
         updates = journeys._prepare_sparse_updates(
             {
+                "contact_record": "카톡 boongtol",
+                "conversation_text": "입금 확인 후 발송 약속",
+                "money_sent_at": "2026-05-25T10:00:00",
+                "money_received_at": "2026-05-25T11:00:00",
+                "account_number": "2222-3333-4444",
                 "resale_listing_price_krw": "790000",
                 "sale_price_krw": "810000",
+                "purchase_price_krw": "700000",
                 "current_stage": "SOLD",
             },
             journeys.RESALE_RECORD_PATCH_FIELDS,
-            {"resale_listing_price_krw", "sale_price_krw", "current_stage"},
+            {
+                "contact_record",
+                "conversation_text",
+                "money_sent_at",
+                "money_received_at",
+                "account_number",
+                "resale_listing_price_krw",
+                "sale_price_krw",
+                "purchase_price_krw",
+                "current_stage",
+            },
         )
 
         self.assertEqual(
             updates,
             {
+                "contact_record": "카톡 boongtol",
+                "conversation_text": "입금 확인 후 발송 약속",
+                "money_sent_at": datetime(2026, 5, 25, 10, 0, 0),
+                "money_received_at": datetime(2026, 5, 25, 11, 0, 0),
+                "account_number": "2222-3333-4444",
                 "resale_listing_price_krw": 790000,
                 "sale_price_krw": 810000,
                 "current_stage": "SOLD",

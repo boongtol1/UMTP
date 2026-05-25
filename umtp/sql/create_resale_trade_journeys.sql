@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS resale_trade_journeys (
   -- 3. 판매자 연락
   contacted_at DATETIME NULL,
   seller_response_at DATETIME NULL,
+  contact_record VARCHAR(255) NULL,
+  conversation_text LONGTEXT NULL,
   response_time_minutes INT GENERATED ALWAYS AS (
     CASE
       WHEN contacted_at IS NULL OR seller_response_at IS NULL THEN NULL
@@ -75,6 +77,9 @@ CREATE TABLE IF NOT EXISTS resale_trade_journeys (
     END
   ) STORED,
   payment_method VARCHAR(50) NULL,
+  money_sent_at DATETIME NULL,
+  money_received_at DATETIME NULL,
+  account_number VARCHAR(100) NULL,
 
   -- 6. 실물 검수
   serial_number VARCHAR(100) NULL,
@@ -269,6 +274,76 @@ SET @sql_gpu_core_count = IF(
 PREPARE stmt_gpu_core_count FROM @sql_gpu_core_count;
 EXECUTE stmt_gpu_core_count;
 DEALLOCATE PREPARE stmt_gpu_core_count;
+
+SELECT COUNT(*) INTO @has_contact_record
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'contact_record';
+SET @sql_contact_record = IF(
+  @has_contact_record = 0,
+  'ALTER TABLE resale_trade_journeys ADD COLUMN contact_record VARCHAR(255) NULL AFTER seller_response_at',
+  'SELECT ''resale_trade_journeys.contact_record exists'''
+);
+PREPARE stmt_contact_record FROM @sql_contact_record;
+EXECUTE stmt_contact_record;
+DEALLOCATE PREPARE stmt_contact_record;
+
+SELECT COUNT(*) INTO @has_conversation_text
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'conversation_text';
+SET @sql_conversation_text = IF(
+  @has_conversation_text = 0,
+  'ALTER TABLE resale_trade_journeys ADD COLUMN conversation_text LONGTEXT NULL AFTER contact_record',
+  'SELECT ''resale_trade_journeys.conversation_text exists'''
+);
+PREPARE stmt_conversation_text FROM @sql_conversation_text;
+EXECUTE stmt_conversation_text;
+DEALLOCATE PREPARE stmt_conversation_text;
+
+SELECT COUNT(*) INTO @has_money_sent_at
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'money_sent_at';
+SET @sql_money_sent_at = IF(
+  @has_money_sent_at = 0,
+  'ALTER TABLE resale_trade_journeys ADD COLUMN money_sent_at DATETIME NULL AFTER payment_method',
+  'SELECT ''resale_trade_journeys.money_sent_at exists'''
+);
+PREPARE stmt_money_sent_at FROM @sql_money_sent_at;
+EXECUTE stmt_money_sent_at;
+DEALLOCATE PREPARE stmt_money_sent_at;
+
+SELECT COUNT(*) INTO @has_money_received_at
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'money_received_at';
+SET @sql_money_received_at = IF(
+  @has_money_received_at = 0,
+  'ALTER TABLE resale_trade_journeys ADD COLUMN money_received_at DATETIME NULL AFTER money_sent_at',
+  'SELECT ''resale_trade_journeys.money_received_at exists'''
+);
+PREPARE stmt_money_received_at FROM @sql_money_received_at;
+EXECUTE stmt_money_received_at;
+DEALLOCATE PREPARE stmt_money_received_at;
+
+SELECT COUNT(*) INTO @has_account_number
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'account_number';
+SET @sql_account_number = IF(
+  @has_account_number = 0,
+  'ALTER TABLE resale_trade_journeys ADD COLUMN account_number VARCHAR(100) NULL AFTER money_received_at',
+  'SELECT ''resale_trade_journeys.account_number exists'''
+);
+PREPARE stmt_account_number FROM @sql_account_number;
+EXECUTE stmt_account_number;
+DEALLOCATE PREPARE stmt_account_number;
 
 SELECT COUNT(*) INTO @has_legacy_uq_source_product
 FROM information_schema.statistics

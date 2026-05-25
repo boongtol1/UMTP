@@ -49,11 +49,16 @@ def main():
     url = _ask_optional_text("url(옵션)")
 
     purchased_at = _ask_optional_datetime("구매 시각")
+    contact_record = _ask_optional_text("연락처 기록")
+    conversation_text = _ask_optional_text("대화내용 기록")
     purchase_price_krw = _ask_optional_int("구매 금액")
     purchase_method = _ask_optional_text("구매 방식(직거래/택배)")
     purchase_location = _ask_optional_text("구매 장소")
     transport_cost_krw = _ask_optional_int("이동비")
     shipping_cost_krw = _ask_optional_int("배송비")
+    money_sent_at = _ask_optional_datetime("돈 보낸 시각")
+    money_received_at = _ask_optional_datetime("돈 들어온 시각")
+    account_number = _ask_optional_text("계좌번호")
 
     battery_health_percent = _ask_optional_int("배터리 효율(%)")
     battery_cycle_count = _ask_optional_int("배터리 사이클")
@@ -72,11 +77,16 @@ def main():
         "product_id": product_id,
         "url": url,
         "purchased_at": purchased_at,
+        "contact_record": contact_record,
+        "conversation_text": conversation_text,
         "purchase_price_krw": purchase_price_krw,
         "purchase_method": purchase_method,
         "purchase_location": purchase_location,
         "transport_cost_krw": transport_cost_krw,
         "shipping_cost_krw": shipping_cost_krw,
+        "money_sent_at": money_sent_at,
+        "money_received_at": money_received_at,
+        "account_number": account_number,
         "battery_health_percent": battery_health_percent,
         "battery_cycle_count": battery_cycle_count,
         "cpu_core_count": cpu_core_count,

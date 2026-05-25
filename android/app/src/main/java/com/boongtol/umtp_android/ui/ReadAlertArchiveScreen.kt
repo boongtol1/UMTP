@@ -118,6 +118,23 @@ fun ReadAlertArchiveScreen(
                 ) {
                     Text(if (isSelectionMode) "선택 해제" else "선택")
                 }
+                if (isSelectionMode) {
+                    val isAllVisibleSelected = visibleAlertIds.isNotEmpty() &&
+                        selectedAlertIds.size == visibleAlertIds.size &&
+                        selectedAlertIds.containsAll(visibleAlertIds)
+                    TextButton(
+                        onClick = {
+                            selectedAlertIds = if (isAllVisibleSelected) {
+                                emptySet()
+                            } else {
+                                visibleAlertIds
+                            }
+                        },
+                        enabled = visibleAlertIds.isNotEmpty(),
+                    ) {
+                        Text(if (isAllVisibleSelected) "전체 해제" else "전체 선택")
+                    }
+                }
                 TextButton(
                     onClick = {
                         onClearSelected(selectedAlertIds.toList())

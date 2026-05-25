@@ -90,6 +90,8 @@ private val AUTO_DISABLED_FIELDS = listOf(
 private val PURCHASE_INPUT_FIELDS = listOf(
     "contacted_at",
     "seller_response_at",
+    "contact_record",
+    "conversation_text",
     "seller_answer_text",
     "negotiable",
     "seller_tone",
@@ -110,6 +112,9 @@ private val PURCHASE_INPUT_FIELDS = listOf(
     "transport_cost_krw",
     "shipping_cost_krw",
     "payment_method",
+    "money_sent_at",
+    "money_received_at",
+    "account_number",
     "serial_number",
     "model_number",
     "applecare_status",
@@ -138,6 +143,11 @@ private val PURCHASE_INPUT_FIELDS = listOf(
 )
 
 private val RESALE_INPUT_FIELDS = listOf(
+    "contact_record",
+    "conversation_text",
+    "money_sent_at",
+    "money_received_at",
+    "account_number",
     "resale_title",
     "resale_body_text",
     "resale_photo_count",

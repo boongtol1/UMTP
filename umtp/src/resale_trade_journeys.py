@@ -23,6 +23,8 @@ DATETIME_FIELDS = {
     "purchased_at",
     "cleaned_at",
     "photo_taken_at",
+    "money_sent_at",
+    "money_received_at",
     "resale_listing_created_at",
     "first_inquiry_at",
     "sold_at",
@@ -123,6 +125,8 @@ AUTO_HYDRATE_FIELDS = {
 PURCHASE_PATCH_FIELDS = {
     "contacted_at",
     "seller_response_at",
+    "contact_record",
+    "conversation_text",
     "seller_answer_text",
     "negotiable",
     "seller_tone",
@@ -145,6 +149,9 @@ PURCHASE_PATCH_FIELDS = {
     "cleaned_at",
     "photo_taken_at",
     "payment_method",
+    "money_sent_at",
+    "money_received_at",
+    "account_number",
     "serial_number",
     "model_number",
     "applecare_status",
@@ -171,6 +178,11 @@ PURCHASE_PATCH_FIELDS = {
 }
 
 RESALE_PATCH_FIELDS = {
+    "contact_record",
+    "conversation_text",
+    "money_sent_at",
+    "money_received_at",
+    "account_number",
     "resale_title",
     "resale_body_text",
     "resale_photo_count",
