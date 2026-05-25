@@ -72,9 +72,15 @@ class ResaleTradeJourneysMigrationTest(unittest.TestCase):
                 "current_stage",
                 "contact_record",
                 "conversation_text",
+                "purchase_contact_record",
+                "purchase_conversation_text",
+                "resale_contact_record",
+                "resale_conversation_text",
                 "money_sent_at",
                 "money_received_at",
                 "account_number",
+                "purchase_account_number",
+                "resale_account_number",
                 "response_time_minutes",
                 "total_cost_krw",
                 "roi_percent",
@@ -177,6 +183,67 @@ class ResaleTradeJourneysMigrationTest(unittest.TestCase):
 
             self.assertIsNone(resale_row.get("money_sent_at"))
             self.assertIsNotNone(resale_row.get("money_received_at"))
+        finally:
+            try:
+                cursor.execute("DELETE FROM resale_trade_journeys WHERE user_id = %s", (marker,))
+                connection.commit()
+            except Exception:
+                pass
+            cursor.close()
+            connection.close()
+
+    def test_migration_backfills_split_contact_fields_from_legacy_shared_fields(self):
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        marker = f"migration_split_contact_{uuid.uuid4().hex[:10]}"
+        try:
+            _execute_sql_script(connection, MIGRATION_SQL_PATH)
+
+            cursor.execute(
+                """
+                INSERT INTO resale_trade_journeys (
+                    user_id, source, product_id, current_stage,
+                    contact_record, conversation_text, account_number
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    marker,
+                    "joongna",
+                    "split-contact",
+                    "INSPECTED",
+                    "010-2222-3333",
+                    "기존 공통 대화내용",
+                    "111-222-333",
+                ),
+            )
+            connection.commit()
+
+            _execute_sql_script(connection, MIGRATION_SQL_PATH)
+
+            cursor.execute(
+                """
+                SELECT
+                    purchase_contact_record,
+                    purchase_conversation_text,
+                    purchase_account_number,
+                    resale_contact_record,
+                    resale_conversation_text,
+                    resale_account_number
+                FROM resale_trade_journeys
+                WHERE user_id = %s
+                  AND product_id = %s
+                LIMIT 1
+                """,
+                (marker, "split-contact"),
+            )
+            row = cursor.fetchone() or {}
+
+            self.assertEqual(row.get("purchase_contact_record"), "010-2222-3333")
+            self.assertEqual(row.get("purchase_conversation_text"), "기존 공통 대화내용")
+            self.assertEqual(row.get("purchase_account_number"), "111-222-333")
+            self.assertEqual(row.get("resale_contact_record"), "010-2222-3333")
+            self.assertEqual(row.get("resale_conversation_text"), "기존 공통 대화내용")
+            self.assertEqual(row.get("resale_account_number"), "111-222-333")
         finally:
             try:
                 cursor.execute("DELETE FROM resale_trade_journeys WHERE user_id = %s", (marker,))

@@ -123,9 +123,9 @@ AUTO_HYDRATE_FIELDS = {
 }
 
 PURCHASE_PATCH_FIELDS = {
-    "contact_record",
-    "conversation_text",
-    "account_number",
+    "purchase_contact_record",
+    "purchase_conversation_text",
+    "purchase_account_number",
     "contacted_at",
     "seller_response_at",
     "purchased_at",
@@ -142,9 +142,9 @@ PURCHASE_PATCH_FIELDS = {
 }
 
 RESALE_PATCH_FIELDS = {
-    "contact_record",
-    "conversation_text",
-    "account_number",
+    "resale_contact_record",
+    "resale_conversation_text",
+    "resale_account_number",
     "money_received_at",
     "resale_listing_price_krw",
     "minimum_accept_price_krw",

@@ -36,9 +36,9 @@ def main():
     source = _ask_optional_text("source(기본 joongna)") or "joongna"
     product_id = _ask_optional_text("product_id(없으면 URL에서 추출)")
     url = _ask_optional_text("url(옵션)")
-    contact_record = _ask_optional_text("연락처 기록")
-    conversation_text = _ask_optional_text("대화내용 기록")
-    account_number = _ask_optional_text("계좌번호")
+    resale_contact_record = _ask_optional_text("연락처 기록")
+    resale_conversation_text = _ask_optional_text("대화내용 기록")
+    resale_account_number = _ask_optional_text("계좌번호")
     money_received_at = _ask_optional_datetime("돈 들어온 시각")
     resale_listing_created_at = _ask_optional_datetime("되팔이 게시 시각")
     resale_listing_price_krw = _ask_optional_int("되팔이 게시가")
@@ -63,9 +63,9 @@ def main():
         "source": source,
         "product_id": product_id,
         "url": url,
-        "contact_record": contact_record,
-        "conversation_text": conversation_text,
-        "account_number": account_number,
+        "resale_contact_record": resale_contact_record,
+        "resale_conversation_text": resale_conversation_text,
+        "resale_account_number": resale_account_number,
         "money_received_at": money_received_at,
         "resale_listing_created_at": resale_listing_created_at,
         "resale_listing_price_krw": resale_listing_price_krw,

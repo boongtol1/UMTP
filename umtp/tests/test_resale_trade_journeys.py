@@ -105,11 +105,11 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             {
                 "purchase_price_krw": "650000",
                 "final_result_notes": "memo",
-                "contact_record": "010-1111-2222",
-                "conversation_text": "상태 좋다고 답변받음",
+                "purchase_contact_record": "010-1111-2222",
+                "purchase_conversation_text": "상태 좋다고 답변받음",
                 "money_sent_at": "2026-05-25 12:30",
                 "money_received_at": "2026-05-26 09:10:00",
-                "account_number": " 123-456-7890 ",
+                "purchase_account_number": " 123-456-7890 ",
                 "inspection_notes": "  상태 양호  ",
                 "sale_price_krw": "820000",
                 "listing_price_krw": "700000",
@@ -118,11 +118,11 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             {
                 "purchase_price_krw",
                 "final_result_notes",
-                "contact_record",
-                "conversation_text",
+                "purchase_contact_record",
+                "purchase_conversation_text",
                 "money_sent_at",
                 "money_received_at",
-                "account_number",
+                "purchase_account_number",
                 "inspection_notes",
                 "sale_price_krw",
                 "listing_price_krw",
@@ -134,10 +134,10 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             {
                 "purchase_price_krw": 650000,
                 "final_result_notes": "memo",
-                "contact_record": "010-1111-2222",
-                "conversation_text": "상태 좋다고 답변받음",
+                "purchase_contact_record": "010-1111-2222",
+                "purchase_conversation_text": "상태 좋다고 답변받음",
                 "money_sent_at": datetime(2026, 5, 25, 12, 30, 0),
-                "account_number": "123-456-7890",
+                "purchase_account_number": "123-456-7890",
                 "inspection_notes": "상태 양호",
             },
         )
@@ -146,28 +146,28 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         updates = journeys._prepare_sparse_updates(
             {
                 "seller_location": "  서울 강남구  ",
-                "contact_record": " 010-1111-2222 ",
+                "purchase_contact_record": " 010-1111-2222 ",
                 "url": "https://example.com/product/1",
             },
             journeys.PURCHASE_PATCH_FIELDS,
-            {"seller_location", "contact_record", "url"},
+            {"seller_location", "purchase_contact_record", "url"},
         )
 
         self.assertEqual(
             updates,
             {
-                "contact_record": "010-1111-2222",
+                "purchase_contact_record": "010-1111-2222",
             },
         )
 
     def test_prepare_sparse_updates_resale_record_allows_sold_fields(self):
         updates = journeys._prepare_sparse_updates(
             {
-                "contact_record": "카톡 boongtol",
-                "conversation_text": "입금 확인 후 발송 약속",
+                "resale_contact_record": "카톡 boongtol",
+                "resale_conversation_text": "입금 확인 후 발송 약속",
                 "money_sent_at": "2026-05-25T10:00:00",
                 "money_received_at": "2026-05-25T11:00:00",
-                "account_number": "2222-3333-4444",
+                "resale_account_number": "2222-3333-4444",
                 "resale_listing_price_krw": "790000",
                 "sale_price_krw": "810000",
                 "purchase_price_krw": "700000",
@@ -175,11 +175,11 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             },
             journeys.RESALE_RECORD_PATCH_FIELDS,
             {
-                "contact_record",
-                "conversation_text",
+                "resale_contact_record",
+                "resale_conversation_text",
                 "money_sent_at",
                 "money_received_at",
-                "account_number",
+                "resale_account_number",
                 "resale_listing_price_krw",
                 "sale_price_krw",
                 "purchase_price_krw",
@@ -190,10 +190,10 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         self.assertEqual(
             updates,
             {
-                "contact_record": "카톡 boongtol",
-                "conversation_text": "입금 확인 후 발송 약속",
+                "resale_contact_record": "카톡 boongtol",
+                "resale_conversation_text": "입금 확인 후 발송 약속",
                 "money_received_at": datetime(2026, 5, 25, 11, 0, 0),
-                "account_number": "2222-3333-4444",
+                "resale_account_number": "2222-3333-4444",
                 "resale_listing_price_krw": 790000,
                 "sale_price_krw": 810000,
                 "current_stage": "SOLD",

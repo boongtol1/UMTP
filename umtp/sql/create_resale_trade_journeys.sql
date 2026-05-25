@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS resale_trade_journeys (
   seller_response_at DATETIME NULL,
   contact_record VARCHAR(255) NULL,
   conversation_text LONGTEXT NULL,
+  purchase_contact_record VARCHAR(255) NULL,
+  purchase_conversation_text LONGTEXT NULL,
   response_time_minutes INT GENERATED ALWAYS AS (
     CASE
       WHEN contacted_at IS NULL OR seller_response_at IS NULL THEN NULL
@@ -80,6 +82,7 @@ CREATE TABLE IF NOT EXISTS resale_trade_journeys (
   money_sent_at DATETIME NULL,
   money_received_at DATETIME NULL,
   account_number VARCHAR(100) NULL,
+  purchase_account_number VARCHAR(100) NULL,
 
   -- 6. 실물 검수
   serial_number VARCHAR(100) NULL,
@@ -138,6 +141,9 @@ CREATE TABLE IF NOT EXISTS resale_trade_journeys (
   price_drop_history LONGTEXT NULL,
   buyer_questions LONGTEXT NULL,
   common_objections LONGTEXT NULL,
+  resale_contact_record VARCHAR(255) NULL,
+  resale_conversation_text LONGTEXT NULL,
+  resale_account_number VARCHAR(100) NULL,
 
   -- 10. 판매 완료
   sold_at DATETIME NULL,
@@ -344,6 +350,118 @@ SET @sql_account_number = IF(
 PREPARE stmt_account_number FROM @sql_account_number;
 EXECUTE stmt_account_number;
 DEALLOCATE PREPARE stmt_account_number;
+
+SELECT COUNT(*) INTO @has_purchase_contact_record
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'purchase_contact_record';
+SET @sql_purchase_contact_record = IF(
+  @has_purchase_contact_record = 0,
+  'ALTER TABLE resale_trade_journeys ADD COLUMN purchase_contact_record VARCHAR(255) NULL AFTER contact_record',
+  'SELECT ''resale_trade_journeys.purchase_contact_record exists'''
+);
+PREPARE stmt_purchase_contact_record FROM @sql_purchase_contact_record;
+EXECUTE stmt_purchase_contact_record;
+DEALLOCATE PREPARE stmt_purchase_contact_record;
+
+SELECT COUNT(*) INTO @has_purchase_conversation_text
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'purchase_conversation_text';
+SET @sql_purchase_conversation_text = IF(
+  @has_purchase_conversation_text = 0,
+  'ALTER TABLE resale_trade_journeys ADD COLUMN purchase_conversation_text LONGTEXT NULL AFTER purchase_contact_record',
+  'SELECT ''resale_trade_journeys.purchase_conversation_text exists'''
+);
+PREPARE stmt_purchase_conversation_text FROM @sql_purchase_conversation_text;
+EXECUTE stmt_purchase_conversation_text;
+DEALLOCATE PREPARE stmt_purchase_conversation_text;
+
+SELECT COUNT(*) INTO @has_purchase_account_number
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'purchase_account_number';
+SET @sql_purchase_account_number = IF(
+  @has_purchase_account_number = 0,
+  'ALTER TABLE resale_trade_journeys ADD COLUMN purchase_account_number VARCHAR(100) NULL AFTER account_number',
+  'SELECT ''resale_trade_journeys.purchase_account_number exists'''
+);
+PREPARE stmt_purchase_account_number FROM @sql_purchase_account_number;
+EXECUTE stmt_purchase_account_number;
+DEALLOCATE PREPARE stmt_purchase_account_number;
+
+SELECT COUNT(*) INTO @has_resale_contact_record
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'resale_contact_record';
+SET @sql_resale_contact_record = IF(
+  @has_resale_contact_record = 0,
+  'ALTER TABLE resale_trade_journeys ADD COLUMN resale_contact_record VARCHAR(255) NULL AFTER common_objections',
+  'SELECT ''resale_trade_journeys.resale_contact_record exists'''
+);
+PREPARE stmt_resale_contact_record FROM @sql_resale_contact_record;
+EXECUTE stmt_resale_contact_record;
+DEALLOCATE PREPARE stmt_resale_contact_record;
+
+SELECT COUNT(*) INTO @has_resale_conversation_text
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'resale_conversation_text';
+SET @sql_resale_conversation_text = IF(
+  @has_resale_conversation_text = 0,
+  'ALTER TABLE resale_trade_journeys ADD COLUMN resale_conversation_text LONGTEXT NULL AFTER resale_contact_record',
+  'SELECT ''resale_trade_journeys.resale_conversation_text exists'''
+);
+PREPARE stmt_resale_conversation_text FROM @sql_resale_conversation_text;
+EXECUTE stmt_resale_conversation_text;
+DEALLOCATE PREPARE stmt_resale_conversation_text;
+
+SELECT COUNT(*) INTO @has_resale_account_number
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'resale_account_number';
+SET @sql_resale_account_number = IF(
+  @has_resale_account_number = 0,
+  'ALTER TABLE resale_trade_journeys ADD COLUMN resale_account_number VARCHAR(100) NULL AFTER resale_conversation_text',
+  'SELECT ''resale_trade_journeys.resale_account_number exists'''
+);
+PREPARE stmt_resale_account_number FROM @sql_resale_account_number;
+EXECUTE stmt_resale_account_number;
+DEALLOCATE PREPARE stmt_resale_account_number;
+
+-- 기존 공통 필드를 신규 분리 필드로 백필 (데이터 유실 방지)
+UPDATE resale_trade_journeys
+SET purchase_contact_record = COALESCE(purchase_contact_record, contact_record),
+    resale_contact_record = COALESCE(resale_contact_record, contact_record)
+WHERE contact_record IS NOT NULL
+  AND (
+    purchase_contact_record IS NULL
+    OR resale_contact_record IS NULL
+  );
+
+UPDATE resale_trade_journeys
+SET purchase_conversation_text = COALESCE(purchase_conversation_text, conversation_text),
+    resale_conversation_text = COALESCE(resale_conversation_text, conversation_text)
+WHERE conversation_text IS NOT NULL
+  AND (
+    purchase_conversation_text IS NULL
+    OR resale_conversation_text IS NULL
+  );
+
+UPDATE resale_trade_journeys
+SET purchase_account_number = COALESCE(purchase_account_number, account_number),
+    resale_account_number = COALESCE(resale_account_number, account_number)
+WHERE account_number IS NOT NULL
+  AND (
+    purchase_account_number IS NULL
+    OR resale_account_number IS NULL
+  );
 
 SELECT COUNT(*) INTO @has_legacy_uq_source_product
 FROM information_schema.statistics
