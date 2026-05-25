@@ -71,14 +71,14 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             {
                 "purchase_price_krw": "",
                 "inspection_notes": "  ",
-                "battery_cycle_count": "123",
-                "battery_health_percent": None,
+                "shipping_cost_krw": "123",
+                "money_sent_at": None,
             },
             journeys.PURCHASE_PATCH_FIELDS,
-            {"purchase_price_krw", "inspection_notes", "battery_cycle_count", "battery_health_percent"},
+            {"purchase_price_krw", "inspection_notes", "shipping_cost_krw", "money_sent_at"},
         )
 
-        self.assertEqual(updates, {"battery_cycle_count": 123})
+        self.assertEqual(updates, {"shipping_cost_krw": 123})
 
     def test_prepare_sparse_updates_accepts_all_payload_keys_when_allowed_fields_none(self):
         updates = journeys._prepare_sparse_updates(
@@ -110,6 +110,7 @@ class ResaleTradeJourneysTest(unittest.TestCase):
                 "money_sent_at": "2026-05-25 12:30",
                 "money_received_at": "2026-05-26 09:10:00",
                 "account_number": " 123-456-7890 ",
+                "inspection_notes": "  상태 양호  ",
                 "sale_price_krw": "820000",
                 "listing_price_krw": "700000",
             },
@@ -122,6 +123,7 @@ class ResaleTradeJourneysTest(unittest.TestCase):
                 "money_sent_at",
                 "money_received_at",
                 "account_number",
+                "inspection_notes",
                 "sale_price_krw",
                 "listing_price_krw",
             },
@@ -135,25 +137,26 @@ class ResaleTradeJourneysTest(unittest.TestCase):
                 "contact_record": "010-1111-2222",
                 "conversation_text": "상태 좋다고 답변받음",
                 "money_sent_at": datetime(2026, 5, 25, 12, 30, 0),
-                "money_received_at": datetime(2026, 5, 26, 9, 10, 0),
                 "account_number": "123-456-7890",
+                "inspection_notes": "상태 양호",
             },
         )
 
-    def test_prepare_sparse_updates_purchase_fields_allow_seller_location(self):
+    def test_prepare_sparse_updates_purchase_fields_drop_removed_field(self):
         updates = journeys._prepare_sparse_updates(
             {
                 "seller_location": "  서울 강남구  ",
+                "contact_record": " 010-1111-2222 ",
                 "url": "https://example.com/product/1",
             },
             journeys.PURCHASE_PATCH_FIELDS,
-            {"seller_location", "url"},
+            {"seller_location", "contact_record", "url"},
         )
 
         self.assertEqual(
             updates,
             {
-                "seller_location": "서울 강남구",
+                "contact_record": "010-1111-2222",
             },
         )
 
@@ -189,7 +192,6 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             {
                 "contact_record": "카톡 boongtol",
                 "conversation_text": "입금 확인 후 발송 약속",
-                "money_sent_at": datetime(2026, 5, 25, 10, 0, 0),
                 "money_received_at": datetime(2026, 5, 25, 11, 0, 0),
                 "account_number": "2222-3333-4444",
                 "resale_listing_price_krw": 790000,
