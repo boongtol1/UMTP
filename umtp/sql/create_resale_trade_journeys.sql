@@ -437,3 +437,42 @@ SET @sql_add_idx_stage = IF(
 PREPARE stmt_add_idx_stage FROM @sql_add_idx_stage;
 EXECUTE stmt_add_idx_stage;
 DEALLOCATE PREPARE stmt_add_idx_stage;
+
+-- 데이터 정규화(기존 행 반영):
+-- 1) 구매 맥락(되팔이/판매 정보 없음)에서는 money_received_at -> money_sent_at로 이동
+-- 2) 되팔이/판매 맥락 + 구매 정보 없음에서는 money_sent_at -> money_received_at로 이동
+-- 3) 이동 후 반대쪽 필드는 NULL 처리
+UPDATE resale_trade_journeys
+SET money_sent_at = COALESCE(money_sent_at, money_received_at),
+    money_received_at = NULL
+WHERE money_received_at IS NOT NULL
+  AND money_sent_at IS NULL
+  AND sold_at IS NULL
+  AND sale_price_krw IS NULL
+  AND resale_listing_created_at IS NULL
+  AND resale_listing_price_krw IS NULL
+  AND resale_url IS NULL
+  AND resale_platform IS NULL
+  AND resale_product_id IS NULL;
+
+UPDATE resale_trade_journeys
+SET money_received_at = COALESCE(money_received_at, money_sent_at),
+    money_sent_at = NULL
+WHERE money_sent_at IS NOT NULL
+  AND money_received_at IS NULL
+  AND (
+    sold_at IS NOT NULL
+    OR sale_price_krw IS NOT NULL
+    OR resale_listing_created_at IS NOT NULL
+    OR resale_listing_price_krw IS NOT NULL
+    OR resale_url IS NOT NULL
+    OR resale_platform IS NOT NULL
+    OR resale_product_id IS NOT NULL
+  )
+  AND purchased_at IS NULL
+  AND purchase_price_krw IS NULL
+  AND purchase_method IS NULL
+  AND purchase_location IS NULL
+  AND transport_cost_krw IS NULL
+  AND shipping_cost_krw IS NULL
+  AND payment_method IS NULL;

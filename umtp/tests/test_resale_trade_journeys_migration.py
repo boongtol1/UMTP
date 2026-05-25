@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+import uuid
 
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -115,6 +116,73 @@ class ResaleTradeJourneysMigrationTest(unittest.TestCase):
                 row = cursor.fetchone() or {}
                 self.assertGreaterEqual(int(row.get("index_count", 0)), 1, f"missing index: {index_name}")
         finally:
+            cursor.close()
+            connection.close()
+
+    def test_migration_normalizes_money_flow_fields_for_existing_rows(self):
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        marker = f"migration_money_norm_{uuid.uuid4().hex[:10]}"
+        try:
+            _execute_sql_script(connection, MIGRATION_SQL_PATH)
+
+            # 구매 맥락: money_received_at만 있는 레거시 행
+            cursor.execute(
+                """
+                INSERT INTO resale_trade_journeys (
+                    user_id, source, product_id, current_stage, money_received_at
+                ) VALUES (%s, %s, %s, %s, %s)
+                """,
+                (marker, "joongna", "purchase-ctx", "INSPECTED", "2026-05-25 10:00:00"),
+            )
+
+            # 되팔이 맥락: money_sent_at만 있는 레거시 행(구매 정보 없음)
+            cursor.execute(
+                """
+                INSERT INTO resale_trade_journeys (
+                    user_id, source, product_id, current_stage,
+                    resale_listing_created_at, money_sent_at
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    marker,
+                    "joongna",
+                    "resale-ctx",
+                    "RESALE_LISTED",
+                    "2026-05-26 09:00:00",
+                    "2026-05-26 09:30:00",
+                ),
+            )
+            connection.commit()
+
+            _execute_sql_script(connection, MIGRATION_SQL_PATH)
+
+            cursor.execute(
+                """
+                SELECT product_id, money_sent_at, money_received_at
+                FROM resale_trade_journeys
+                WHERE user_id = %s
+                ORDER BY product_id
+                """,
+                (marker,),
+            )
+            rows = cursor.fetchall() or []
+            by_product = {row["product_id"]: row for row in rows}
+
+            purchase_row = by_product.get("purchase-ctx") or {}
+            resale_row = by_product.get("resale-ctx") or {}
+
+            self.assertIsNotNone(purchase_row.get("money_sent_at"))
+            self.assertIsNone(purchase_row.get("money_received_at"))
+
+            self.assertIsNone(resale_row.get("money_sent_at"))
+            self.assertIsNotNone(resale_row.get("money_received_at"))
+        finally:
+            try:
+                cursor.execute("DELETE FROM resale_trade_journeys WHERE user_id = %s", (marker,))
+                connection.commit()
+            except Exception:
+                pass
             cursor.close()
             connection.close()
 
