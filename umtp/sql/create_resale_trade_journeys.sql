@@ -25,8 +25,6 @@ CREATE TABLE IF NOT EXISTS resale_trade_journeys (
   screen_inch INT NULL,
   ram_gb INT NULL,
   ssd_gb INT NULL,
-  color VARCHAR(50) NULL,
-  keyboard_layout VARCHAR(50) NULL,
   fair_price_krw INT NULL,
   discount_rate_percent DECIMAL(7,2) NULL,
   expected_profit_krw INT NULL,
@@ -36,8 +34,6 @@ CREATE TABLE IF NOT EXISTS resale_trade_journeys (
   -- 3. 판매자 연락
   contacted_at DATETIME NULL,
   seller_response_at DATETIME NULL,
-  contact_record VARCHAR(255) NULL,
-  conversation_text LONGTEXT NULL,
   purchase_contact_record VARCHAR(255) NULL,
   purchase_conversation_text LONGTEXT NULL,
   response_time_minutes INT GENERATED ALWAYS AS (
@@ -46,20 +42,6 @@ CREATE TABLE IF NOT EXISTS resale_trade_journeys (
       ELSE TIMESTAMPDIFF(MINUTE, contacted_at, seller_response_at)
     END
   ) STORED,
-  seller_answer_text LONGTEXT NULL,
-  negotiable TINYINT(1) NULL,
-  seller_tone VARCHAR(50) NULL,
-  suspicious_points LONGTEXT NULL,
-  confirmed_price_krw INT NULL,
-
-  -- 4. 구매 결정
-  decision_at DATETIME NULL,
-  decision_result VARCHAR(20) NULL,
-  decision_reason LONGTEXT NULL,
-  target_purchase_price_krw INT NULL,
-  expected_sale_price_krw INT NULL,
-  expected_net_profit_krw INT NULL,
-  expected_sale_duration_days INT NULL,
 
   -- 5. 실제 구매
   purchased_at DATETIME NULL,
@@ -81,66 +63,23 @@ CREATE TABLE IF NOT EXISTS resale_trade_journeys (
   payment_method VARCHAR(50) NULL,
   money_sent_at DATETIME NULL,
   money_received_at DATETIME NULL,
-  account_number VARCHAR(100) NULL,
   purchase_account_number VARCHAR(100) NULL,
 
-  -- 6. 실물 검수
-  serial_number VARCHAR(100) NULL,
-  model_number VARCHAR(100) NULL,
-  applecare_status VARCHAR(50) NULL,
-  activation_lock_off TINYINT(1) NULL,
-  mdm_lock_none TINYINT(1) NULL,
-  cpu_core_count INT NULL,
-  gpu_core_count INT NULL,
-  battery_health_percent INT NULL,
-  battery_cycle_count INT NULL,
-  battery_condition VARCHAR(50) NULL,
-  truetone_ok TINYINT(1) NULL,
-  display_condition VARCHAR(100) NULL,
-  keyboard_condition VARCHAR(100) NULL,
-  trackpad_condition VARCHAR(100) NULL,
-  speaker_condition VARCHAR(100) NULL,
-  camera_condition VARCHAR(100) NULL,
-  wifi_bluetooth_ok TINYINT(1) NULL,
-  exterior_grade VARCHAR(50) NULL,
-  included_items LONGTEXT NULL,
-  repair_suspected TINYINT(1) NULL,
+  -- 6. 검수 메모
   inspection_notes LONGTEXT NULL,
 
   -- 7. 되팔이 준비
-  cleaned_at DATETIME NULL,
-  photo_taken_at DATETIME NULL,
-  resale_title VARCHAR(500) NULL,
-  resale_body_text LONGTEXT NULL,
-  resale_photo_count INT NULL,
   resale_listing_price_krw INT NULL,
   minimum_accept_price_krw INT NULL,
   resale_platform VARCHAR(50) NULL,
-  resale_strategy_notes LONGTEXT NULL,
 
   -- 8. 되팔이 글 업로드
   resale_listing_created_at DATETIME NULL,
   resale_url TEXT NULL,
   resale_product_id VARCHAR(100) NULL,
   initial_resale_price_krw INT NULL,
-  upload_time_slot VARCHAR(50) NULL,
 
   -- 9. 판매 중 반응
-  view_count INT NULL,
-  favorite_count INT NULL,
-  inquiry_count INT NULL,
-  first_inquiry_at DATETIME NULL,
-  first_inquiry_delay_minutes INT GENERATED ALWAYS AS (
-    CASE
-      WHEN resale_listing_created_at IS NULL OR first_inquiry_at IS NULL THEN NULL
-      ELSE TIMESTAMPDIFF(MINUTE, resale_listing_created_at, first_inquiry_at)
-    END
-  ) STORED,
-  negotiation_count INT NULL,
-  price_drop_count INT NULL,
-  price_drop_history LONGTEXT NULL,
-  buyer_questions LONGTEXT NULL,
-  common_objections LONGTEXT NULL,
   resale_contact_record VARCHAR(255) NULL,
   resale_conversation_text LONGTEXT NULL,
   resale_account_number VARCHAR(100) NULL,
@@ -253,62 +192,6 @@ CREATE TABLE IF NOT EXISTS resale_trade_journeys (
 
 SET @target_db = DATABASE();
 
-SELECT COUNT(*) INTO @has_cpu_core_count
-FROM information_schema.columns
-WHERE table_schema = @target_db
-  AND table_name = 'resale_trade_journeys'
-  AND column_name = 'cpu_core_count';
-SET @sql_cpu_core_count = IF(
-  @has_cpu_core_count = 0,
-  'ALTER TABLE resale_trade_journeys ADD COLUMN cpu_core_count INT NULL AFTER mdm_lock_none',
-  'SELECT ''resale_trade_journeys.cpu_core_count exists'''
-);
-PREPARE stmt_cpu_core_count FROM @sql_cpu_core_count;
-EXECUTE stmt_cpu_core_count;
-DEALLOCATE PREPARE stmt_cpu_core_count;
-
-SELECT COUNT(*) INTO @has_gpu_core_count
-FROM information_schema.columns
-WHERE table_schema = @target_db
-  AND table_name = 'resale_trade_journeys'
-  AND column_name = 'gpu_core_count';
-SET @sql_gpu_core_count = IF(
-  @has_gpu_core_count = 0,
-  'ALTER TABLE resale_trade_journeys ADD COLUMN gpu_core_count INT NULL AFTER cpu_core_count',
-  'SELECT ''resale_trade_journeys.gpu_core_count exists'''
-);
-PREPARE stmt_gpu_core_count FROM @sql_gpu_core_count;
-EXECUTE stmt_gpu_core_count;
-DEALLOCATE PREPARE stmt_gpu_core_count;
-
-SELECT COUNT(*) INTO @has_contact_record
-FROM information_schema.columns
-WHERE table_schema = @target_db
-  AND table_name = 'resale_trade_journeys'
-  AND column_name = 'contact_record';
-SET @sql_contact_record = IF(
-  @has_contact_record = 0,
-  'ALTER TABLE resale_trade_journeys ADD COLUMN contact_record VARCHAR(255) NULL AFTER seller_response_at',
-  'SELECT ''resale_trade_journeys.contact_record exists'''
-);
-PREPARE stmt_contact_record FROM @sql_contact_record;
-EXECUTE stmt_contact_record;
-DEALLOCATE PREPARE stmt_contact_record;
-
-SELECT COUNT(*) INTO @has_conversation_text
-FROM information_schema.columns
-WHERE table_schema = @target_db
-  AND table_name = 'resale_trade_journeys'
-  AND column_name = 'conversation_text';
-SET @sql_conversation_text = IF(
-  @has_conversation_text = 0,
-  'ALTER TABLE resale_trade_journeys ADD COLUMN conversation_text LONGTEXT NULL AFTER contact_record',
-  'SELECT ''resale_trade_journeys.conversation_text exists'''
-);
-PREPARE stmt_conversation_text FROM @sql_conversation_text;
-EXECUTE stmt_conversation_text;
-DEALLOCATE PREPARE stmt_conversation_text;
-
 SELECT COUNT(*) INTO @has_money_sent_at
 FROM information_schema.columns
 WHERE table_schema = @target_db
@@ -337,20 +220,6 @@ PREPARE stmt_money_received_at FROM @sql_money_received_at;
 EXECUTE stmt_money_received_at;
 DEALLOCATE PREPARE stmt_money_received_at;
 
-SELECT COUNT(*) INTO @has_account_number
-FROM information_schema.columns
-WHERE table_schema = @target_db
-  AND table_name = 'resale_trade_journeys'
-  AND column_name = 'account_number';
-SET @sql_account_number = IF(
-  @has_account_number = 0,
-  'ALTER TABLE resale_trade_journeys ADD COLUMN account_number VARCHAR(100) NULL AFTER money_received_at',
-  'SELECT ''resale_trade_journeys.account_number exists'''
-);
-PREPARE stmt_account_number FROM @sql_account_number;
-EXECUTE stmt_account_number;
-DEALLOCATE PREPARE stmt_account_number;
-
 SELECT COUNT(*) INTO @has_purchase_contact_record
 FROM information_schema.columns
 WHERE table_schema = @target_db
@@ -358,7 +227,7 @@ WHERE table_schema = @target_db
   AND column_name = 'purchase_contact_record';
 SET @sql_purchase_contact_record = IF(
   @has_purchase_contact_record = 0,
-  'ALTER TABLE resale_trade_journeys ADD COLUMN purchase_contact_record VARCHAR(255) NULL AFTER contact_record',
+  'ALTER TABLE resale_trade_journeys ADD COLUMN purchase_contact_record VARCHAR(255) NULL AFTER seller_response_at',
   'SELECT ''resale_trade_journeys.purchase_contact_record exists'''
 );
 PREPARE stmt_purchase_contact_record FROM @sql_purchase_contact_record;
@@ -386,7 +255,7 @@ WHERE table_schema = @target_db
   AND column_name = 'purchase_account_number';
 SET @sql_purchase_account_number = IF(
   @has_purchase_account_number = 0,
-  'ALTER TABLE resale_trade_journeys ADD COLUMN purchase_account_number VARCHAR(100) NULL AFTER account_number',
+  'ALTER TABLE resale_trade_journeys ADD COLUMN purchase_account_number VARCHAR(100) NULL AFTER money_received_at',
   'SELECT ''resale_trade_journeys.purchase_account_number exists'''
 );
 PREPARE stmt_purchase_account_number FROM @sql_purchase_account_number;
@@ -400,7 +269,7 @@ WHERE table_schema = @target_db
   AND column_name = 'resale_contact_record';
 SET @sql_resale_contact_record = IF(
   @has_resale_contact_record = 0,
-  'ALTER TABLE resale_trade_journeys ADD COLUMN resale_contact_record VARCHAR(255) NULL AFTER common_objections',
+  'ALTER TABLE resale_trade_journeys ADD COLUMN resale_contact_record VARCHAR(255) NULL AFTER minimum_accept_price_krw',
   'SELECT ''resale_trade_journeys.resale_contact_record exists'''
 );
 PREPARE stmt_resale_contact_record FROM @sql_resale_contact_record;
@@ -435,33 +304,155 @@ PREPARE stmt_resale_account_number FROM @sql_resale_account_number;
 EXECUTE stmt_resale_account_number;
 DEALLOCATE PREPARE stmt_resale_account_number;
 
--- 기존 공통 필드를 신규 분리 필드로 백필 (데이터 유실 방지)
-UPDATE resale_trade_journeys
-SET purchase_contact_record = COALESCE(purchase_contact_record, contact_record),
-    resale_contact_record = COALESCE(resale_contact_record, contact_record)
-WHERE contact_record IS NOT NULL
-  AND (
-    purchase_contact_record IS NULL
-    OR resale_contact_record IS NULL
-  );
+-- 기존 공통 필드를 신규 분리 필드로 백필 (legacy 컬럼이 있을 때만)
+SELECT COUNT(*) INTO @has_legacy_contact_record
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'contact_record';
+SET @sql_backfill_legacy_contact_record = IF(
+  @has_legacy_contact_record = 0,
+  'SELECT ''legacy contact_record absent''',
+  'UPDATE resale_trade_journeys
+   SET purchase_contact_record = COALESCE(purchase_contact_record, contact_record),
+       resale_contact_record = COALESCE(resale_contact_record, contact_record)
+   WHERE contact_record IS NOT NULL
+     AND (
+       purchase_contact_record IS NULL
+       OR resale_contact_record IS NULL
+     )'
+);
+PREPARE stmt_backfill_legacy_contact_record FROM @sql_backfill_legacy_contact_record;
+EXECUTE stmt_backfill_legacy_contact_record;
+DEALLOCATE PREPARE stmt_backfill_legacy_contact_record;
 
-UPDATE resale_trade_journeys
-SET purchase_conversation_text = COALESCE(purchase_conversation_text, conversation_text),
-    resale_conversation_text = COALESCE(resale_conversation_text, conversation_text)
-WHERE conversation_text IS NOT NULL
-  AND (
-    purchase_conversation_text IS NULL
-    OR resale_conversation_text IS NULL
-  );
+SELECT COUNT(*) INTO @has_legacy_conversation_text
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'conversation_text';
+SET @sql_backfill_legacy_conversation_text = IF(
+  @has_legacy_conversation_text = 0,
+  'SELECT ''legacy conversation_text absent''',
+  'UPDATE resale_trade_journeys
+   SET purchase_conversation_text = COALESCE(purchase_conversation_text, conversation_text),
+       resale_conversation_text = COALESCE(resale_conversation_text, conversation_text)
+   WHERE conversation_text IS NOT NULL
+     AND (
+       purchase_conversation_text IS NULL
+       OR resale_conversation_text IS NULL
+     )'
+);
+PREPARE stmt_backfill_legacy_conversation_text FROM @sql_backfill_legacy_conversation_text;
+EXECUTE stmt_backfill_legacy_conversation_text;
+DEALLOCATE PREPARE stmt_backfill_legacy_conversation_text;
 
-UPDATE resale_trade_journeys
-SET purchase_account_number = COALESCE(purchase_account_number, account_number),
-    resale_account_number = COALESCE(resale_account_number, account_number)
-WHERE account_number IS NOT NULL
-  AND (
-    purchase_account_number IS NULL
-    OR resale_account_number IS NULL
+SELECT COUNT(*) INTO @has_legacy_account_number
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'account_number';
+SET @sql_backfill_legacy_account_number = IF(
+  @has_legacy_account_number = 0,
+  'SELECT ''legacy account_number absent''',
+  'UPDATE resale_trade_journeys
+   SET purchase_account_number = COALESCE(purchase_account_number, account_number),
+       resale_account_number = COALESCE(resale_account_number, account_number)
+   WHERE account_number IS NOT NULL
+     AND (
+       purchase_account_number IS NULL
+       OR resale_account_number IS NULL
+     )'
+);
+PREPARE stmt_backfill_legacy_account_number FROM @sql_backfill_legacy_account_number;
+EXECUTE stmt_backfill_legacy_account_number;
+DEALLOCATE PREPARE stmt_backfill_legacy_account_number;
+
+-- 현재 기준에서 불필요/어긋난 legacy 컬럼 정리
+SELECT COUNT(*) INTO @has_first_inquiry_delay_minutes
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'first_inquiry_delay_minutes';
+SET @sql_drop_first_inquiry_delay_minutes = IF(
+  @has_first_inquiry_delay_minutes = 0,
+  'SELECT ''first_inquiry_delay_minutes already absent''',
+  'ALTER TABLE resale_trade_journeys DROP COLUMN first_inquiry_delay_minutes'
+);
+PREPARE stmt_drop_first_inquiry_delay_minutes FROM @sql_drop_first_inquiry_delay_minutes;
+EXECUTE stmt_drop_first_inquiry_delay_minutes;
+DEALLOCATE PREPARE stmt_drop_first_inquiry_delay_minutes;
+
+SET SESSION group_concat_max_len = 65535;
+
+SELECT GROUP_CONCAT(CONCAT('DROP COLUMN `', column_name, '`') ORDER BY column_name SEPARATOR ', ')
+INTO @obsolete_drop_clauses
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name IN (
+    'contact_record',
+    'conversation_text',
+    'account_number',
+    'seller_answer_text',
+    'negotiable',
+    'seller_tone',
+    'suspicious_points',
+    'confirmed_price_krw',
+    'decision_at',
+    'decision_result',
+    'decision_reason',
+    'target_purchase_price_krw',
+    'expected_sale_price_krw',
+    'expected_net_profit_krw',
+    'expected_sale_duration_days',
+    'serial_number',
+    'model_number',
+    'applecare_status',
+    'activation_lock_off',
+    'mdm_lock_none',
+    'cpu_core_count',
+    'gpu_core_count',
+    'battery_health_percent',
+    'battery_cycle_count',
+    'battery_condition',
+    'truetone_ok',
+    'display_condition',
+    'keyboard_condition',
+    'trackpad_condition',
+    'speaker_condition',
+    'camera_condition',
+    'wifi_bluetooth_ok',
+    'exterior_grade',
+    'included_items',
+    'repair_suspected',
+    'cleaned_at',
+    'photo_taken_at',
+    'resale_title',
+    'resale_body_text',
+    'resale_photo_count',
+    'resale_strategy_notes',
+    'upload_time_slot',
+    'view_count',
+    'favorite_count',
+    'inquiry_count',
+    'first_inquiry_at',
+    'negotiation_count',
+    'price_drop_count',
+    'price_drop_history',
+    'buyer_questions',
+    'common_objections',
+    'color',
+    'keyboard_layout'
   );
+SET @sql_drop_obsolete_columns = IF(
+  @obsolete_drop_clauses IS NULL OR @obsolete_drop_clauses = '',
+  'SELECT ''no obsolete columns to drop''',
+  CONCAT('ALTER TABLE resale_trade_journeys ', @obsolete_drop_clauses)
+);
+PREPARE stmt_drop_obsolete_columns FROM @sql_drop_obsolete_columns;
+EXECUTE stmt_drop_obsolete_columns;
+DEALLOCATE PREPARE stmt_drop_obsolete_columns;
 
 SELECT COUNT(*) INTO @has_legacy_uq_source_product
 FROM information_schema.statistics

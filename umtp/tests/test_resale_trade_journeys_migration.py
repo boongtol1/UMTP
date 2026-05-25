@@ -70,22 +70,17 @@ class ResaleTradeJourneysMigrationTest(unittest.TestCase):
                 "sale_price_krw",
                 "net_profit_krw",
                 "current_stage",
-                "contact_record",
-                "conversation_text",
                 "purchase_contact_record",
                 "purchase_conversation_text",
                 "resale_contact_record",
                 "resale_conversation_text",
                 "money_sent_at",
                 "money_received_at",
-                "account_number",
                 "purchase_account_number",
                 "resale_account_number",
                 "response_time_minutes",
                 "total_cost_krw",
                 "roi_percent",
-                "cpu_core_count",
-                "gpu_core_count",
             ]
 
             for column_name in expected_columns:
@@ -199,6 +194,15 @@ class ResaleTradeJourneysMigrationTest(unittest.TestCase):
         try:
             _execute_sql_script(connection, MIGRATION_SQL_PATH)
 
+            # 구버전 테이블 상태 시뮬레이션: legacy 공통 컬럼 임시 추가
+            cursor.execute(
+                """
+                ALTER TABLE resale_trade_journeys
+                ADD COLUMN contact_record VARCHAR(255) NULL,
+                ADD COLUMN conversation_text LONGTEXT NULL,
+                ADD COLUMN account_number VARCHAR(100) NULL
+                """
+            )
             cursor.execute(
                 """
                 INSERT INTO resale_trade_journeys (
@@ -244,6 +248,18 @@ class ResaleTradeJourneysMigrationTest(unittest.TestCase):
             self.assertEqual(row.get("resale_contact_record"), "010-2222-3333")
             self.assertEqual(row.get("resale_conversation_text"), "기존 공통 대화내용")
             self.assertEqual(row.get("resale_account_number"), "111-222-333")
+
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS legacy_count
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'resale_trade_journeys'
+                  AND column_name IN ('contact_record', 'conversation_text', 'account_number')
+                """
+            )
+            legacy_row = cursor.fetchone() or {}
+            self.assertEqual(int(legacy_row.get("legacy_count", 0)), 0)
         finally:
             try:
                 cursor.execute("DELETE FROM resale_trade_journeys WHERE user_id = %s", (marker,))
