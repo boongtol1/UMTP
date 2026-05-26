@@ -121,6 +121,8 @@ def _build_archive_condition_label(trigger_reason):
     normalized_trigger = _normalize_optional_text(trigger_reason)
     if normalized_trigger == "condition_change_candidate_notice":
         return "조건 변경 사이 후보"
+    if normalized_trigger == "content_changed":
+        return "내용변경알림"
     if normalized_trigger is None:
         return None
     return "가격 알림"
@@ -453,6 +455,11 @@ def _build_spec_summary(alert):
 
 
 def _resolve_alert_condition_label_for_display(alert):
+    trigger_reason = _normalize_optional_text(alert.get("trigger_reason"))
+    if trigger_reason == "content_changed":
+        return "내용변경알림"
+    if trigger_reason == CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON:
+        return "조건 변경 사이 후보"
     explicit_label = _normalize_optional_text(alert.get("alert_condition_label"))
     if explicit_label is not None:
         return explicit_label
@@ -1645,7 +1652,12 @@ def _is_unregistered_push_token_error(error_text):
 
 
 def _build_push_notification_payload(alert):
-    title = _normalize_optional_text(alert.get("title")) or "UMTP 새 매물 알림"
+    listing_title = _normalize_optional_text(alert.get("title")) or "UMTP 새 매물 알림"
+    trigger_reason = _normalize_optional_text(alert.get("trigger_reason"))
+    if trigger_reason == "content_changed":
+        title = f"내용변경알림 · {listing_title}"
+    else:
+        title = listing_title
     listing_price_krw = _safe_int(alert.get("price_krw"))
     risk_level = _normalize_optional_text(alert.get("risk_level"))
     risk_label = _build_formatted_risk_label(risk_level)
@@ -2492,7 +2504,15 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
                     "price_gap_percent": diff_ratio,
                     "alert_drop_rate_percent": alert_drop_rate_percent,
                     "alert_price_direction": alert_price_direction,
-                    "alert_condition_label": _build_alert_condition_label(alert_price_direction),
+                    "alert_condition_label": (
+                        "내용변경알림"
+                        if trigger_reason == "content_changed"
+                        else (
+                            "조건 변경 사이 후보"
+                            if trigger_reason == CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON
+                            else _build_alert_condition_label(alert_price_direction)
+                        )
+                    ),
                     "trigger_reason": trigger_reason,
                     "message": row.get("message"),
                     "risk_level": risk_level,

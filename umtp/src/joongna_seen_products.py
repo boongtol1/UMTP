@@ -11,6 +11,7 @@ CHANGE_REASON_PRICE_CHANGED = "price_changed"
 CHANGE_REASON_TITLE_CHANGED = "title_changed"
 CHANGE_REASON_BODY_MAYBE_CHANGED = "body_maybe_changed"
 CHANGE_REASON_REFRESH_KEY_CHANGED = "refresh_key_changed"
+CHANGE_REASON_CONTENT_CHANGED = "content_changed"
 CHANGE_REASON_UNCHANGED = "unchanged"
 
 ANALYZE_REQUIRED_CHANGE_REASONS = {
@@ -20,6 +21,7 @@ ANALYZE_REQUIRED_CHANGE_REASONS = {
     CHANGE_REASON_TITLE_CHANGED,
     CHANGE_REASON_BODY_MAYBE_CHANGED,
     CHANGE_REASON_REFRESH_KEY_CHANGED,
+    CHANGE_REASON_CONTENT_CHANGED,
 }
 
 
@@ -154,6 +156,62 @@ def _resolve_body_fingerprint(record):
     return None
 
 
+def _resolve_body_hash(record):
+    if not isinstance(record, dict):
+        return None
+
+    for key in ("body_hash", "last_body_hash"):
+        hashed_value = _coerce_text(record.get(key))
+        if hashed_value:
+            return hashed_value
+
+    for key in ("body_text", "body", "content", "description"):
+        raw_text = _coerce_text(record.get(key))
+        if raw_text:
+            return _build_stable_hash(raw_text)
+
+    return None
+
+
+def _resolve_self_check_hash(record):
+    if not isinstance(record, dict):
+        return None
+
+    for key in ("self_check_hash", "last_self_check_hash"):
+        hashed_value = _coerce_text(record.get(key))
+        if hashed_value:
+            return hashed_value
+
+    self_check_fields = record.get("self_check_fields")
+    if isinstance(self_check_fields, dict):
+        return _build_stable_hash(self_check_fields)
+
+    return None
+
+
+def build_listing_content_snapshot(*, title=None, price_krw=None, body_text=None, self_check_fields=None):
+    normalized_title = _coerce_text(title)
+    normalized_price = _coerce_price(price_krw)
+    body_hash = _resolve_body_hash({"body_text": body_text})
+    self_check_hash = _resolve_self_check_hash({"self_check_fields": self_check_fields})
+
+    revision_payload = {
+        "title": normalized_title or "",
+        "price_krw": normalized_price,
+        "body_hash": body_hash or "",
+        "self_check_hash": self_check_hash or "",
+    }
+    content_revision_hash = _build_stable_hash(revision_payload)
+
+    return {
+        "title": normalized_title,
+        "price_krw": normalized_price,
+        "body_hash": body_hash,
+        "self_check_hash": self_check_hash,
+        "content_revision_hash": content_revision_hash,
+    }
+
+
 def _is_unknown_column_error(exc):
     if getattr(exc, "errno", None) == UNKNOWN_COLUMN_ERRNO:
         return True
@@ -183,7 +241,11 @@ def get_seen_product(cursor, product_id):
                 last_change_reason,
                 last_seen_at,
                 last_analyzed_at,
-                seen_count
+                seen_count,
+                last_body_hash,
+                last_self_check_hash,
+                last_content_revision_hash,
+                last_content_checked_at
             FROM joongna_seen_products
             WHERE seq = %s
             LIMIT 1
@@ -210,6 +272,10 @@ def get_seen_product(cursor, product_id):
             "last_seen_at": row[12],
             "last_analyzed_at": row[13],
             "seen_count": row[14],
+            "last_body_hash": _coerce_text(row[15]),
+            "last_self_check_hash": _coerce_text(row[16]),
+            "last_content_revision_hash": _coerce_text(row[17]),
+            "last_content_checked_at": row[18],
         }
     except Exception as exc:
         if not _is_unknown_column_error(exc):
@@ -249,6 +315,10 @@ def get_seen_product(cursor, product_id):
         "last_seen_at": legacy_row[4],
         "last_analyzed_at": None,
         "seen_count": 1,
+        "last_body_hash": None,
+        "last_self_check_hash": None,
+        "last_content_revision_hash": None,
+        "last_content_checked_at": None,
     }
 
 
@@ -259,14 +329,14 @@ def detect_listing_change(previous, current):
     previous_title = _coerce_text(previous.get("last_title")) or _coerce_text(previous.get("title"))
     current_title = _coerce_text(current.get("title"))
     if previous_title != current_title:
-        return CHANGE_REASON_TITLE_CHANGED
+        return CHANGE_REASON_CONTENT_CHANGED
 
     previous_price = _coerce_price(previous.get("last_price_krw"))
     if previous_price is None:
         previous_price = _coerce_price(previous.get("price"))
     current_price = _coerce_price(current.get("price"))
     if previous_price != current_price:
-        return CHANGE_REASON_PRICE_CHANGED
+        return CHANGE_REASON_CONTENT_CHANGED
 
     previous_sort_date = _coerce_sort_date_datetime(previous.get("last_sort_date"))
     current_sort_date = _coerce_sort_date_datetime(current.get("sort_date"))
@@ -281,7 +351,21 @@ def detect_listing_change(previous, current):
     previous_body_fingerprint = _resolve_body_fingerprint(previous)
     current_body_fingerprint = _resolve_body_fingerprint(current)
     if previous_body_fingerprint and current_body_fingerprint and previous_body_fingerprint != current_body_fingerprint:
-        return CHANGE_REASON_BODY_MAYBE_CHANGED
+        return CHANGE_REASON_CONTENT_CHANGED
+
+    previous_body_hash = _resolve_body_hash(previous)
+    current_body_hash = _resolve_body_hash(current)
+    if previous_body_hash and current_body_hash and previous_body_hash != current_body_hash:
+        return CHANGE_REASON_CONTENT_CHANGED
+
+    previous_self_check_hash = _resolve_self_check_hash(previous)
+    current_self_check_hash = _resolve_self_check_hash(current)
+    if (
+        previous_self_check_hash
+        and current_self_check_hash
+        and previous_self_check_hash != current_self_check_hash
+    ):
+        return CHANGE_REASON_CONTENT_CHANGED
 
     return CHANGE_REASON_UNCHANGED
 
@@ -319,6 +403,16 @@ def upsert_seen_product_observation(
     sort_date_datetime = _coerce_sort_date_datetime(sort_date)
     normalized_status = _coerce_text(status)
     normalized_reason = _coerce_text(change_reason)
+    body_hash = _resolve_body_hash(product)
+    self_check_hash = _resolve_self_check_hash(product)
+    content_revision_hash = _coerce_text(product.get("content_revision_hash"))
+    if content_revision_hash is None:
+        content_revision_hash = build_listing_content_snapshot(
+            title=title,
+            price_krw=price_krw,
+            body_text=product.get("body_text"),
+            self_check_fields=product.get("self_check_fields"),
+        ).get("content_revision_hash")
 
     try:
         cursor.execute(
@@ -342,12 +436,16 @@ def upsert_seen_product_observation(
                 previous_sort_date,
                 sort_date_changed_count,
                 last_sort_date_changed_at,
-                last_change_reason
+                last_change_reason,
+                last_body_hash,
+                last_self_check_hash,
+                last_content_revision_hash,
+                last_content_checked_at
             )
             VALUES (
                 %s, %s, %s, %s, %s, %s, %s,
                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1,
-                %s, %s, %s, %s, %s, NULL, 0, NULL, %s
+                %s, %s, %s, %s, %s, NULL, 0, NULL, %s, %s, %s, %s, CURRENT_TIMESTAMP
             )
             ON DUPLICATE KEY UPDATE
                 search_word = VALUES(search_word),
@@ -388,7 +486,20 @@ def upsert_seen_product_observation(
                         THEN CURRENT_TIMESTAMP
                     ELSE last_sort_date_changed_at
                 END,
-                last_change_reason = VALUES(last_change_reason)
+                last_change_reason = VALUES(last_change_reason),
+                last_body_hash = COALESCE(VALUES(last_body_hash), last_body_hash),
+                last_self_check_hash = COALESCE(VALUES(last_self_check_hash), last_self_check_hash),
+                last_content_revision_hash = COALESCE(
+                    VALUES(last_content_revision_hash),
+                    last_content_revision_hash
+                ),
+                last_content_checked_at = CASE
+                    WHEN VALUES(last_body_hash) IS NOT NULL
+                         OR VALUES(last_self_check_hash) IS NOT NULL
+                         OR VALUES(last_content_revision_hash) IS NOT NULL
+                        THEN CURRENT_TIMESTAMP
+                    ELSE last_content_checked_at
+                END
             """,
             (
                 product_id,
@@ -404,6 +515,9 @@ def upsert_seen_product_observation(
                 refresh_key,
                 sort_date_datetime,
                 normalized_reason,
+                body_hash,
+                self_check_hash,
+                content_revision_hash,
             ),
         )
         return
@@ -465,3 +579,55 @@ def mark_seen_product_analyzed(cursor, product_id, *, status="analyzed"):
     except Exception as exc:
         if not _is_unknown_column_error(exc):
             raise
+
+
+def update_seen_product_content_snapshot(
+    cursor,
+    product_id,
+    *,
+    title=None,
+    price_krw=None,
+    body_text=None,
+    self_check_fields=None,
+    changed_reason=None,
+):
+    normalized_id = _coerce_product_id(product_id)
+    if normalized_id is None:
+        return {"ok": False, "reason": "invalid_product_id"}
+
+    snapshot = build_listing_content_snapshot(
+        title=title,
+        price_krw=price_krw,
+        body_text=body_text,
+        self_check_fields=self_check_fields,
+    )
+
+    try:
+        cursor.execute(
+            """
+            UPDATE joongna_seen_products
+            SET
+                last_title = COALESCE(%s, last_title),
+                last_price_krw = COALESCE(%s, last_price_krw),
+                last_body_hash = COALESCE(%s, last_body_hash),
+                last_self_check_hash = COALESCE(%s, last_self_check_hash),
+                last_content_revision_hash = COALESCE(%s, last_content_revision_hash),
+                last_content_checked_at = CURRENT_TIMESTAMP,
+                last_change_reason = COALESCE(%s, last_change_reason)
+            WHERE seq = %s
+            """,
+            (
+                snapshot.get("title"),
+                snapshot.get("price_krw"),
+                snapshot.get("body_hash"),
+                snapshot.get("self_check_hash"),
+                snapshot.get("content_revision_hash"),
+                _coerce_text(changed_reason),
+                normalized_id,
+            ),
+        )
+        return {"ok": True, "snapshot": snapshot}
+    except Exception as exc:
+        if _is_unknown_column_error(exc):
+            return {"ok": False, "reason": "missing_content_snapshot_columns", "snapshot": snapshot}
+        raise

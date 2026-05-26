@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import datetime, timezone
 
 from src.db import get_connection
@@ -107,6 +109,34 @@ def _normalize_status(status):
     return normalized.lower()
 
 
+def _normalize_change_fingerprint(value):
+    normalized = _normalize_optional_text(value)
+    if normalized is None:
+        return ""
+    return normalized[:64]
+
+
+def _build_change_fingerprint(
+    *,
+    trigger_reason,
+    sort_date,
+    title,
+    price_krw,
+    url,
+    refresh_key=None,
+):
+    payload = {
+        "trigger_reason": _normalize_optional_text(trigger_reason) or "",
+        "sort_date": str(sort_date) if sort_date is not None else "",
+        "title": _normalize_optional_text(title) or "",
+        "price_krw": _normalize_optional_int(price_krw, "price_krw"),
+        "url": _normalize_optional_text(url) or "",
+        "refresh_key": _normalize_optional_text(refresh_key) or "",
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def _is_duplicate_entry_error(exc):
     error_code = getattr(exc, "errno", None)
     if error_code == DUPLICATE_ENTRY_ERROR_CODE:
@@ -121,6 +151,7 @@ def find_analysis_job_by_identity(
     watch_rule_id,
     product_id,
     sort_date=None,
+    change_fingerprint=None,
     *,
     include_sort_date=True,
 ):
@@ -128,6 +159,7 @@ def find_analysis_job_by_identity(
     normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
     normalized_product_id = _normalize_product_id(product_id)
     normalized_sort_date = _normalize_sort_date_for_db(sort_date)
+    normalized_change_fingerprint = _normalize_change_fingerprint(change_fingerprint)
 
     if normalized_user_id is None or normalized_product_id is None:
         return None
@@ -138,7 +170,33 @@ def find_analysis_job_by_identity(
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
         try:
-            if include_sort_date:
+            if normalized_change_fingerprint:
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        status,
+                        created_at
+                    FROM analysis_jobs
+                    WHERE user_id = %s
+                      AND (
+                            (watch_rule_id IS NULL AND %s IS NULL)
+                         OR watch_rule_id = %s
+                      )
+                      AND product_id = %s
+                      AND change_fingerprint = %s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        normalized_user_id,
+                        normalized_watch_rule_id,
+                        normalized_watch_rule_id,
+                        normalized_product_id,
+                        normalized_change_fingerprint,
+                    ),
+                )
+            elif include_sort_date:
                 cursor.execute(
                     """
                     SELECT
@@ -277,6 +335,8 @@ def create_analysis_job(
     watch_rule_id=None,
     sort_date=None,
     trigger_reason=None,
+    change_fingerprint=None,
+    refresh_key=None,
     dedupe_within_seconds=300,
 ):
     normalized_source = _normalize_required_text(source, "source")
@@ -289,12 +349,25 @@ def create_analysis_job(
     normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
     normalized_sort_date = _normalize_sort_date_for_db(sort_date)
     normalized_trigger_reason = _normalize_optional_text(trigger_reason)
+    normalized_change_fingerprint = _normalize_change_fingerprint(change_fingerprint)
+    normalized_refresh_key = _normalize_optional_text(refresh_key)
+
+    if not normalized_change_fingerprint:
+        normalized_change_fingerprint = _build_change_fingerprint(
+            trigger_reason=normalized_trigger_reason,
+            sort_date=normalized_sort_date,
+            title=normalized_title,
+            price_krw=normalized_price_krw,
+            url=normalized_url,
+            refresh_key=normalized_refresh_key,
+        )
 
     identity_job = find_analysis_job_by_identity(
         normalized_user_id,
         normalized_watch_rule_id,
         normalized_product_id,
         normalized_sort_date,
+        normalized_change_fingerprint,
     )
     if identity_job is not None:
         return {
@@ -341,9 +414,10 @@ def create_analysis_job(
                     watch_rule_id,
                     sort_date,
                     trigger_reason,
+                    change_fingerprint,
                     status
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
                 """,
                 (
                     normalized_source,
@@ -356,6 +430,7 @@ def create_analysis_job(
                     normalized_watch_rule_id,
                     normalized_sort_date,
                     normalized_trigger_reason,
+                    normalized_change_fingerprint,
                 ),
             )
         except Exception as exc:
@@ -373,10 +448,11 @@ def create_analysis_job(
                             search_keyword,
                             user_id,
                             watch_rule_id,
+                            change_fingerprint,
                             trigger_reason,
                             status
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
                         """,
                         (
                             normalized_source,
@@ -387,6 +463,7 @@ def create_analysis_job(
                             normalized_search_keyword,
                             normalized_user_id,
                             normalized_watch_rule_id,
+                            normalized_change_fingerprint,
                             normalized_trigger_reason,
                         ),
                     )
@@ -394,32 +471,65 @@ def create_analysis_job(
                     lowered_second_exc = str(second_exc).lower()
                     if "unknown column" not in lowered_second_exc:
                         raise
-                    cursor.execute(
-                        """
-                        INSERT INTO analysis_jobs (
-                            source,
-                            product_id,
-                            url,
-                            title,
-                            price_krw,
-                            search_keyword,
-                            user_id,
-                            trigger_reason,
-                            status
+                    try:
+                        cursor.execute(
+                            """
+                            INSERT INTO analysis_jobs (
+                                source,
+                                product_id,
+                                url,
+                                title,
+                                price_krw,
+                                search_keyword,
+                                user_id,
+                                change_fingerprint,
+                                trigger_reason,
+                                status
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                            """,
+                            (
+                                normalized_source,
+                                normalized_product_id,
+                                normalized_url,
+                                normalized_title,
+                                normalized_price_krw,
+                                normalized_search_keyword,
+                                normalized_user_id,
+                                normalized_change_fingerprint,
+                                normalized_trigger_reason,
+                            ),
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending')
-                        """,
-                        (
-                            normalized_source,
-                            normalized_product_id,
-                            normalized_url,
-                            normalized_title,
-                            normalized_price_krw,
-                            normalized_search_keyword,
-                            normalized_user_id,
-                            normalized_trigger_reason,
-                        ),
-                    )
+                    except Exception as third_exc:
+                        lowered_third_exc = str(third_exc).lower()
+                        if "unknown column" not in lowered_third_exc:
+                            raise
+                        cursor.execute(
+                            """
+                            INSERT INTO analysis_jobs (
+                                source,
+                                product_id,
+                                url,
+                                title,
+                                price_krw,
+                                search_keyword,
+                                user_id,
+                                trigger_reason,
+                                status
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+                            """,
+                            (
+                                normalized_source,
+                                normalized_product_id,
+                                normalized_url,
+                                normalized_title,
+                                normalized_price_krw,
+                                normalized_search_keyword,
+                                normalized_user_id,
+                                normalized_trigger_reason,
+                            ),
+                        )
                 # Unknown-column fallback succeeded; continue normal flow.
                 pass
             elif _is_duplicate_entry_error(exc):
@@ -428,12 +538,14 @@ def create_analysis_job(
                     normalized_watch_rule_id,
                     normalized_product_id,
                     normalized_sort_date,
+                    normalized_change_fingerprint,
                 )
                 if duplicate_job is None:
                     duplicate_job = find_analysis_job_by_identity(
                         normalized_user_id,
                         normalized_watch_rule_id,
                         normalized_product_id,
+                        change_fingerprint=normalized_change_fingerprint,
                         include_sort_date=False,
                     )
                 if duplicate_job is not None:
@@ -482,6 +594,8 @@ def create_analysis_jobs_for_rules(product, watch_rules, trigger_reason):
             user_id=product.get("user_id"),
             sort_date=product.get("sort_date"),
             trigger_reason=trigger_reason,
+            change_fingerprint=product.get("change_fingerprint"),
+            refresh_key=product.get("refresh_key"),
         )
         if result.get("created"):
             created_jobs.append(result)
@@ -542,6 +656,8 @@ def create_analysis_jobs_for_rules(product, watch_rules, trigger_reason):
             watch_rule_id=target.get("watch_rule_id"),
             sort_date=product.get("sort_date"),
             trigger_reason=trigger_reason,
+            change_fingerprint=product.get("change_fingerprint"),
+            refresh_key=product.get("refresh_key"),
         )
         if result.get("created"):
             created_jobs.append(result)

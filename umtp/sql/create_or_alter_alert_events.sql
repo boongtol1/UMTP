@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS alert_events (
   sort_date DATETIME NULL,
   analyzed_at TIMESTAMP NULL,
   trigger_reason VARCHAR(100) NULL,
+  change_fingerprint VARCHAR(64) NOT NULL DEFAULT '',
   message TEXT NULL,
   status VARCHAR(30) NOT NULL DEFAULT 'pending',
   send_attempts INT NOT NULL DEFAULT 0,
@@ -50,7 +51,7 @@ CREATE TABLE IF NOT EXISTS alert_events (
   KEY idx_alert_events_created_at (created_at),
   KEY idx_alert_events_product (product_id),
   KEY idx_alert_events_sort_date (sort_date),
-  UNIQUE KEY uq_alert_events_user_rule_product (user_id, watch_rule_id, product_id, sort_date)
+  UNIQUE KEY uq_alert_events_user_rule_product (user_id, watch_rule_id, product_id, change_fingerprint)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET @target_db = DATABASE();
@@ -236,6 +237,41 @@ SET @sql_trigger_reason = IF(
 PREPARE stmt_trigger_reason FROM @sql_trigger_reason;
 EXECUTE stmt_trigger_reason;
 DEALLOCATE PREPARE stmt_trigger_reason;
+
+SELECT COUNT(*) INTO @has_change_fingerprint
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND COLUMN_NAME = 'change_fingerprint';
+SET @sql_change_fingerprint = IF(
+  @has_change_fingerprint = 0,
+  'ALTER TABLE alert_events ADD COLUMN change_fingerprint VARCHAR(64) NOT NULL DEFAULT '''' AFTER trigger_reason',
+  'SELECT "change_fingerprint exists"'
+);
+PREPARE stmt_change_fingerprint FROM @sql_change_fingerprint;
+EXECUTE stmt_change_fingerprint;
+DEALLOCATE PREPARE stmt_change_fingerprint;
+
+SET @sql_backfill_change_fingerprint = '
+UPDATE alert_events
+SET change_fingerprint = SHA2(
+  CONCAT_WS(
+    ''|'',
+    IFNULL(user_id, ''''),
+    IFNULL(CAST(watch_rule_id AS CHAR), ''''),
+    IFNULL(product_id, ''''),
+    IFNULL(trigger_reason, ''''),
+    IFNULL(DATE_FORMAT(sort_date, ''%Y-%m-%d %H:%i:%s''), ''''),
+    IFNULL(title, ''''),
+    IFNULL(CAST(price_krw AS CHAR), ''''),
+    IFNULL(CAST(id AS CHAR), '''')
+  ),
+  256
+)
+WHERE change_fingerprint IS NULL OR LENGTH(TRIM(change_fingerprint)) = 0';
+PREPARE stmt_backfill_change_fingerprint FROM @sql_backfill_change_fingerprint;
+EXECUTE stmt_backfill_change_fingerprint;
+DEALLOCATE PREPARE stmt_backfill_change_fingerprint;
 
 SELECT COUNT(*) INTO @has_message
 FROM INFORMATION_SCHEMA.COLUMNS
@@ -504,7 +540,7 @@ WHERE TABLE_SCHEMA = @target_db
 
 SET @sql_drop_uq_user_rule_product_mismatch = IF(
   @has_uq_user_rule_product > 0
-  AND IFNULL(@uq_alert_events_user_rule_product_cols, '') <> 'user_id,watch_rule_id,product_id,sort_date',
+  AND IFNULL(@uq_alert_events_user_rule_product_cols, '') <> 'user_id,watch_rule_id,product_id,change_fingerprint',
   'ALTER TABLE alert_events DROP INDEX uq_alert_events_user_rule_product',
   'SELECT "uq_alert_events_user_rule_product definition ok"'
 );
@@ -519,7 +555,7 @@ WHERE TABLE_SCHEMA = @target_db
   AND INDEX_NAME = 'uq_alert_events_user_rule_product';
 SET @sql_uq_user_rule_product = IF(
   @has_uq_user_rule_product_after_drop = 0,
-  'ALTER TABLE alert_events ADD UNIQUE KEY uq_alert_events_user_rule_product (user_id, watch_rule_id, product_id, sort_date)',
+  'ALTER TABLE alert_events ADD UNIQUE KEY uq_alert_events_user_rule_product (user_id, watch_rule_id, product_id, change_fingerprint)',
   'SELECT "uq_alert_events_user_rule_product exists"'
 );
 PREPARE stmt_uq_user_rule_product FROM @sql_uq_user_rule_product;

@@ -138,20 +138,20 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.8 판매자 프로필 조회: `storeSeq`가 있으면 `GET https://main-api.joongna.com/user/info/product-detail?storeSeq={storeSeq}`를 추가 호출해 `nickName(storeName)`을 판매자 표시 이름으로 저장합니다.
 - 1.8 판매자 캐시 정책: `joongna_store_profiles` 테이블에 `storeSeq -> store_name`을 장기 캐시하고, 캐시 hit 시 외부 API 재호출 없이 DB 값을 재사용합니다.
 - 1.8 장애 허용 정책: 닉네임 조회 실패는 전체 polling/analysis 실패로 처리하지 않고 seller 컬럼은 `NULL`(또는 stale 캐시)로 저장하며 warning 로그만 남깁니다.
-- 1.8 변경 감지 스킵 구조: `joongna_seen_products`의 이전 관측값과 현재 관측값을 비교해 `new/sort_date_changed/price_changed/title_changed/refresh_key_changed/body_maybe_changed`만 분석 큐로 보내고, `unchanged`는 분석을 스킵합니다.
+- 1.8 변경 감지 스킵 구조: `joongna_seen_products`의 이전 관측값과 현재 관측값을 비교해 `new/sort_date_changed/refresh_key_changed/content_changed`를 중심으로 분석 큐를 구성합니다. `content_changed`는 제목/가격/본문/셀프검수 해시 비교 결과를 포함하며, `unchanged`는 분석을 스킵합니다.
 - 1.8 lazy detail fetch 구조: analysis worker는 모든 매물의 상세본문을 조회하지 않고, `new/저가 후보/제목 파싱 실패/제품명만 있고 스펙 부족` 후보에만 상세조회(fetch_html)를 수행합니다.
 - 1.8 알림 속도(priority) 구조: watch_rule(`user_fair_prices`)마다 `priority=FAST/NORMAL/LOW`를 저장하고, polling scheduler는 priority 기준 기본 주기(45/180/600초)에 ±20% jitter를 적용해 다음 조회 시점을 계산합니다.
 - 1.8 변경 로그: polling 요약에 `fetched_count/new_count/changed_count/unchanged_skipped_count/analyzed_count/alert_created_count`를 함께 기록합니다.
 - 1.8 알림 구조: notification worker가 `alert_events` pending을 읽어 Telegram 전송(`sent`) 또는 앱 피드 전용 상태(`app_only`)로 처리합니다.
 - 1.8 운영 구조: polling은 enqueue 전용이며, analysis는 `run_analysis_worker_umtp.py`, Telegram 전송은 `run_notification_worker_umtp.py` 전용 worker로 처리합니다.
-- identity 정책: `analysis_jobs`/`alert_events`의 중복 기준은 `(user_id, watch_rule_id, product_id, sort_date)`입니다.
+- identity 정책: `analysis_jobs`/`alert_events`의 중복 기준은 `(user_id, watch_rule_id, product_id, change_fingerprint)`입니다.
 - saved_at 정책: UMTP는 사용자가 저장한 시각(`saved_at`) 이후에 등록된 매물(`sort_date >= saved_at`)만 알림 후보로 봅니다.
 - 재저장 정책: 같은 저장 조건에서 저장 버튼을 다시 누르면 `saved_at`이 현재 시각으로 갱신되고, 그 시점부터 새로 조회를 시작합니다.
 - 새로고침 정책: 새로고침은 저장 조건의 `saved_at`을 현재 시각으로 갱신합니다. 전체 새로고침은 활성 규칙 전체를, 단일 새로고침은 선택한 규칙 하나만 갱신합니다. 새로고침 후 UMTP는 `sort_date >= saved_at` 인 매물만 정식 알림 후보로 봅니다.
 - 조건 변경 참고 메시지 정책: 조건을 다시 저장할 때 이전 `saved_at`과 새 `saved_at` 사이에 등록된 매물 중 새 조건에는 맞지만 이전 조건에는 맞지 않았던 매물은 참고 메시지로 생성됩니다. 이 참고 메시지는 `alert_events.status='pending'`으로 저장되어 일반 알림 전송 루트(앱/텔레그램)로도 전달될 수 있습니다. 정식 알림 기준은 항상 `sort_date >= 현재 saved_at` 입니다.
 - 참고 메시지 생성 시 `alert_events`/`url_analysis_logs`를 조회해 위험도·위험점수·위험키워드·교환여부·본문·분석시각을 가능한 범위에서 채워 일반 알림 카드와 유사한 정보 밀도를 유지합니다.
-- 재알림 정책: 같은 `product_id`라도 `sort_date`가 바뀐(끌올/재등록) 경우 사용자/규칙 기준으로 재알림 가능합니다. 단, 같은 사용자/같은 규칙/같은 `product_id`/같은 `sort_date` 조합 알림은 한 번만 보냅니다.
-- 마이그레이션: 기존 운영 DB는 `sql/migrate_realert_identity_sort_date.sql`을 실행해 `(user_id, watch_rule_id, product_id, sort_date)` 기준 unique key를 반영합니다.
+- 재알림 정책: 같은 `product_id`라도 `change_fingerprint`(트리거/정렬시각/핵심 스냅샷 해시)가 달라지면 사용자/규칙 기준으로 재알림 가능합니다. 제목/가격/본문/셀프검수 중 하나라도 바뀌면 `내용변경알림`을 생성합니다.
+- 마이그레이션: 기존 운영 DB는 `sql/create_analysis_jobs.sql`, `sql/create_or_alter_alert_events.sql`, `sql/migrate_saved_at_alert_window.sql` 최신 버전을 실행해 `change_fingerprint` 컬럼/unique key를 반영합니다.
 - Telegram 발송 기준: 새 `alert_events` insert 성공 시 1회만 발송됩니다.
 - 1.10 진행 현황: Android FCM 푸시를 위한 `POST /users/{user_id}/push-token` API와 `user_push_tokens` 저장소를 추가했습니다.
 - 1.10 알림 전달 정책: notification worker는 사용자 활성 푸시 토큰이 있으면 FCM 푸시를 우선 시도하고, Telegram은 기존 정책대로 병행 처리합니다. 둘 다 실패하면 `failed`, 둘 다 전송 채널이 없으면 `app_only`로 남습니다.

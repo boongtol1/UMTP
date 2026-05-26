@@ -128,6 +128,62 @@ PREPARE stmt_last_change_reason FROM @sql_last_change_reason;
 EXECUTE stmt_last_change_reason;
 DEALLOCATE PREPARE stmt_last_change_reason;
 
+SELECT COUNT(*) INTO @has_last_body_hash
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'joongna_seen_products'
+  AND COLUMN_NAME = 'last_body_hash';
+SET @sql_last_body_hash = IF(
+  @has_last_body_hash = 0,
+  'ALTER TABLE joongna_seen_products ADD COLUMN last_body_hash VARCHAR(64) NULL AFTER last_change_reason',
+  'SELECT "last_body_hash already exists"'
+);
+PREPARE stmt_last_body_hash FROM @sql_last_body_hash;
+EXECUTE stmt_last_body_hash;
+DEALLOCATE PREPARE stmt_last_body_hash;
+
+SELECT COUNT(*) INTO @has_last_self_check_hash
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'joongna_seen_products'
+  AND COLUMN_NAME = 'last_self_check_hash';
+SET @sql_last_self_check_hash = IF(
+  @has_last_self_check_hash = 0,
+  'ALTER TABLE joongna_seen_products ADD COLUMN last_self_check_hash VARCHAR(64) NULL AFTER last_body_hash',
+  'SELECT "last_self_check_hash already exists"'
+);
+PREPARE stmt_last_self_check_hash FROM @sql_last_self_check_hash;
+EXECUTE stmt_last_self_check_hash;
+DEALLOCATE PREPARE stmt_last_self_check_hash;
+
+SELECT COUNT(*) INTO @has_last_content_revision_hash
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'joongna_seen_products'
+  AND COLUMN_NAME = 'last_content_revision_hash';
+SET @sql_last_content_revision_hash = IF(
+  @has_last_content_revision_hash = 0,
+  'ALTER TABLE joongna_seen_products ADD COLUMN last_content_revision_hash VARCHAR(64) NULL AFTER last_self_check_hash',
+  'SELECT "last_content_revision_hash already exists"'
+);
+PREPARE stmt_last_content_revision_hash FROM @sql_last_content_revision_hash;
+EXECUTE stmt_last_content_revision_hash;
+DEALLOCATE PREPARE stmt_last_content_revision_hash;
+
+SELECT COUNT(*) INTO @has_last_content_checked_at
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'joongna_seen_products'
+  AND COLUMN_NAME = 'last_content_checked_at';
+SET @sql_last_content_checked_at = IF(
+  @has_last_content_checked_at = 0,
+  'ALTER TABLE joongna_seen_products ADD COLUMN last_content_checked_at TIMESTAMP NULL AFTER last_content_revision_hash',
+  'SELECT "last_content_checked_at already exists"'
+);
+PREPARE stmt_last_content_checked_at FROM @sql_last_content_checked_at;
+EXECUTE stmt_last_content_checked_at;
+DEALLOCATE PREPARE stmt_last_content_checked_at;
+
 SELECT COUNT(*) INTO @has_updated_at
 FROM INFORMATION_SCHEMA.COLUMNS
 WHERE TABLE_SCHEMA = @target_db

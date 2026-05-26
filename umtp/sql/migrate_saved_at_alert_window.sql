@@ -77,6 +77,49 @@ PREPARE stmt_analysis_jobs_sort_date FROM @sql_analysis_jobs_sort_date;
 EXECUTE stmt_analysis_jobs_sort_date;
 DEALLOCATE PREPARE stmt_analysis_jobs_sort_date;
 
+SELECT COUNT(*) INTO @has_analysis_jobs_change_fingerprint
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'analysis_jobs'
+  AND column_name = 'change_fingerprint';
+SET @sql_analysis_jobs_change_fingerprint = IF(
+  @has_analysis_jobs_table = 0,
+  'SELECT ''skip analysis_jobs.change_fingerprint''',
+  IF(
+    @has_analysis_jobs_change_fingerprint = 0,
+    'ALTER TABLE analysis_jobs ADD COLUMN change_fingerprint VARCHAR(64) NOT NULL DEFAULT '''' AFTER sort_date',
+    'SELECT ''analysis_jobs.change_fingerprint exists'''
+  )
+);
+PREPARE stmt_analysis_jobs_change_fingerprint FROM @sql_analysis_jobs_change_fingerprint;
+EXECUTE stmt_analysis_jobs_change_fingerprint;
+DEALLOCATE PREPARE stmt_analysis_jobs_change_fingerprint;
+
+SET @sql_backfill_analysis_jobs_change_fingerprint = IF(
+  @has_analysis_jobs_table = 0,
+  'SELECT ''skip analysis_jobs.change_fingerprint backfill''',
+  'UPDATE analysis_jobs
+   SET change_fingerprint = SHA2(
+     CONCAT_WS(
+       ''|'',
+       IFNULL(user_id, ''''),
+       IFNULL(CAST(watch_rule_id AS CHAR), ''''),
+       IFNULL(product_id, ''''),
+       IFNULL(trigger_reason, ''''),
+       IFNULL(DATE_FORMAT(sort_date, ''%Y-%m-%d %H:%i:%s''), ''''),
+       IFNULL(title, ''''),
+       IFNULL(CAST(price_krw AS CHAR), ''''),
+       IFNULL(url, ''''),
+       IFNULL(CAST(id AS CHAR), '''')
+     ),
+     256
+   )
+   WHERE change_fingerprint IS NULL OR LENGTH(TRIM(change_fingerprint)) = 0'
+);
+PREPARE stmt_backfill_analysis_jobs_change_fingerprint FROM @sql_backfill_analysis_jobs_change_fingerprint;
+EXECUTE stmt_backfill_analysis_jobs_change_fingerprint;
+DEALLOCATE PREPARE stmt_backfill_analysis_jobs_change_fingerprint;
+
 SELECT COUNT(*) INTO @has_analysis_jobs_idx_sort_date
 FROM information_schema.statistics
 WHERE table_schema = @target_db
@@ -131,7 +174,7 @@ SET @sql_drop_uq_analysis_jobs_user_rule_product_mismatch = IF(
   'SELECT ''skip drop uq_analysis_jobs_user_rule_product mismatch''',
   IF(
     @has_uq_analysis_jobs_user_rule_product > 0
-    AND IFNULL(@uq_analysis_jobs_user_rule_product_cols, '') <> 'user_id,watch_rule_id,product_id,sort_date',
+    AND IFNULL(@uq_analysis_jobs_user_rule_product_cols, '') <> 'user_id,watch_rule_id,product_id,change_fingerprint',
     'ALTER TABLE analysis_jobs DROP INDEX uq_analysis_jobs_user_rule_product',
     'SELECT ''uq_analysis_jobs_user_rule_product definition ok'''
   )
@@ -151,7 +194,7 @@ SET @sql_uq_analysis_jobs_user_rule_product = IF(
   'SELECT ''skip add uq_analysis_jobs_user_rule_product''',
   IF(
     @has_uq_analysis_jobs_user_rule_product_after_drop = 0,
-    'ALTER TABLE analysis_jobs ADD UNIQUE KEY uq_analysis_jobs_user_rule_product (user_id, watch_rule_id, product_id, sort_date)',
+    'ALTER TABLE analysis_jobs ADD UNIQUE KEY uq_analysis_jobs_user_rule_product (user_id, watch_rule_id, product_id, change_fingerprint)',
     'SELECT ''uq_analysis_jobs_user_rule_product exists'''
   )
 );
@@ -199,6 +242,48 @@ SET @sql_alert_events_sort_date = IF(
 PREPARE stmt_alert_events_sort_date FROM @sql_alert_events_sort_date;
 EXECUTE stmt_alert_events_sort_date;
 DEALLOCATE PREPARE stmt_alert_events_sort_date;
+
+SELECT COUNT(*) INTO @has_alert_events_change_fingerprint
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'alert_events'
+  AND column_name = 'change_fingerprint';
+SET @sql_alert_events_change_fingerprint = IF(
+  @has_alert_events_table = 0,
+  'SELECT ''skip alert_events.change_fingerprint''',
+  IF(
+    @has_alert_events_change_fingerprint = 0,
+    'ALTER TABLE alert_events ADD COLUMN change_fingerprint VARCHAR(64) NOT NULL DEFAULT '''' AFTER sort_date',
+    'SELECT ''alert_events.change_fingerprint exists'''
+  )
+);
+PREPARE stmt_alert_events_change_fingerprint FROM @sql_alert_events_change_fingerprint;
+EXECUTE stmt_alert_events_change_fingerprint;
+DEALLOCATE PREPARE stmt_alert_events_change_fingerprint;
+
+SET @sql_backfill_alert_events_change_fingerprint = IF(
+  @has_alert_events_table = 0,
+  'SELECT ''skip alert_events.change_fingerprint backfill''',
+  'UPDATE alert_events
+   SET change_fingerprint = SHA2(
+     CONCAT_WS(
+       ''|'',
+       IFNULL(user_id, ''''),
+       IFNULL(CAST(watch_rule_id AS CHAR), ''''),
+       IFNULL(product_id, ''''),
+       IFNULL(trigger_reason, ''''),
+       IFNULL(DATE_FORMAT(sort_date, ''%Y-%m-%d %H:%i:%s''), ''''),
+       IFNULL(title, ''''),
+       IFNULL(CAST(price_krw AS CHAR), ''''),
+       IFNULL(CAST(id AS CHAR), '''')
+     ),
+     256
+   )
+   WHERE change_fingerprint IS NULL OR LENGTH(TRIM(change_fingerprint)) = 0'
+);
+PREPARE stmt_backfill_alert_events_change_fingerprint FROM @sql_backfill_alert_events_change_fingerprint;
+EXECUTE stmt_backfill_alert_events_change_fingerprint;
+DEALLOCATE PREPARE stmt_backfill_alert_events_change_fingerprint;
 
 SELECT COUNT(*) INTO @has_alert_events_idx_sort_date
 FROM information_schema.statistics
@@ -254,7 +339,7 @@ SET @sql_drop_uq_alert_events_user_rule_product_mismatch = IF(
   'SELECT ''skip drop uq_alert_events_user_rule_product mismatch''',
   IF(
     @has_uq_alert_events_user_rule_product > 0
-    AND IFNULL(@uq_alert_events_user_rule_product_cols, '') <> 'user_id,watch_rule_id,product_id,sort_date',
+    AND IFNULL(@uq_alert_events_user_rule_product_cols, '') <> 'user_id,watch_rule_id,product_id,change_fingerprint',
     'ALTER TABLE alert_events DROP INDEX uq_alert_events_user_rule_product',
     'SELECT ''uq_alert_events_user_rule_product definition ok'''
   )
@@ -274,7 +359,7 @@ SET @sql_uq_alert_events_user_rule_product = IF(
   'SELECT ''skip add uq_alert_events_user_rule_product''',
   IF(
     @has_uq_alert_events_user_rule_product_after_drop = 0,
-    'ALTER TABLE alert_events ADD UNIQUE KEY uq_alert_events_user_rule_product (user_id, watch_rule_id, product_id, sort_date)',
+    'ALTER TABLE alert_events ADD UNIQUE KEY uq_alert_events_user_rule_product (user_id, watch_rule_id, product_id, change_fingerprint)',
     'SELECT ''uq_alert_events_user_rule_product exists'''
   )
 );

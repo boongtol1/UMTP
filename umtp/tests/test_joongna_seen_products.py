@@ -28,6 +28,7 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
     def test_should_analyze_listing_matrix(self):
         self.assertTrue(should_analyze_listing("new"))
         self.assertTrue(should_analyze_listing("sort_date_changed"))
+        self.assertTrue(should_analyze_listing("content_changed"))
         self.assertTrue(should_analyze_listing("price_changed"))
         self.assertTrue(should_analyze_listing("title_changed"))
         self.assertTrue(should_analyze_listing("refresh_key_changed"))
@@ -60,7 +61,7 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
             },
         )
         self.assertTrue(should_analyze)
-        self.assertEqual(reason, "price_changed")
+        self.assertEqual(reason, "content_changed")
 
     def test_title_changed(self):
         should_analyze, reason = should_analyze_seen_product(
@@ -76,7 +77,7 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
             },
         )
         self.assertTrue(should_analyze)
-        self.assertEqual(reason, "title_changed")
+        self.assertEqual(reason, "content_changed")
 
     def test_refresh_key_changed(self):
         should_analyze, reason = should_analyze_seen_product(
@@ -165,7 +166,7 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
             },
         )
         self.assertTrue(should_analyze)
-        self.assertEqual(reason, "title_changed")
+        self.assertEqual(reason, "content_changed")
 
     def test_detect_listing_change_body_hash_changed(self):
         reason = detect_listing_change(
@@ -182,7 +183,7 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
                 "body_hash": "xyz",
             },
         )
-        self.assertEqual(reason, "body_maybe_changed")
+        self.assertEqual(reason, "content_changed")
 
     def test_upsert_seen_product_tracks_sort_date_columns(self):
         cursor = _FakeCursor()

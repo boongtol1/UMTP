@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 from datetime import datetime, timezone
@@ -19,7 +20,15 @@ try:
         mark_analysis_job_started,
     )
     from src.db import get_connection
-    from src.joongna_seen_products import mark_seen_product_analyzed
+    from src.joongna_seen_products import (
+        CHANGE_REASON_CONTENT_CHANGED,
+        CHANGE_REASON_PRICE_CHANGED,
+        CHANGE_REASON_TITLE_CHANGED,
+        build_listing_content_snapshot,
+        get_seen_product,
+        mark_seen_product_analyzed,
+        update_seen_product_content_snapshot,
+    )
     from src.listing_page_parser import fetch_html, parse_joongna_listing_page
     from src.notification_worker import dispatch_alert_event_immediately
     from src.risk_analyzer import analyze_risk
@@ -46,7 +55,15 @@ except ModuleNotFoundError:
         mark_analysis_job_started,
     )
     from db import get_connection
-    from joongna_seen_products import mark_seen_product_analyzed
+    from joongna_seen_products import (
+        CHANGE_REASON_CONTENT_CHANGED,
+        CHANGE_REASON_PRICE_CHANGED,
+        CHANGE_REASON_TITLE_CHANGED,
+        build_listing_content_snapshot,
+        get_seen_product,
+        mark_seen_product_analyzed,
+        update_seen_product_content_snapshot,
+    )
     from listing_page_parser import fetch_html, parse_joongna_listing_page
     from notification_worker import dispatch_alert_event_immediately
     from risk_analyzer import analyze_risk
@@ -171,6 +188,7 @@ def should_fetch_detail(listing, change_reason, title_parse_result, *, target_pr
         "title_changed",
         "body_maybe_changed",
         "refresh_key_changed",
+        "content_changed",
     }:
         return True, "changed_listing"
 
@@ -471,6 +489,47 @@ def _build_alert_message(title, listing_price_krw, fair_price_krw, drop_rate_per
     )
 
 
+def _build_content_changed_alert_message(*, title, url, changed_fields):
+    field_label_map = {
+        "title": "제목",
+        "price": "가격",
+        "body_text": "본문",
+        "self_check": "셀프검수",
+    }
+    labels = []
+    for field in changed_fields or []:
+        label = field_label_map.get(_normalize_optional_text(field))
+        if label and label not in labels:
+            labels.append(label)
+    changed_text = ", ".join(labels) if labels else "내용"
+    return (
+        "[내용변경알림]\n"
+        f"{title or '-'}\n\n"
+        f"변경 항목: {changed_text}\n\n"
+        "URL:\n"
+        f"{url}"
+    )
+
+
+def _build_alert_change_fingerprint(
+    *,
+    trigger_reason,
+    sort_date,
+    content_revision_hash,
+    title,
+    listing_price_krw,
+):
+    payload = {
+        "trigger_reason": _normalize_optional_text(trigger_reason) or "",
+        "sort_date": str(sort_date) if sort_date is not None else "",
+        "content_revision_hash": _normalize_optional_text(content_revision_hash) or "",
+        "title": _normalize_optional_text(title) or "",
+        "price_krw": _normalize_optional_int(listing_price_krw),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def _build_body_excerpt(description, max_len=ALERT_BODY_EXCERPT_MAX_LEN):
     normalized = _normalize_optional_text(description)
     if normalized is None:
@@ -554,18 +613,43 @@ def _find_alert_event_by_identity(
     watch_rule_id,
     product_id,
     sort_date=None,
+    change_fingerprint=None,
     include_sort_date=True,
 ):
     normalized_user_id = _normalize_optional_text(user_id)
     normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
     normalized_product_id = _normalize_optional_text(product_id)
     normalized_sort_date = _coerce_datetime(sort_date)
+    normalized_change_fingerprint = _normalize_optional_text(change_fingerprint)
 
     if normalized_user_id is None or normalized_product_id is None:
         return None
 
     try:
-        if include_sort_date:
+        if normalized_change_fingerprint is not None:
+            cursor.execute(
+                """
+                SELECT id
+                FROM alert_events
+                WHERE user_id = %s
+                  AND (
+                        (watch_rule_id IS NULL AND %s IS NULL)
+                     OR watch_rule_id = %s
+                  )
+                  AND product_id = %s
+                  AND change_fingerprint = %s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (
+                    normalized_user_id,
+                    normalized_watch_rule_id,
+                    normalized_watch_rule_id,
+                    normalized_product_id,
+                    normalized_change_fingerprint,
+                ),
+            )
+        elif include_sort_date:
             cursor.execute(
                 """
                 SELECT id
@@ -656,6 +740,7 @@ def maybe_create_alert_event(
     body_excerpt=None,
     body_text=None,
     sort_date=None,
+    change_fingerprint=None,
     seller_store_seq=None,
     seller_store_name=None,
 ):
@@ -666,6 +751,15 @@ def maybe_create_alert_event(
     normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
     normalized_product_id = _normalize_optional_text(product_id)
     normalized_sort_date = _coerce_datetime(sort_date)
+    normalized_change_fingerprint = _normalize_optional_text(change_fingerprint)
+    if normalized_change_fingerprint is None:
+        normalized_change_fingerprint = _build_alert_change_fingerprint(
+            trigger_reason=trigger_reason,
+            sort_date=normalized_sort_date,
+            content_revision_hash=None,
+            title=title,
+            listing_price_krw=price_krw,
+        )
 
     duplicate = _find_alert_event_by_identity(
         cursor,
@@ -673,6 +767,7 @@ def maybe_create_alert_event(
         watch_rule_id=normalized_watch_rule_id,
         product_id=normalized_product_id,
         sort_date=normalized_sort_date,
+        change_fingerprint=normalized_change_fingerprint,
     )
     if duplicate is not None:
         return {
@@ -715,6 +810,7 @@ def maybe_create_alert_event(
                 sort_date,
                 analyzed_at,
                 trigger_reason,
+                change_fingerprint,
                 message,
                 status,
                 send_attempts
@@ -722,7 +818,7 @@ def maybe_create_alert_event(
             VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, 'pending', 0
+                %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, 'pending', 0
             )
             """,
             (
@@ -755,6 +851,7 @@ def maybe_create_alert_event(
                 _normalize_optional_text(body_text),
                 normalized_sort_date,
                 _normalize_optional_text(trigger_reason),
+                normalized_change_fingerprint,
                 _normalize_optional_text(message),
             ),
         )
@@ -794,6 +891,7 @@ def maybe_create_alert_event(
                         sort_date,
                         analyzed_at,
                         trigger_reason,
+                        change_fingerprint,
                         message,
                         status,
                         send_attempts
@@ -801,7 +899,7 @@ def maybe_create_alert_event(
                     VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, 'pending', 0
+                        %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, 'pending', 0
                     )
                     """,
                     (
@@ -835,6 +933,7 @@ def maybe_create_alert_event(
                         _normalize_optional_text(body_excerpt),
                         normalized_sort_date,
                         _normalize_optional_text(trigger_reason),
+                        normalized_change_fingerprint,
                         _normalize_optional_text(message),
                     ),
                 )
@@ -891,6 +990,7 @@ def maybe_create_alert_event(
                 watch_rule_id=normalized_watch_rule_id,
                 product_id=normalized_product_id,
                 sort_date=normalized_sort_date,
+                change_fingerprint=normalized_change_fingerprint,
             )
             if duplicate is None:
                 duplicate = _find_alert_event_by_identity(
@@ -1148,6 +1248,10 @@ def analyze_product_for_watch_rule(job):
     try:
         connection = get_connection()
         cursor = connection.cursor()
+        try:
+            previous_seen_product = get_seen_product(cursor, product_id)
+        except Exception:
+            previous_seen_product = None
 
         (
             pre_fair_price_krw,
@@ -1212,6 +1316,51 @@ def analyze_product_for_watch_rule(job):
         else:
             detail_skipped_reason = detail_decision_reason
 
+        content_snapshot = build_listing_content_snapshot(
+            title=title,
+            price_krw=listing_price_krw,
+            body_text=description,
+            self_check_fields=self_check_fields,
+        )
+        previous_body_hash = _normalize_optional_text((previous_seen_product or {}).get("last_body_hash"))
+        previous_self_check_hash = _normalize_optional_text((previous_seen_product or {}).get("last_self_check_hash"))
+        current_body_hash = _normalize_optional_text(content_snapshot.get("body_hash"))
+        current_self_check_hash = _normalize_optional_text(content_snapshot.get("self_check_hash"))
+
+        content_change_fields = []
+        if trigger_reason == CHANGE_REASON_TITLE_CHANGED:
+            content_change_fields.append("title")
+        if trigger_reason == CHANGE_REASON_PRICE_CHANGED:
+            content_change_fields.append("price")
+        if previous_body_hash and current_body_hash and previous_body_hash != current_body_hash:
+            content_change_fields.append("body_text")
+        if (
+            previous_self_check_hash
+            and current_self_check_hash
+            and previous_self_check_hash != current_self_check_hash
+        ):
+            content_change_fields.append("self_check")
+
+        if (
+            trigger_reason != "new"
+            and (
+                trigger_reason == CHANGE_REASON_CONTENT_CHANGED
+                or len(content_change_fields) > 0
+            )
+        ):
+            trigger_reason = CHANGE_REASON_CONTENT_CHANGED
+
+        if product_id is not None:
+            update_seen_product_content_snapshot(
+                cursor,
+                product_id,
+                title=title,
+                price_krw=listing_price_krw,
+                body_text=description,
+                self_check_fields=self_check_fields,
+                changed_reason=trigger_reason,
+            )
+
         if trigger_reason == "unchanged":
             return {
                 "ok": True,
@@ -1244,6 +1393,7 @@ def analyze_product_for_watch_rule(job):
                 "detail_fetch_reason": detail_fetch_reason,
                 "detail_skipped_reason": detail_skipped_reason or "unchanged",
                 "detail_fetch_error": detail_fetch_error,
+                "content_change_fields": content_change_fields,
             }
 
         if detail_fetch_performed and detail_fetch_error is None:
@@ -1287,6 +1437,7 @@ def analyze_product_for_watch_rule(job):
 
         is_alert_target = False
         alert_skip_reason = price_error_reason
+        is_content_changed_alert = trigger_reason == CHANGE_REASON_CONTENT_CHANGED
         if not saved_window_allowed:
             is_alert_target = False
             alert_skip_reason = saved_window_reason or "sort_date_before_saved_at"
@@ -1331,11 +1482,22 @@ def analyze_product_for_watch_rule(job):
         elif alert_skip_reason is None:
             alert_skip_reason = "price_condition_missing"
 
+        if is_content_changed_alert:
+            is_alert_target = True
+            alert_skip_reason = None
+
         alert_create_result = {
             "created": False,
             "alert_id": None,
         }
         alert_message = None
+        alert_change_fingerprint = _build_alert_change_fingerprint(
+            trigger_reason=trigger_reason,
+            sort_date=sort_date,
+            content_revision_hash=content_snapshot.get("content_revision_hash"),
+            title=title,
+            listing_price_krw=listing_price_krw,
+        )
         if is_alert_target:
             seller_info = _resolve_seller_info_for_alert(
                 cursor,
@@ -1343,13 +1505,20 @@ def analyze_product_for_watch_rule(job):
                 fallback_store_seq=listing_snapshot.get("seller_store_seq"),
                 fallback_store_name=listing_snapshot.get("seller_store_name"),
             )
-            alert_message = _build_alert_message(
-                title=title,
-                listing_price_krw=listing_price_krw or 0,
-                fair_price_krw=fair_price_krw or 0,
-                drop_rate_percent=drop_rate_percent,
-                url=url,
-            )
+            if is_content_changed_alert:
+                alert_message = _build_content_changed_alert_message(
+                    title=title,
+                    url=url,
+                    changed_fields=content_change_fields,
+                )
+            else:
+                alert_message = _build_alert_message(
+                    title=title,
+                    listing_price_krw=listing_price_krw or 0,
+                    fair_price_krw=fair_price_krw or 0,
+                    drop_rate_percent=drop_rate_percent,
+                    url=url,
+                )
             risk_keywords = risk_result.get("risk_keywords")
             risk_keywords_json = None
             if isinstance(risk_keywords, list):
@@ -1386,6 +1555,7 @@ def analyze_product_for_watch_rule(job):
                 body_excerpt=_build_body_excerpt(description),
                 body_text=_normalize_optional_text(description),
                 sort_date=sort_date,
+                change_fingerprint=alert_change_fingerprint,
                 seller_store_seq=seller_info.get("seller_store_seq"),
                 seller_store_name=seller_info.get("seller_store_name"),
             )
@@ -1441,6 +1611,7 @@ def analyze_product_for_watch_rule(job):
                         "drop_rate_percent": drop_rate_percent,
                         "sort_date": sort_date,
                         "trigger_reason": trigger_reason,
+                        "change_fingerprint": alert_change_fingerprint,
                         "message": alert_message,
                     },
                 )
@@ -1492,6 +1663,7 @@ def analyze_product_for_watch_rule(job):
             "detail_skipped_reason": detail_skipped_reason,
             "detail_fetch_error": detail_fetch_error,
             "analysis_skipped": False,
+            "content_change_fields": content_change_fields,
         }
     except Exception:
         if connection is not None:

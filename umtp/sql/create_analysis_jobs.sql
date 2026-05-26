@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS analysis_jobs (
   watch_rule_id BIGINT UNSIGNED NULL,
   sort_date DATETIME NULL,
   trigger_reason VARCHAR(100) NULL,
+  change_fingerprint VARCHAR(64) NOT NULL DEFAULT '',
   status VARCHAR(30) NOT NULL DEFAULT 'pending',
   error_message TEXT NULL,
   attempts INT NOT NULL DEFAULT 0,
@@ -24,7 +25,7 @@ CREATE TABLE IF NOT EXISTS analysis_jobs (
   KEY idx_analysis_jobs_watch_rule (watch_rule_id),
   KEY idx_analysis_jobs_product (product_id),
   KEY idx_analysis_jobs_sort_date (sort_date),
-  UNIQUE KEY uq_analysis_jobs_user_rule_product (user_id, watch_rule_id, product_id, sort_date)
+  UNIQUE KEY uq_analysis_jobs_user_rule_product (user_id, watch_rule_id, product_id, change_fingerprint)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET @target_db = DATABASE();
@@ -56,6 +57,42 @@ SET @sql_sort_date = IF(
 PREPARE stmt_sort_date FROM @sql_sort_date;
 EXECUTE stmt_sort_date;
 DEALLOCATE PREPARE stmt_sort_date;
+
+SELECT COUNT(*) INTO @has_change_fingerprint
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'analysis_jobs'
+  AND COLUMN_NAME = 'change_fingerprint';
+SET @sql_change_fingerprint = IF(
+  @has_change_fingerprint = 0,
+  'ALTER TABLE analysis_jobs ADD COLUMN change_fingerprint VARCHAR(64) NOT NULL DEFAULT '''' AFTER sort_date',
+  'SELECT "change_fingerprint exists"'
+);
+PREPARE stmt_change_fingerprint FROM @sql_change_fingerprint;
+EXECUTE stmt_change_fingerprint;
+DEALLOCATE PREPARE stmt_change_fingerprint;
+
+SET @sql_backfill_change_fingerprint = '
+UPDATE analysis_jobs
+SET change_fingerprint = SHA2(
+  CONCAT_WS(
+    ''|'',
+    IFNULL(user_id, ''''),
+    IFNULL(CAST(watch_rule_id AS CHAR), ''''),
+    IFNULL(product_id, ''''),
+    IFNULL(trigger_reason, ''''),
+    IFNULL(DATE_FORMAT(sort_date, ''%Y-%m-%d %H:%i:%s''), ''''),
+    IFNULL(title, ''''),
+    IFNULL(CAST(price_krw AS CHAR), ''''),
+    IFNULL(url, ''''),
+    IFNULL(CAST(id AS CHAR), '''')
+  ),
+  256
+)
+WHERE change_fingerprint IS NULL OR LENGTH(TRIM(change_fingerprint)) = 0';
+PREPARE stmt_backfill_change_fingerprint FROM @sql_backfill_change_fingerprint;
+EXECUTE stmt_backfill_change_fingerprint;
+DEALLOCATE PREPARE stmt_backfill_change_fingerprint;
 
 SELECT COUNT(*) INTO @has_idx_sort_date
 FROM INFORMATION_SCHEMA.STATISTICS
@@ -100,7 +137,7 @@ WHERE TABLE_SCHEMA = @target_db
 
 SET @sql_drop_uq_analysis_user_rule_product_mismatch = IF(
   @has_uq_analysis_user_rule_product > 0
-  AND IFNULL(@uq_analysis_user_rule_product_cols, '') <> 'user_id,watch_rule_id,product_id,sort_date',
+  AND IFNULL(@uq_analysis_user_rule_product_cols, '') <> 'user_id,watch_rule_id,product_id,change_fingerprint',
   'ALTER TABLE analysis_jobs DROP INDEX uq_analysis_jobs_user_rule_product',
   'SELECT "uq_analysis_jobs_user_rule_product definition ok"'
 );
@@ -115,7 +152,7 @@ WHERE TABLE_SCHEMA = @target_db
   AND INDEX_NAME = 'uq_analysis_jobs_user_rule_product';
 SET @sql_uq_analysis_user_rule_product = IF(
   @has_uq_analysis_user_rule_product_after_drop = 0,
-  'ALTER TABLE analysis_jobs ADD UNIQUE KEY uq_analysis_jobs_user_rule_product (user_id, watch_rule_id, product_id, sort_date)',
+  'ALTER TABLE analysis_jobs ADD UNIQUE KEY uq_analysis_jobs_user_rule_product (user_id, watch_rule_id, product_id, change_fingerprint)',
   'SELECT "uq_analysis_jobs_user_rule_product exists"'
 );
 PREPARE stmt_uq_analysis_user_rule_product FROM @sql_uq_analysis_user_rule_product;
