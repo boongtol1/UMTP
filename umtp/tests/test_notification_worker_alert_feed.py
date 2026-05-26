@@ -95,6 +95,7 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
         self.assertEqual(item.get("price_gap_percent"), 20.5)
         self.assertEqual(item.get("alert_price_direction"), "BELOW_OR_EQUAL")
         self.assertEqual(item.get("alert_condition_label"), "이 가격 이하이면 알림")
+        self.assertEqual(item.get("alert_type_label"), "정식 알림")
         self.assertEqual(item.get("formatted_risk_label"), "낮음")
         self.assertEqual(item.get("risk_keywords"), [])
         self.assertEqual(item.get("body_excerpt"), "상태 좋고 배터리 정상")
@@ -165,6 +166,7 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
         item = items[0]
         self.assertEqual(item.get("alert_price_direction"), "BELOW_OR_EQUAL")
         self.assertEqual(item.get("alert_condition_label"), "이 가격 이하이면 알림")
+        self.assertEqual(item.get("alert_type_label"), "정식 알림")
         self.assertEqual(item.get("risk_level"), "HIGH")
         self.assertEqual(item.get("formatted_risk_label"), "위험")
         self.assertEqual(item.get("risk_keywords"), ["교환"])
@@ -219,8 +221,52 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
         self.assertEqual(len(items), 1)
         item = items[0]
         self.assertEqual(item.get("trigger_reason"), "condition_change_candidate_notice")
+        self.assertEqual(item.get("alert_type_label"), "참고 알림 (조건 변경 사이 후보)")
+        self.assertEqual(item.get("alert_condition_label"), "조건 변경 사이 후보")
         self.assertFalse(item.get("is_alert_target"))
         self.assertTrue(item.get("is_condition_change_candidate_notice"))
+
+    @patch("src.notification_worker.get_connection", return_value=_FakeConnection())
+    @patch(
+        "src.notification_worker._fetch_alert_rows",
+        return_value=(
+            [
+                {
+                    "id": 14,
+                    "user_id": "boongtol",
+                    "watch_rule_id": 4,
+                    "analysis_job_id": 102,
+                    "product_id": "p14",
+                    "url": "https://web.joongna.com/product/14",
+                    "title": "제목 수정된 매물",
+                    "price_krw": 1200000,
+                    "fair_price_krw": 1300000,
+                    "target_price_krw": 1250000,
+                    "drop_rate_percent": 7.69,
+                    "alert_drop_rate_percent": 3.85,
+                    "alert_price_direction": "ABOVE_OR_EQUAL",
+                    "trigger_reason": "title_changed",
+                    "message": "내용 변경",
+                    "status": "pending",
+                    "send_attempts": 0,
+                    "error_message": None,
+                    "created_at": "2026-05-20T11:00:00",
+                    "sent_at": None,
+                    "updated_at": "2026-05-20T11:00:00",
+                }
+            ],
+            True,
+        ),
+    )
+    def test_content_change_type_keeps_price_condition_label(self, _mock_rows, _mock_conn):
+        items = list_alert_events_for_user("boongtol", limit=20)
+
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item.get("trigger_reason"), "title_changed")
+        self.assertEqual(item.get("alert_type_label"), "내용 변경 알림")
+        self.assertEqual(item.get("alert_condition_label"), "이 가격 이상이면 알림")
+        self.assertTrue(item.get("is_alert_target"))
 
 
 if __name__ == "__main__":

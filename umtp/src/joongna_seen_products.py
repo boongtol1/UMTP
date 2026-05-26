@@ -9,6 +9,8 @@ CHANGE_REASON_NEW = "new"
 CHANGE_REASON_SORT_DATE_CHANGED = "sort_date_changed"
 CHANGE_REASON_PRICE_CHANGED = "price_changed"
 CHANGE_REASON_TITLE_CHANGED = "title_changed"
+CHANGE_REASON_BODY_CHANGED = "body_changed"
+CHANGE_REASON_SELF_CHECK_CHANGED = "self_check_changed"
 CHANGE_REASON_BODY_MAYBE_CHANGED = "body_maybe_changed"
 CHANGE_REASON_REFRESH_KEY_CHANGED = "refresh_key_changed"
 CHANGE_REASON_CONTENT_CHANGED = "content_changed"
@@ -19,6 +21,8 @@ ANALYZE_REQUIRED_CHANGE_REASONS = {
     CHANGE_REASON_SORT_DATE_CHANGED,
     CHANGE_REASON_PRICE_CHANGED,
     CHANGE_REASON_TITLE_CHANGED,
+    CHANGE_REASON_BODY_CHANGED,
+    CHANGE_REASON_SELF_CHECK_CHANGED,
     CHANGE_REASON_BODY_MAYBE_CHANGED,
     CHANGE_REASON_REFRESH_KEY_CHANGED,
     CHANGE_REASON_CONTENT_CHANGED,
@@ -136,15 +140,10 @@ def _resolve_body_fingerprint(record):
     if not isinstance(record, dict):
         return None
 
-    for key in ("body_hash", "content_hash", "self_check_hash", "body_fingerprint", "content_fingerprint"):
+    for key in ("body_hash", "content_hash", "body_fingerprint", "content_fingerprint"):
         hashed_value = _coerce_text(record.get(key))
         if hashed_value:
             return hashed_value
-
-    if record.get("self_check_fields") is not None:
-        hashed_self_check = _build_stable_hash(record.get("self_check_fields"))
-        if hashed_self_check:
-            return hashed_self_check
 
     for key in ("body_text", "body", "content", "description"):
         raw_text = _coerce_text(record.get(key))
@@ -329,14 +328,14 @@ def detect_listing_change(previous, current):
     previous_title = _coerce_text(previous.get("last_title")) or _coerce_text(previous.get("title"))
     current_title = _coerce_text(current.get("title"))
     if previous_title != current_title:
-        return CHANGE_REASON_CONTENT_CHANGED
+        return CHANGE_REASON_TITLE_CHANGED
 
     previous_price = _coerce_price(previous.get("last_price_krw"))
     if previous_price is None:
         previous_price = _coerce_price(previous.get("price"))
     current_price = _coerce_price(current.get("price"))
     if previous_price != current_price:
-        return CHANGE_REASON_CONTENT_CHANGED
+        return CHANGE_REASON_PRICE_CHANGED
 
     previous_sort_date = _coerce_sort_date_datetime(previous.get("last_sort_date"))
     current_sort_date = _coerce_sort_date_datetime(current.get("sort_date"))
@@ -351,12 +350,12 @@ def detect_listing_change(previous, current):
     previous_body_fingerprint = _resolve_body_fingerprint(previous)
     current_body_fingerprint = _resolve_body_fingerprint(current)
     if previous_body_fingerprint and current_body_fingerprint and previous_body_fingerprint != current_body_fingerprint:
-        return CHANGE_REASON_CONTENT_CHANGED
+        return CHANGE_REASON_BODY_CHANGED
 
     previous_body_hash = _resolve_body_hash(previous)
     current_body_hash = _resolve_body_hash(current)
     if previous_body_hash and current_body_hash and previous_body_hash != current_body_hash:
-        return CHANGE_REASON_CONTENT_CHANGED
+        return CHANGE_REASON_BODY_CHANGED
 
     previous_self_check_hash = _resolve_self_check_hash(previous)
     current_self_check_hash = _resolve_self_check_hash(current)
@@ -365,7 +364,7 @@ def detect_listing_change(previous, current):
         and current_self_check_hash
         and previous_self_check_hash != current_self_check_hash
     ):
-        return CHANGE_REASON_CONTENT_CHANGED
+        return CHANGE_REASON_SELF_CHECK_CHANGED
 
     return CHANGE_REASON_UNCHANGED
 

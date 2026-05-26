@@ -21,6 +21,7 @@ data class AlertItem(
     val alert_drop_rate_percent: Double? = null,
     val alert_price_direction: String? = null,
     val alert_condition_label: String? = null,
+    val alert_type_label: String? = null,
     val product_type: String? = null,
     val chip: String? = null,
     val screen_inch: Int? = null,

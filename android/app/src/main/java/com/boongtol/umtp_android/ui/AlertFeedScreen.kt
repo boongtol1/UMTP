@@ -289,6 +289,9 @@ fun AlertCard(
                     BadgeChip(label = "참고 알림", color = Color(0xFF8D6E63))
                     BadgeChip(label = "조건 변경 사이 후보", color = Color(0xFF6D4C41))
                 } else {
+                    if (isContentChangeAlert(alert)) {
+                        BadgeChip(label = resolveAlertTypeLabel(alert), color = Color(0xFF3949AB))
+                    }
                     BadgeChip(label = resolveRiskLabel(alert), color = resolveRiskColor(alert))
                     BadgeChip(label = resolveAlertConditionLabel(alert), color = Color(0xFF1565C0))
                 }
@@ -619,9 +622,14 @@ private fun resolveAlertConditionLabel(alert: AlertItem): String {
     if (isConditionChangeCandidateNotice(alert)) {
         return "조건 변경 사이 후보"
     }
+    val staleContentTypeLabels = setOf("내용변경알림", "내용 변경 알림")
     alert.alert_condition_label?.let {
         if (it.isNotBlank()) {
-            return it
+            if (isContentChangeAlert(alert) && staleContentTypeLabels.contains(it.trim())) {
+                // Legacy payloads stored type text in condition; prefer live price-condition label.
+            } else {
+                return it
+            }
         }
     }
     return if ((alert.alert_price_direction ?: "").uppercase() == "ABOVE_OR_EQUAL") {
@@ -756,7 +764,7 @@ private fun buildAlertDetailRows(
     listingImageUrl: String?,
 ): List<Pair<String, String>> {
     return listOf(
-        "알림 유형" to if (isConditionChangeCandidateNotice(alert)) "참고 알림 (조건 변경 사이 후보)" else "정식 알림",
+        "알림 유형" to resolveAlertTypeLabel(alert),
         "참고 안내" to if (isConditionChangeCandidateNotice(alert)) {
             "정식 알림 기준은 저장 이후 매물이며, 이 항목은 참고용 후보입니다."
         } else {
@@ -811,3 +819,30 @@ private fun isConditionChangeCandidateNotice(alert: AlertItem): Boolean {
     }
     return (alert.trigger_reason ?: "").trim().lowercase() == "condition_change_candidate_notice"
 }
+
+private fun isContentChangeAlert(alert: AlertItem): Boolean {
+    return contentChangeTriggerReasons.contains((alert.trigger_reason ?: "").trim().lowercase())
+}
+
+private fun resolveAlertTypeLabel(alert: AlertItem): String {
+    alert.alert_type_label?.let { label ->
+        if (label.isNotBlank()) {
+            return label
+        }
+    }
+    if (isConditionChangeCandidateNotice(alert)) {
+        return "참고 알림 (조건 변경 사이 후보)"
+    }
+    if (isContentChangeAlert(alert)) {
+        return "내용 변경 알림"
+    }
+    return "정식 알림"
+}
+
+private val contentChangeTriggerReasons = setOf(
+    "content_changed",
+    "title_changed",
+    "price_changed",
+    "body_changed",
+    "self_check_changed",
+)

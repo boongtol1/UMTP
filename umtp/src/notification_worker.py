@@ -38,6 +38,14 @@ except Exception:  # pragma: no cover
 _FIREBASE_INIT_ATTEMPTED = False
 _FIREBASE_INIT_ERROR = None
 CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON = "condition_change_candidate_notice"
+CONTENT_CHANGE_TRIGGER_REASONS = {
+    "content_changed",
+    "title_changed",
+    "price_changed",
+    "body_changed",
+    "self_check_changed",
+}
+CONTENT_CHANGE_ALERT_TYPE_LABEL = "내용 변경 알림"
 
 
 def _normalize_optional_text(value):
@@ -117,15 +125,27 @@ def _build_alert_condition_label(alert_price_direction):
     return "이 가격 이하이면 알림"
 
 
-def _build_archive_condition_label(trigger_reason):
+def _is_content_change_trigger_reason(trigger_reason):
     normalized_trigger = _normalize_optional_text(trigger_reason)
-    if normalized_trigger == "condition_change_candidate_notice":
-        return "조건 변경 사이 후보"
-    if normalized_trigger == "content_changed":
-        return "내용변경알림"
     if normalized_trigger is None:
-        return None
-    return "가격 알림"
+        return False
+    return normalized_trigger in CONTENT_CHANGE_TRIGGER_REASONS
+
+
+def _build_alert_type_label(trigger_reason):
+    normalized_trigger = _normalize_optional_text(trigger_reason)
+    if normalized_trigger == CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON:
+        return "참고 알림 (조건 변경 사이 후보)"
+    if _is_content_change_trigger_reason(normalized_trigger):
+        return CONTENT_CHANGE_ALERT_TYPE_LABEL
+    return "정식 알림"
+
+
+def _build_archive_condition_label(trigger_reason, alert_price_direction):
+    normalized_trigger = _normalize_optional_text(trigger_reason)
+    if normalized_trigger == CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON:
+        return "조건 변경 사이 후보"
+    return _build_alert_condition_label(alert_price_direction)
 
 
 def _build_formatted_risk_label(risk_level):
@@ -456,14 +476,24 @@ def _build_spec_summary(alert):
 
 def _resolve_alert_condition_label_for_display(alert):
     trigger_reason = _normalize_optional_text(alert.get("trigger_reason"))
-    if trigger_reason == "content_changed":
-        return "내용변경알림"
     if trigger_reason == CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON:
         return "조건 변경 사이 후보"
     explicit_label = _normalize_optional_text(alert.get("alert_condition_label"))
     if explicit_label is not None:
+        if _is_content_change_trigger_reason(trigger_reason) and explicit_label in {
+            "내용변경알림",
+            CONTENT_CHANGE_ALERT_TYPE_LABEL,
+        }:
+            return _build_alert_condition_label(alert.get("alert_price_direction"))
         return explicit_label
     return _build_alert_condition_label(alert.get("alert_price_direction"))
+
+
+def _resolve_alert_type_label_for_display(alert):
+    explicit_label = _normalize_optional_text(alert.get("alert_type_label"))
+    if explicit_label is not None:
+        return explicit_label
+    return _build_alert_type_label(alert.get("trigger_reason"))
 
 
 def _resolve_risk_label_for_display(alert):
@@ -1203,7 +1233,11 @@ def _normalize_alert_detail_for_archive_log(alert_detail):
     )
     if special_notes_text == "특이사항 없음":
         special_notes_text = None
-    condition_label = _build_archive_condition_label(normalized_trigger_reason)
+    condition_label = _build_archive_condition_label(
+        normalized_trigger_reason,
+        normalized.get("alert_price_direction"),
+    )
+    alert_type_label = _build_alert_type_label(normalized_trigger_reason)
     body_text = _normalize_optional_text(normalized.get("body_text"))
     body_excerpt = _normalize_optional_text(normalized.get("body_excerpt"))
     listing_image_url = _normalize_optional_text(normalized.get("listing_image_url")) or _normalize_optional_text(
@@ -1216,6 +1250,7 @@ def _normalize_alert_detail_for_archive_log(alert_detail):
     payload = {
         "raw_alert_event": dict(normalized),
         "trigger_reason": normalized_trigger_reason,
+        "alert_type_label": alert_type_label,
         "alert_condition_label": condition_label,
         "source": _normalize_optional_text(normalized.get("source")),
         "url": _normalize_optional_text(normalized.get("url")),
@@ -1441,6 +1476,9 @@ def _insert_alert_read_archive_event_log(
         alert_payload = {
             "alert_event": raw_alert_event,
             "display_fields": {
+                "alert_type_label": _normalize_optional_text(normalized_alert_detail.get("alert_type_label"))
+                if isinstance(normalized_alert_detail, dict)
+                else None,
                 "alert_condition_label": _normalize_optional_text(normalized_alert_detail.get("alert_condition_label"))
                 if isinstance(normalized_alert_detail, dict)
                 else None,
@@ -1654,8 +1692,8 @@ def _is_unregistered_push_token_error(error_text):
 def _build_push_notification_payload(alert):
     listing_title = _normalize_optional_text(alert.get("title")) or "UMTP 새 매물 알림"
     trigger_reason = _normalize_optional_text(alert.get("trigger_reason"))
-    if trigger_reason == "content_changed":
-        title = f"내용변경알림 · {listing_title}"
+    if _is_content_change_trigger_reason(trigger_reason):
+        title = f"{CONTENT_CHANGE_ALERT_TYPE_LABEL} · {listing_title}"
     else:
         title = listing_title
     listing_price_krw = _safe_int(alert.get("price_krw"))
@@ -1757,6 +1795,7 @@ def _build_telegram_message(alert):
     risk_label = _resolve_risk_label_for_display(alert)
     risk_score = _resolve_risk_score_for_display(alert)
     risk_keywords_text = _resolve_risk_keywords_text_for_display(alert)
+    alert_type_label = _resolve_alert_type_label_for_display(alert)
     alert_condition_label = _resolve_alert_condition_label_for_display(alert)
     body_text = _resolve_body_text_for_display(alert)
     analyzed_at_text = _resolve_analyzed_at_text_for_display(alert)
@@ -1770,6 +1809,7 @@ def _build_telegram_message(alert):
 
     sections = [
         _build_telegram_detail_row("출처", source),
+        _build_telegram_detail_row("알림 유형", alert_type_label),
         _build_telegram_detail_row("게시글 제목", title),
         _build_telegram_detail_row("URL", url),
         _build_telegram_detail_row("대표 이미지", listing_image_url),
@@ -2504,14 +2544,10 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
                     "price_gap_percent": diff_ratio,
                     "alert_drop_rate_percent": alert_drop_rate_percent,
                     "alert_price_direction": alert_price_direction,
-                    "alert_condition_label": (
-                        "내용변경알림"
-                        if trigger_reason == "content_changed"
-                        else (
-                            "조건 변경 사이 후보"
-                            if trigger_reason == CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON
-                            else _build_alert_condition_label(alert_price_direction)
-                        )
+                    "alert_type_label": _build_alert_type_label(trigger_reason),
+                    "alert_condition_label": _build_archive_condition_label(
+                        trigger_reason,
+                        alert_price_direction,
                     ),
                     "trigger_reason": trigger_reason,
                     "message": row.get("message"),

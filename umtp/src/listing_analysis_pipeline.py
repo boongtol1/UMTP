@@ -21,8 +21,10 @@ try:
     )
     from src.db import get_connection
     from src.joongna_seen_products import (
+        CHANGE_REASON_BODY_CHANGED,
         CHANGE_REASON_CONTENT_CHANGED,
         CHANGE_REASON_PRICE_CHANGED,
+        CHANGE_REASON_SELF_CHECK_CHANGED,
         CHANGE_REASON_TITLE_CHANGED,
         build_listing_content_snapshot,
         get_seen_product,
@@ -56,8 +58,10 @@ except ModuleNotFoundError:
     )
     from db import get_connection
     from joongna_seen_products import (
+        CHANGE_REASON_BODY_CHANGED,
         CHANGE_REASON_CONTENT_CHANGED,
         CHANGE_REASON_PRICE_CHANGED,
+        CHANGE_REASON_SELF_CHECK_CHANGED,
         CHANGE_REASON_TITLE_CHANGED,
         build_listing_content_snapshot,
         get_seen_product,
@@ -92,6 +96,20 @@ _TITLE_SSD_SPEC_PATTERN = re.compile(
     r"(?:\b(?:256|512|1024|2048|4096|8192)\s*(?:gb|g|ssd)\b|(?:256|512|1024|2048|4096|8192)\s*기가|\b(?:1|2|4|8)\s*(?:tb|t|테라)\b)",
     flags=re.IGNORECASE,
 )
+CONTENT_CHANGE_TRIGGER_REASONS = {
+    CHANGE_REASON_CONTENT_CHANGED,
+    CHANGE_REASON_TITLE_CHANGED,
+    CHANGE_REASON_PRICE_CHANGED,
+    CHANGE_REASON_BODY_CHANGED,
+    CHANGE_REASON_SELF_CHECK_CHANGED,
+}
+
+
+def _is_content_change_trigger_reason(trigger_reason):
+    normalized_reason = _normalize_optional_text(trigger_reason)
+    if normalized_reason is None:
+        return False
+    return normalized_reason in CONTENT_CHANGE_TRIGGER_REASONS
 
 
 def _build_parse_failure_result(reason):
@@ -186,6 +204,8 @@ def should_fetch_detail(listing, change_reason, title_parse_result, *, target_pr
         "sort_date_changed",
         "price_changed",
         "title_changed",
+        "body_changed",
+        "self_check_changed",
         "body_maybe_changed",
         "refresh_key_changed",
         "content_changed",
@@ -814,7 +834,7 @@ def maybe_create_alert_event(
     normalized_trigger_reason = _normalize_optional_text(trigger_reason)
     identity_scope = (
         "user_product"
-        if normalized_trigger_reason == CHANGE_REASON_CONTENT_CHANGED
+        if _is_content_change_trigger_reason(normalized_trigger_reason)
         else "watch_rule"
     )
     if normalized_change_fingerprint is None:
@@ -1400,23 +1420,20 @@ def analyze_product_for_watch_rule(job):
             content_change_fields.append("title")
         if trigger_reason == CHANGE_REASON_PRICE_CHANGED:
             content_change_fields.append("price")
-        if previous_body_hash and current_body_hash and previous_body_hash != current_body_hash:
+        if trigger_reason == CHANGE_REASON_BODY_CHANGED:
             content_change_fields.append("body_text")
+        if trigger_reason == CHANGE_REASON_SELF_CHECK_CHANGED:
+            content_change_fields.append("self_check")
+        if previous_body_hash and current_body_hash and previous_body_hash != current_body_hash:
+            if "body_text" not in content_change_fields:
+                content_change_fields.append("body_text")
         if (
             previous_self_check_hash
             and current_self_check_hash
             and previous_self_check_hash != current_self_check_hash
         ):
-            content_change_fields.append("self_check")
-
-        if (
-            trigger_reason != "new"
-            and (
-                trigger_reason == CHANGE_REASON_CONTENT_CHANGED
-                or len(content_change_fields) > 0
-            )
-        ):
-            trigger_reason = CHANGE_REASON_CONTENT_CHANGED
+            if "self_check" not in content_change_fields:
+                content_change_fields.append("self_check")
 
         if product_id is not None:
             update_seen_product_content_snapshot(
@@ -1505,7 +1522,7 @@ def analyze_product_for_watch_rule(job):
 
         is_alert_target = False
         alert_skip_reason = price_error_reason
-        is_content_changed_alert = trigger_reason == CHANGE_REASON_CONTENT_CHANGED
+        is_content_changed_alert = _is_content_change_trigger_reason(trigger_reason)
         if not saved_window_allowed:
             is_alert_target = False
             alert_skip_reason = saved_window_reason or "sort_date_before_saved_at"

@@ -125,6 +125,7 @@ class NotificationWorkerTest(unittest.TestCase):
         self.assertIn("알림 기준 가격\n795,000원", message)
         self.assertIn("시장가와의 차이\n18.75%", message)
         self.assertIn("차이율 계산식\n(내가 생각한 시장가 - 등록 가격) / 내가 생각한 시장가 × 100", message)
+        self.assertIn("알림 유형\n정식 알림", message)
         self.assertIn("알림 조건\n이 가격 이하이면 알림", message)
         self.assertIn("위험도\n낮음", message)
         self.assertIn("위험 점수\n0", message)
@@ -138,6 +139,7 @@ class NotificationWorkerTest(unittest.TestCase):
         expected_order_tokens = [
             "거래 알림 피드",
             "출처\n",
+            "알림 유형\n",
             "게시글 제목\n",
             "URL\n",
             "대표 이미지\n",

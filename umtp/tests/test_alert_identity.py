@@ -110,7 +110,7 @@ class AlertIdentityTest(unittest.TestCase):
         self.assertEqual(result.get("reason"), "duplicate_identity_alert")
         self.assertEqual(result.get("alert_id"), 17)
 
-    def test_content_changed_dedupe_lookup_ignores_watch_rule_id(self):
+    def test_content_change_family_dedupe_lookup_ignores_watch_rule_id(self):
         fake_cursor = _FakeCursor(duplicate_row=None, lastrowid=11)
 
         maybe_create_alert_event(
@@ -125,7 +125,7 @@ class AlertIdentityTest(unittest.TestCase):
             fair_price_krw=200,
             target_price_krw=150,
             drop_rate_percent=50.0,
-            trigger_reason="content_changed",
+            trigger_reason="self_check_changed",
             change_fingerprint="cfp-1",
             message="msg",
         )
@@ -149,7 +149,7 @@ class AlertIdentityTest(unittest.TestCase):
             fair_price_krw=200,
             target_price_krw=150,
             drop_rate_percent=50.0,
-            trigger_reason="price_changed",
+            trigger_reason="sort_date_changed",
             change_fingerprint="cfp-2",
             message="msg",
         )

@@ -31,6 +31,8 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
         self.assertTrue(should_analyze_listing("content_changed"))
         self.assertTrue(should_analyze_listing("price_changed"))
         self.assertTrue(should_analyze_listing("title_changed"))
+        self.assertTrue(should_analyze_listing("body_changed"))
+        self.assertTrue(should_analyze_listing("self_check_changed"))
         self.assertTrue(should_analyze_listing("refresh_key_changed"))
         self.assertTrue(should_analyze_listing("body_maybe_changed"))
         self.assertFalse(should_analyze_listing("unchanged"))
@@ -61,7 +63,7 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
             },
         )
         self.assertTrue(should_analyze)
-        self.assertEqual(reason, "content_changed")
+        self.assertEqual(reason, "price_changed")
 
     def test_title_changed(self):
         should_analyze, reason = should_analyze_seen_product(
@@ -77,7 +79,7 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
             },
         )
         self.assertTrue(should_analyze)
-        self.assertEqual(reason, "content_changed")
+        self.assertEqual(reason, "title_changed")
 
     def test_refresh_key_changed(self):
         should_analyze, reason = should_analyze_seen_product(
@@ -166,7 +168,7 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
             },
         )
         self.assertTrue(should_analyze)
-        self.assertEqual(reason, "content_changed")
+        self.assertEqual(reason, "title_changed")
 
     def test_detect_listing_change_body_hash_changed(self):
         reason = detect_listing_change(
@@ -183,7 +185,24 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
                 "body_hash": "xyz",
             },
         )
-        self.assertEqual(reason, "content_changed")
+        self.assertEqual(reason, "body_changed")
+
+    def test_detect_listing_change_self_check_hash_changed(self):
+        reason = detect_listing_change(
+            {
+                "last_title": "M3 맥북에어 8/256",
+                "last_price_krw": 1200000,
+                "last_refresh_key": "rk-1",
+                "self_check_hash": "self-a",
+            },
+            {
+                "title": "M3 맥북에어 8/256",
+                "price": 1200000,
+                "refresh_key": "rk-1",
+                "self_check_hash": "self-b",
+            },
+        )
+        self.assertEqual(reason, "self_check_changed")
 
     def test_upsert_seen_product_tracks_sort_date_columns(self):
         cursor = _FakeCursor()

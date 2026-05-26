@@ -530,7 +530,7 @@ private fun buildReadArchiveDetailRows(alert: AlertItem, resolvedUrl: String?): 
     val tradeFlagsText = resolveReadArchiveTradeFlagsText(alert.trade_type_flags)
 
     return listOf(
-        "알림 유형" to if (isConditionChangeCandidateNotice(alert)) "참고 알림 (조건 변경 사이 후보)" else "정식 알림",
+        "알림 유형" to resolveReadArchiveAlertTypeLabel(alert),
         "출처" to (alert.source?.takeIf { it.isNotBlank() } ?: "정보 없음"),
         "URL" to (resolvedUrl ?: "URL 정보 없음"),
         "대표 이미지" to (alert.listing_image_url?.takeIf { it.isNotBlank() } ?: "이미지 없음"),
@@ -561,9 +561,12 @@ private fun resolveReadArchiveConditionLabel(alert: AlertItem): String {
     if (isConditionChangeCandidateNotice(alert)) {
         return "조건 변경 사이 후보"
     }
+    val staleContentTypeLabels = setOf("내용변경알림", "내용 변경 알림")
     val explicit = alert.alert_condition_label?.takeIf { it.isNotBlank() }
     if (explicit != null) {
-        return explicit
+        if (!isContentChangeAlertForReadArchive(alert) || !staleContentTypeLabels.contains(explicit.trim())) {
+            return explicit
+        }
     }
     return if ((alert.alert_price_direction ?: "").uppercase() == "ABOVE_OR_EQUAL") {
         "이 가격 이상이면 알림"
@@ -656,6 +659,33 @@ private fun isConditionChangeCandidateNotice(alert: AlertItem): Boolean {
     }
     return (alert.trigger_reason ?: "").trim().lowercase() == "condition_change_candidate_notice"
 }
+
+private fun isContentChangeAlertForReadArchive(alert: AlertItem): Boolean {
+    return contentChangeTriggerReasonsForReadArchive.contains((alert.trigger_reason ?: "").trim().lowercase())
+}
+
+private fun resolveReadArchiveAlertTypeLabel(alert: AlertItem): String {
+    alert.alert_type_label?.let { label ->
+        if (label.isNotBlank()) {
+            return label
+        }
+    }
+    if (isConditionChangeCandidateNotice(alert)) {
+        return "참고 알림 (조건 변경 사이 후보)"
+    }
+    if (isContentChangeAlertForReadArchive(alert)) {
+        return "내용 변경 알림"
+    }
+    return "정식 알림"
+}
+
+private val contentChangeTriggerReasonsForReadArchive = setOf(
+    "content_changed",
+    "title_changed",
+    "price_changed",
+    "body_changed",
+    "self_check_changed",
+)
 
 private fun chipSortGroupOrder(chip: String): Int {
     return when (chip.uppercase()) {
