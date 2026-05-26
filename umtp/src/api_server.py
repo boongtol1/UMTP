@@ -24,9 +24,13 @@ from src.resale_trade_journeys import (
     create_or_hydrate_resale_trade_journey_from_product,
     delete_completed_resale_trade_journeys,
     list_completed_resale_trade_journeys,
+    list_purchased_resale_trade_journeys,
     patch_resale_trade_journey_purchase,
     patch_resale_trade_journey_resale,
     patch_resale_trade_journey_sold,
+    start_resale_trade_journey_from_alert,
+    start_resale_trade_journey_from_read_archive,
+    start_resale_trade_journey_from_url,
     upsert_resale_trade_after_purchase,
     upsert_resale_trade_after_resale,
 )
@@ -177,6 +181,21 @@ class ResaleTradeJourneyFromProductRequest(BaseModel):
 
 class ResaleTradeJourneyDeleteSelectedRequest(BaseModel):
     journey_ids: list[int] = Field(default_factory=list)
+
+
+class TradeJourneyStartFromUrlRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=100)
+    url: str = Field(..., min_length=1, max_length=1000)
+
+
+class TradeJourneyStartFromAlertRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=100)
+    alert_event_id: int = Field(..., gt=0)
+
+
+class TradeJourneyStartFromReadArchiveRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=100)
+    read_archive_event_id: int = Field(..., gt=0)
 
 
 @app.get("/health")
@@ -519,6 +538,80 @@ def create_resale_trade_journey_from_product(user_id: str, request: ResaleTradeJ
         return {"ok": False, "reason": f"거래 기록 생성 실패: {exc}"}
 
 
+@app.post("/trade-journeys/start-from-url")
+def start_trade_journey_from_url(request: TradeJourneyStartFromUrlRequest):
+    normalized_user_id = _normalize_user_id(request.user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/trade-journeys/start-from-url",
+        )
+        return start_resale_trade_journey_from_url(
+            user_id=resolved_user_id,
+            url=request.url,
+        )
+    except ValueError as exc:
+        reason = str(exc)
+        if reason == "invalid_url":
+            reason = "URL을 확인해 주세요."
+        elif reason == "invalid_product_id":
+            reason = "URL에서 product_id를 찾지 못했습니다."
+        return {"ok": False, "reason": reason}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"URL 거래 기록 시작 실패: {exc}"}
+
+
+@app.post("/trade-journeys/start-from-alert")
+def start_trade_journey_from_alert(request: TradeJourneyStartFromAlertRequest):
+    normalized_user_id = _normalize_user_id(request.user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/trade-journeys/start-from-alert",
+        )
+        return start_resale_trade_journey_from_alert(
+            user_id=resolved_user_id,
+            alert_event_id=request.alert_event_id,
+        )
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc)}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"알림 기반 거래 기록 시작 실패: {exc}"}
+
+
+@app.post("/trade-journeys/start-from-read-archive")
+def start_trade_journey_from_read_archive(request: TradeJourneyStartFromReadArchiveRequest):
+    normalized_user_id = _normalize_user_id(request.user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/trade-journeys/start-from-read-archive",
+        )
+        return start_resale_trade_journey_from_read_archive(
+            user_id=resolved_user_id,
+            read_archive_event_id=request.read_archive_event_id,
+        )
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc)}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"읽음 보관함 기반 거래 기록 시작 실패: {exc}"}
+
+
 @app.patch("/users/{user_id}/resale-trade-journeys/{journey_id}/purchase")
 def patch_resale_trade_purchase(user_id: str, journey_id: int, request: dict[str, Any]):
     normalized_user_id = _normalize_user_id(user_id)
@@ -615,6 +708,29 @@ def get_completed_resale_trade_journeys(user_id: str, limit: int = 200):
         return {"ok": False, "reason": f"사용자 등록 실패: {exc}", "items": []}
     except Exception as exc:
         return {"ok": False, "reason": f"완료 거래 조회 실패: {exc}", "items": []}
+
+
+@app.get("/users/{user_id}/resale-trade-journeys/purchased")
+def get_purchased_resale_trade_journeys(user_id: str, limit: int = 200):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id", "items": []}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/users/{user_id}/resale-trade-journeys/purchased",
+        )
+        return list_purchased_resale_trade_journeys(
+            user_id=resolved_user_id,
+            limit=limit,
+        )
+    except ValueError as exc:
+        return {"ok": False, "reason": str(exc), "items": []}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}", "items": []}
+    except Exception as exc:
+        return {"ok": False, "reason": f"구매 거래 조회 실패: {exc}", "items": []}
 
 
 @app.patch("/users/{user_id}/resale-trade-journeys/completed/delete-selected")

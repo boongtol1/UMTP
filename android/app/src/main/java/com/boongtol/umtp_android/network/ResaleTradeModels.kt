@@ -21,6 +21,21 @@ data class ResaleTradeJourneyFromProductRequest(
     val product_id: String,
 )
 
+data class TradeJourneyStartFromUrlRequest(
+    val user_id: String,
+    val url: String,
+)
+
+data class TradeJourneyStartFromAlertRequest(
+    val user_id: String,
+    val alert_event_id: Long,
+)
+
+data class TradeJourneyStartFromReadArchiveRequest(
+    val user_id: String,
+    val read_archive_event_id: Long,
+)
+
 data class ResaleTradeJourneyPatchRequest(
     val updates: Map<String, Any?> = emptyMap(),
 )
@@ -45,6 +60,19 @@ data class ResaleTradeJourneyListResponse(
 
 data class ResaleTradeJourneyResponse(
     val ok: Boolean,
+    val id: Long? = null,
+    val source: String? = null,
+    val product_id: String? = null,
+    val current_stage: String? = null,
+    val row: ResaleTradeJourneyRow? = null,
+    val reason: String? = null,
+    val message: String? = null,
+)
+
+data class TradeJourneyStartResponse(
+    val ok: Boolean,
+    val existing: Boolean? = null,
+    val trade_journey_id: Long? = null,
     val id: Long? = null,
     val source: String? = null,
     val product_id: String? = null,

@@ -111,6 +111,7 @@ class ResaleTradeJourneysTest(unittest.TestCase):
                 "money_received_at": "2026-05-26 09:10:00",
                 "purchase_account_number": " 123-456-7890 ",
                 "inspection_notes": "  상태 양호  ",
+                "sale_platform": "  joongna  ",
                 "sale_price_krw": "820000",
                 "listing_price_krw": "700000",
             },
@@ -124,6 +125,7 @@ class ResaleTradeJourneysTest(unittest.TestCase):
                 "money_received_at",
                 "purchase_account_number",
                 "inspection_notes",
+                "sale_platform",
                 "sale_price_krw",
                 "listing_price_krw",
             },
@@ -139,6 +141,7 @@ class ResaleTradeJourneysTest(unittest.TestCase):
                 "money_sent_at": datetime(2026, 5, 25, 12, 30, 0),
                 "purchase_account_number": "123-456-7890",
                 "inspection_notes": "상태 양호",
+                "sale_platform": "joongna",
             },
         )
 
@@ -334,6 +337,89 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             {"current_stage": "INSPECTED"},
         )
         self.assertEqual(stage, "INSPECTED")
+
+    @patch(
+        "src.resale_trade_journeys.create_or_hydrate_resale_trade_journey_from_product",
+        return_value={"ok": True, "id": 14, "trade_journey_id": 14, "existing": False},
+    )
+    def test_start_resale_trade_journey_from_url(self, mock_create):
+        response = journeys.start_resale_trade_journey_from_url(
+            user_id="boongtol",
+            url="https://web.joongna.com/product/228826879",
+        )
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("trade_journey_id"), 14)
+        kwargs = mock_create.call_args.kwargs
+        self.assertEqual(kwargs.get("user_id"), "boongtol")
+        self.assertEqual(kwargs.get("source"), "joongna")
+        self.assertEqual(kwargs.get("product_id"), "228826879")
+        self.assertEqual(
+            kwargs.get("seed_values", {}).get("url"),
+            "https://web.joongna.com/product/228826879",
+        )
+        self.assertTrue(kwargs.get("include_existing"))
+
+    def test_build_read_archive_mapping(self):
+        mapped = journeys._build_read_archive_mapping(
+            {
+                "alert_source": "joongna",
+                "alert_product_id": "123",
+                "alert_url": "https://web.joongna.com/product/123",
+                "alert_title": "M2 16GB",
+                "alert_sort_date": "2026-05-26 10:00:00",
+                "alert_price_krw": 780000,
+                "alert_fair_price_krw": 930000,
+                "alert_drop_rate_percent": 16.1,
+                "alert_product_type": "macbook_air",
+                "alert_chip": "M2",
+                "alert_screen_inch": 13,
+                "alert_ram_gb": 16,
+                "alert_ssd_gb": 512,
+                "alert_risk_score": 12,
+                "alert_risk_keywords": "[\"급처\"]",
+                "alert_body_text": "본문 원문",
+                "alert_listing_image_url": "https://img.example.com/a.jpg",
+            }
+        )
+
+        self.assertEqual(mapped.get("source"), "joongna")
+        self.assertEqual(mapped.get("product_id"), "123")
+        self.assertEqual(mapped.get("url"), "https://web.joongna.com/product/123")
+        self.assertEqual(mapped.get("listing_price_krw"), 780000)
+        self.assertEqual(mapped.get("fair_price_krw"), 930000)
+        self.assertEqual(mapped.get("chip"), "M2")
+        self.assertEqual(mapped.get("screen_inch"), 13)
+        self.assertEqual(mapped.get("ram_gb"), 16)
+        self.assertEqual(mapped.get("ssd_gb"), 512)
+        self.assertEqual(mapped.get("risk_score"), 12)
+        self.assertIn("img.example.com", mapped.get("image_urls") or "")
+
+    @patch("src.resale_trade_journeys._safe_fetchall", return_value=[{"id": 1}])
+    @patch("src.resale_trade_journeys.get_connection")
+    def test_list_purchased_resale_trade_journeys_excludes_sold_stage(
+        self,
+        mock_get_connection,
+        mock_fetchall,
+    ):
+        cursor = MagicMock()
+        connection = MagicMock()
+        connection.cursor.return_value = cursor
+        connection.is_connected.return_value = True
+        mock_get_connection.return_value = connection
+
+        result = journeys.list_purchased_resale_trade_journeys(
+            user_id="boongtol",
+            limit=77,
+        )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("items"), [{"id": 1}])
+        query = mock_fetchall.call_args.args[1]
+        params = mock_fetchall.call_args.args[2]
+        self.assertIn("purchased_at IS NOT NULL", query)
+        self.assertIn("current_stage <> %s", query)
+        self.assertEqual(params, ("boongtol", journeys.STAGE_SOLD, 77))
 
     @patch("src.resale_trade_journeys._fetch_journey_by_key", return_value={"id": 99})
     def test_insert_or_get_journey_id_reuses_existing_row(self, _mock_fetch):

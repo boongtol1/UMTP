@@ -57,6 +57,21 @@ interface UmtpApiService {
         @Body request: ResaleTradeJourneyFromProductRequest,
     ): ResaleTradeJourneyResponse
 
+    @POST("trade-journeys/start-from-url")
+    suspend fun startTradeJourneyFromUrl(
+        @Body request: TradeJourneyStartFromUrlRequest,
+    ): TradeJourneyStartResponse
+
+    @POST("trade-journeys/start-from-alert")
+    suspend fun startTradeJourneyFromAlert(
+        @Body request: TradeJourneyStartFromAlertRequest,
+    ): TradeJourneyStartResponse
+
+    @POST("trade-journeys/start-from-read-archive")
+    suspend fun startTradeJourneyFromReadArchive(
+        @Body request: TradeJourneyStartFromReadArchiveRequest,
+    ): TradeJourneyStartResponse
+
     @PATCH("users/{user_id}/resale-trade-journeys/{journey_id}/purchase")
     suspend fun patchResaleTradeJourneyPurchase(
         @Path("user_id") userId: String,
@@ -80,6 +95,12 @@ interface UmtpApiService {
 
     @GET("users/{user_id}/resale-trade-journeys/completed")
     suspend fun getCompletedResaleTradeJourneys(
+        @Path("user_id") userId: String,
+        @Query("limit") limit: Int = 200,
+    ): ResaleTradeJourneyListResponse
+
+    @GET("users/{user_id}/resale-trade-journeys/purchased")
+    suspend fun getPurchasedResaleTradeJourneys(
         @Path("user_id") userId: String,
         @Query("limit") limit: Int = 200,
     ): ResaleTradeJourneyListResponse

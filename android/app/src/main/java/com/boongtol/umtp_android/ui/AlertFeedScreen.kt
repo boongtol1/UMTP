@@ -2,6 +2,7 @@ package com.boongtol.umtp_android.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,8 +41,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -58,11 +61,13 @@ fun AlertFeedScreen(
     onRefresh: () -> Unit,
     onMarkAlertRead: (Long, (Boolean) -> Unit) -> Unit = { _, callback -> callback(false) },
     onMarkAllAsRead: () -> Unit = {},
+    onStartTradeJourney: (Long, (Boolean) -> Unit) -> Unit = { _, callback -> callback(false) },
     initialTargetAlertId: String? = null,
     onTargetAlertFound: () -> Unit = {},
 ) {
     var selectedAlert by remember { mutableStateOf<AlertItem?>(null) }
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
 
     LaunchedEffect(initialTargetAlertId, alerts) {
         if (initialTargetAlertId != null && alerts.isNotEmpty()) {
@@ -190,6 +195,27 @@ fun AlertFeedScreen(
                     onOpenDetails = {
                         selectedAlert = alert
                     },
+                    onStartTradeJourney = {
+                        onStartTradeJourney(alert.id) { success ->
+                            if (success) {
+                                selectedAlert = null
+                            }
+                        }
+                    },
+                    onCopyUrl = {
+                        val copiedUrl = resolveAlertUrl(alert)
+                        if (!copiedUrl.isNullOrBlank()) {
+                            clipboardManager.setText(AnnotatedString(copiedUrl))
+                            Toast.makeText(context, "URL을 복사했어요.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onCopyImageUrl = {
+                        val copiedImageUrl = resolveAlertImageUrl(alert)
+                        if (!copiedImageUrl.isNullOrBlank()) {
+                            clipboardManager.setText(AnnotatedString(copiedImageUrl))
+                            Toast.makeText(context, "이미지 URL을 복사했어요.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
                 )
             }
         }
@@ -200,6 +226,9 @@ fun AlertFeedScreen(
 fun AlertCard(
     alert: AlertItem,
     onOpenDetails: () -> Unit,
+    onStartTradeJourney: () -> Unit,
+    onCopyUrl: () -> Unit,
+    onCopyImageUrl: () -> Unit,
 ) {
     val listingImageUrl = alert.listing_image_url?.takeIf { it.isNotBlank() }
     val isReferenceNotice = isConditionChangeCandidateNotice(alert)
@@ -314,6 +343,38 @@ fun AlertCard(
             }
 
             Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = onStartTradeJourney,
+                    modifier = Modifier.weight(1f),
+                    enabled = alert.id > 0L,
+                ) {
+                    Text("거래 기록 시작")
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = onCopyUrl,
+                    modifier = Modifier.weight(1f),
+                    enabled = !resolvedUrl.isNullOrBlank(),
+                ) {
+                    Text("URL 복사")
+                }
+                Button(
+                    onClick = onCopyImageUrl,
+                    modifier = Modifier.weight(1f),
+                    enabled = !listingImageUrl.isNullOrBlank(),
+                ) {
+                    Text("이미지 URL 복사")
+                }
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),

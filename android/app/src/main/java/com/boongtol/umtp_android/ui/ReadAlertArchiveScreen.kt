@@ -2,6 +2,7 @@ package com.boongtol.umtp_android.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,7 +42,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -59,8 +62,10 @@ fun ReadAlertArchiveScreen(
     onRefresh: () -> Unit,
     onClearAll: () -> Unit = {},
     onClearSelected: (List<Long>) -> Unit = {},
+    onStartTradeJourney: (AlertItem, (Boolean) -> Unit) -> Unit = { _, callback -> callback(false) },
 ) {
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     var selectedAlert by remember { mutableStateOf<AlertItem?>(null) }
     var isSelectionMode by remember { mutableStateOf(false) }
     var selectedAlertIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
@@ -296,6 +301,54 @@ fun ReadAlertArchiveScreen(
                                         style = MaterialTheme.typography.labelSmall,
                                         color = Color.Gray,
                                     )
+                                    if (!isSelectionMode) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            Button(
+                                                onClick = {
+                                                    onStartTradeJourney(alert) {}
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                                enabled = alert.read_archive_event_id != null || alert.id > 0L,
+                                            ) {
+                                                Text("거래 기록 시작")
+                                            }
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            val resolvedUrl = resolveReadArchiveUrl(alert)
+                                            val resolvedImageUrl = resolveReadArchiveImageUrl(alert)
+                                            Button(
+                                                onClick = {
+                                                    if (!resolvedUrl.isNullOrBlank()) {
+                                                        clipboardManager.setText(AnnotatedString(resolvedUrl))
+                                                        Toast.makeText(context, "URL을 복사했어요.", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                                enabled = !resolvedUrl.isNullOrBlank(),
+                                            ) {
+                                                Text("URL 복사")
+                                            }
+                                            Button(
+                                                onClick = {
+                                                    if (!resolvedImageUrl.isNullOrBlank()) {
+                                                        clipboardManager.setText(AnnotatedString(resolvedImageUrl))
+                                                        Toast.makeText(context, "이미지 URL을 복사했어요.", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                                enabled = !resolvedImageUrl.isNullOrBlank(),
+                                            ) {
+                                                Text("이미지 URL 복사")
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

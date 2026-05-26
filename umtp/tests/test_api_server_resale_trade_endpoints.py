@@ -63,6 +63,72 @@ class ApiServerResaleTradeEndpointsTest(unittest.TestCase):
         self.assertEqual(kwargs.get("updates", {}).get("money_sent_at"), "2026-05-25 12:30:00")
 
     @patch(
+        "src.api_server.list_purchased_resale_trade_journeys",
+        return_value={"ok": True, "items": [{"id": 9}]},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_get_purchased_resale_trade_journeys(self, _mock_register, mock_list):
+        response = api_server.get_purchased_resale_trade_journeys("boongtol", limit=55)
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("items"), [{"id": 9}])
+        mock_list.assert_called_once_with(user_id="boongtol", limit=55)
+
+    @patch(
+        "src.api_server.start_resale_trade_journey_from_url",
+        return_value={"ok": True, "trade_journey_id": 101, "existing": False},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_start_trade_journey_from_url_endpoint(self, _mock_register, mock_start):
+        request = api_server.TradeJourneyStartFromUrlRequest(
+            user_id="boongtol",
+            url="https://web.joongna.com/product/123",
+        )
+
+        response = api_server.start_trade_journey_from_url(request)
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("trade_journey_id"), 101)
+        mock_start.assert_called_once_with(
+            user_id="boongtol",
+            url="https://web.joongna.com/product/123",
+        )
+
+    @patch(
+        "src.api_server.start_resale_trade_journey_from_alert",
+        return_value={"ok": True, "trade_journey_id": 102, "existing": True},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_start_trade_journey_from_alert_endpoint(self, _mock_register, mock_start):
+        request = api_server.TradeJourneyStartFromAlertRequest(
+            user_id="boongtol",
+            alert_event_id=77,
+        )
+
+        response = api_server.start_trade_journey_from_alert(request)
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("trade_journey_id"), 102)
+        mock_start.assert_called_once_with(user_id="boongtol", alert_event_id=77)
+
+    @patch(
+        "src.api_server.start_resale_trade_journey_from_read_archive",
+        return_value={"ok": True, "trade_journey_id": 103, "existing": False},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_start_trade_journey_from_read_archive_endpoint(self, _mock_register, mock_start):
+        request = api_server.TradeJourneyStartFromReadArchiveRequest(
+            user_id="boongtol",
+            read_archive_event_id=88,
+        )
+
+        response = api_server.start_trade_journey_from_read_archive(request)
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("trade_journey_id"), 103)
+        mock_start.assert_called_once_with(user_id="boongtol", read_archive_event_id=88)
+
+    @patch(
         "src.api_server.upsert_resale_trade_after_purchase",
         return_value={"ok": True, "id": 11, "current_stage": "INSPECTED"},
     )

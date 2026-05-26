@@ -40,6 +40,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
   - API: `POST /resale-trades/after-purchase/upsert`, `POST /resale-trades/after-resale/upsert`
   - CLI: `python src/run_resale_after_purchase_umtp.py`, `python src/run_resale_after_resale_umtp.py`
 - 위 입력 경로는 `source + product_id` 또는 `url`만으로도 row를 만들고, 기존 `analysis_jobs/search_results/alert_events/joongna_seen_products` 기반으로 가능한 필드를 자동 채웁니다.
+- 정책: “사용자는 product_id를 직접 입력하지 않는다. 거래 기록은 URL, 알림 카드, 읽음 보관함 카드에서 시작한다.”
 
 - `data/sample_listings.csv`: 0.5에서 테스트 매물 목록을 읽는 CSV 입력 파일입니다.
 - `data/sample_crawled_listings.json`: 0.6에서 크롤링 결과 형태의 테스트 매물 목록을 읽는 JSON 입력 파일입니다.

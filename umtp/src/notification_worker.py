@@ -272,6 +272,58 @@ def _resolve_listing_image_url(product_id, image_url_map):
     return _normalize_optional_text((image_url_map or {}).get(str(seq)))
 
 
+def _fetch_latest_read_archive_event_ids(cursor, *, user_id, alert_event_ids):
+    if cursor is None or not hasattr(cursor, "execute") or not hasattr(cursor, "fetchall"):
+        return {}
+
+    normalized_user_id = _normalize_optional_text(user_id)
+    if normalized_user_id is None:
+        return {}
+
+    normalized_ids = []
+    for value in alert_event_ids or []:
+        parsed = _safe_int(value)
+        if parsed is None or parsed <= 0:
+            continue
+        if parsed not in normalized_ids:
+            normalized_ids.append(parsed)
+
+    if not normalized_ids:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(normalized_ids))
+    try:
+        cursor.execute(
+            f"""
+            SELECT id, alert_event_id
+            FROM alert_read_archive_events
+            WHERE user_id = %s
+              AND alert_event_id IN ({placeholders})
+            ORDER BY created_at DESC, id DESC
+            """,
+            tuple([normalized_user_id, *normalized_ids]),
+        )
+    except Exception as exc:
+        lowered = str(exc).lower()
+        if "unknown table" in lowered or "doesn't exist" in lowered or "unknown column" in lowered:
+            return {}
+        raise
+
+    rows = cursor.fetchall() or []
+    latest_map = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        archive_id = _safe_int(row.get("id"))
+        alert_event_id = _safe_int(row.get("alert_event_id"))
+        if archive_id is None or archive_id <= 0 or alert_event_id is None or alert_event_id <= 0:
+            continue
+        if alert_event_id not in latest_map:
+            latest_map[alert_event_id] = archive_id
+
+    return latest_map
+
+
 def _fetch_listing_image_url_by_product_id(product_id):
     normalized_seq = _coerce_product_seq(product_id)
     if normalized_seq is None:
@@ -2328,6 +2380,11 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
             cursor,
             [row.get("product_id") for row in rows],
         )
+        read_archive_event_id_map = _fetch_latest_read_archive_event_ids(
+            cursor,
+            user_id=normalized_user_id,
+            alert_event_ids=[row.get("id") for row in rows],
+        )
 
         items = []
         for row in rows:
@@ -2406,6 +2463,8 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
             items.append(
                 {
                     "id": int(row.get("id")),
+                    "alert_event_id": int(row.get("id")),
+                    "read_archive_event_id": read_archive_event_id_map.get(int(row.get("id"))),
                     "user_id": row.get("user_id"),
                     "watch_rule_id": row.get("watch_rule_id"),
                     "analysis_job_id": row.get("analysis_job_id"),

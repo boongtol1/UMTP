@@ -164,7 +164,9 @@ fun MainTabScreen(
     val isSubmittingResaleTrade by viewModel.isSubmittingResaleTrade.collectAsState()
     val selectedResaleJourney by viewModel.selectedResaleJourney.collectAsState()
     val completedResaleJourneys by viewModel.completedResaleJourneys.collectAsState()
+    val purchasedResaleJourneys by viewModel.purchasedResaleJourneys.collectAsState()
     val isLoadingCompletedResaleJourneys by viewModel.isLoadingCompletedResaleJourneys.collectAsState()
+    val isLoadingPurchasedResaleJourneys by viewModel.isLoadingPurchasedResaleJourneys.collectAsState()
     val settingsRefreshStatusMessage by viewModel.settingsRefreshStatusMessage.collectAsState()
     val lastSettingsRefreshLabel by viewModel.lastSettingsRefreshLabel.collectAsState()
     val refreshingRuleIds by viewModel.refreshingRuleIds.collectAsState()
@@ -215,7 +217,7 @@ fun MainTabScreen(
                     selected = selectedTab == 2,
                     onClick = {
                         selectedTab = 2
-                        viewModel.loadCompletedResaleJourneys()
+                        viewModel.loadResaleJourneyHistory()
                     },
                     icon = { Icon(Icons.Default.Edit, contentDescription = "Resale Input") },
                     label = { Text("거래 입력") }
@@ -247,6 +249,14 @@ fun MainTabScreen(
                         )
                     },
                     onMarkAllAsRead = { viewModel.markAllAlertsAsRead(userId) },
+                    onStartTradeJourney = { alertEventId, completion ->
+                        viewModel.startTradeJourneyFromAlert(alertEventId) { success ->
+                            if (success) {
+                                selectedTab = 2
+                            }
+                            completion(success)
+                        }
+                    },
                     initialTargetAlertId = targetAlertId,
                     onTargetAlertFound = { targetAlertId = null }
                 )
@@ -261,17 +271,27 @@ fun MainTabScreen(
                     onClearSelected = { alertIds ->
                         viewModel.clearSelectedReadArchive(userId, alertIds)
                     },
+                    onStartTradeJourney = { alert, completion ->
+                        viewModel.startTradeJourneyFromReadArchive(
+                            readArchiveEventId = alert.read_archive_event_id,
+                            fallbackAlertEventId = alert.alert_event_id ?: alert.id,
+                        ) { success ->
+                            if (success) {
+                                selectedTab = 2
+                            }
+                            completion(success)
+                        }
+                    },
                 )
                 2 -> ResaleTradeInputScreen(
                     selectedJourney = selectedResaleJourney,
                     completedJourneys = completedResaleJourneys,
+                    purchasedJourneys = purchasedResaleJourneys,
                     isSubmitting = isSubmittingResaleTrade,
                     isLoadingCompleted = isLoadingCompletedResaleJourneys,
-                    onCreateFromProduct = { source, productId ->
-                        viewModel.createResaleTradeJourneyFromProduct(
-                            source = source,
-                            productId = productId,
-                        )
+                    isLoadingPurchased = isLoadingPurchasedResaleJourneys,
+                    onStartFromUrl = { url ->
+                        viewModel.startTradeJourneyFromUrl(url)
                     },
                     onSubmitPurchase = { updates ->
                         viewModel.patchSelectedResaleJourneyPurchase(updates)
@@ -282,8 +302,11 @@ fun MainTabScreen(
                     onSubmitSold = { updates ->
                         viewModel.patchSelectedResaleJourneySold(updates)
                     },
-                    onLoadCompleted = {
-                        viewModel.loadCompletedResaleJourneys()
+                    onLoadHistory = {
+                        viewModel.loadResaleJourneyHistory()
+                    },
+                    onSelectPurchasedJourney = { row ->
+                        viewModel.selectResaleJourney(row)
                     },
                     onDeleteSelectedCompleted = { selectedIds ->
                         viewModel.deleteSelectedCompletedResaleJourneys(selectedIds)

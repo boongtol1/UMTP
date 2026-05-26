@@ -36,11 +36,6 @@ private enum class ResaleInputMode {
     RESALE,
 }
 
-private fun String.toOptionalText(): String? {
-    val normalized = trim()
-    return if (normalized.isEmpty()) null else normalized
-}
-
 private fun formatWon(value: Int?): String {
     if (value == null) {
         return "-"
@@ -52,6 +47,8 @@ private data class LabeledInputField(
     val key: String,
     val label: String,
     val helperText: String? = null,
+    val trueLabel: String? = null,
+    val falseLabel: String? = null,
 )
 
 private val AUTO_DISABLED_FIELDS = listOf(
@@ -113,11 +110,15 @@ private val EXACT_VERIFICATION_FIELDS = listOf(
         "activation_lock_off",
         "활성화 잠금 해제 확인",
         "이전 Apple ID 잠금 없음",
+        trueLabel = "잠금 없음",
+        falseLabel = "잠금 있음",
     ),
     LabeledInputField(
         "mdm_lock_none",
         "MDM 잠금 없음 확인",
         "회사/학교 관리 기기 아님",
+        trueLabel = "MDM 없음",
+        falseLabel = "MDM 있음",
     ),
 )
 
@@ -137,6 +138,7 @@ private val PURCHASE_INPUT_FIELDS = listOf(
     "payment_method",
     "money_sent_at",
     "purchase_account_number",
+    "sale_platform",
     "inspection_notes",
     "final_result_notes",
     "current_stage",
@@ -159,7 +161,6 @@ private val RESALE_INPUT_FIELDS = listOf(
     "sale_price_krw",
     "money_received_at",
     "resale_account_number",
-    "sale_platform",
     "final_shipping_cost_krw",
     "platform_fee_krw",
     "refund_or_claim",
@@ -295,7 +296,9 @@ private fun ReadOnlyFieldCard(
     Text(text = "자동채움 정보", style = MaterialTheme.typography.titleMedium)
 
     val baseSpecKeys = PRODUCT_BASE_SPEC_FIELDS.map { it.key }.toSet()
+    val hiddenIdentityKeys = setOf("source", "product_id")
     val visibleReadonlyFields = AUTO_DISABLED_FIELDS
+        .filterNot { it in hiddenIdentityKeys }
         .filterNot { it in baseSpecKeys }
         .filter { key -> !rowValues[key].isNullOrBlank() }
 
@@ -345,33 +348,36 @@ private fun ExactVerificationInputSection(
         text = "판매자에게 직접 확인한 정보만 입력하세요. 모르는 경우 비워둘 수 있습니다.",
         style = MaterialTheme.typography.bodySmall,
     )
+    Spacer(modifier = Modifier.height(4.dp))
 
     EXACT_VERIFICATION_FIELDS.forEach { field ->
         if (field.key in BOOL_INPUT_FIELDS) {
             val normalizedValue = parseInputValue(field.key, values[field.key] ?: "") as? Boolean
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(text = field.label, style = MaterialTheme.typography.bodyLarge)
+            if (!field.helperText.isNullOrBlank()) {
+                Text(text = field.helperText, style = MaterialTheme.typography.bodySmall)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(
                     selected = normalizedValue == true,
                     onClick = { values[field.key] = "true" },
                     enabled = !isSubmitting,
-                    label = { Text("${field.label} - 예") },
+                    label = { Text(field.trueLabel ?: "예") },
                 )
                 FilterChip(
                     selected = normalizedValue == false,
                     onClick = { values[field.key] = "false" },
                     enabled = !isSubmitting,
-                    label = { Text("${field.label} - 아니오") },
+                    label = { Text(field.falseLabel ?: "아니오") },
                 )
                 FilterChip(
                     selected = normalizedValue == null,
                     onClick = { values[field.key] = "" },
                     enabled = !isSubmitting,
-                    label = { Text("${field.label} - 미입력") },
+                    label = { Text("미입력") },
                 )
             }
-            if (!field.helperText.isNullOrBlank()) {
-                Text(text = field.helperText, style = MaterialTheme.typography.bodySmall)
-            }
+            Spacer(modifier = Modifier.height(2.dp))
             return@forEach
         }
 
@@ -391,24 +397,37 @@ private fun ExactVerificationInputSection(
     }
 }
 
+private fun stageLabel(raw: String?): String {
+    return when (raw?.trim()?.uppercase()) {
+        "DISCOVERED" -> "발견됨"
+        "INSPECTED" -> "구매/점검"
+        "RESALE_LISTED" -> "재판매 등록"
+        "SOLD" -> "판매 완료"
+        "KEEP" -> "보유(KEEP)"
+        null -> "-"
+        else -> raw ?: "-"
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ResaleTradeInputScreen(
     selectedJourney: ResaleTradeJourneyRow?,
     completedJourneys: List<ResaleTradeJourneyRow>,
+    purchasedJourneys: List<ResaleTradeJourneyRow>,
     isSubmitting: Boolean,
     isLoadingCompleted: Boolean,
-    onCreateFromProduct: (source: String, productId: String) -> Unit,
+    isLoadingPurchased: Boolean,
+    onStartFromUrl: (url: String) -> Unit,
     onSubmitPurchase: (updates: Map<String, Any?>) -> Unit,
     onSubmitResale: (updates: Map<String, Any?>) -> Unit,
     onSubmitSold: (updates: Map<String, Any?>) -> Unit,
-    onLoadCompleted: () -> Unit,
+    onLoadHistory: () -> Unit,
+    onSelectPurchasedJourney: (ResaleTradeJourneyRow) -> Unit,
     onDeleteSelectedCompleted: (Set<Long>) -> Unit,
     onDeleteAllCompleted: () -> Unit,
 ) {
-    var selectedSource by remember { mutableStateOf("joongna") }
-    var customSource by remember { mutableStateOf("") }
-    var productId by remember { mutableStateOf("") }
+    var startUrl by remember { mutableStateOf("") }
     var inputMode by remember { mutableStateOf(ResaleInputMode.PURCHASE) }
 
     val manualInputs = remember { mutableStateMapOf<String, String>() }
@@ -423,8 +442,6 @@ fun ResaleTradeInputScreen(
 
     var selectedCompletedIds by remember { mutableStateOf(setOf<Long>()) }
 
-    val sourceOptions = listOf("joongna", "bunjang", "daangn", "기타")
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -437,48 +454,24 @@ fun ResaleTradeInputScreen(
             style = MaterialTheme.typography.titleLarge,
         )
         Text(
-            text = "source + product_id 조회 후 자동채움 정보를 확인하고, 필요한 값만 입력해 저장합니다.",
+            text = "URL 또는 알림 카드에서 거래 기록을 시작한 뒤, 필요한 값만 입력해 저장합니다.",
             style = MaterialTheme.typography.bodySmall,
         )
 
-        Text(text = "source + product_id 조회", style = MaterialTheme.typography.titleMedium)
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            sourceOptions.forEach { option ->
-                FilterChip(
-                    selected = selectedSource == option,
-                    onClick = { selectedSource = option },
-                    label = { Text(option) },
-                )
-            }
-        }
-
-        if (selectedSource == "기타") {
-            OutlinedTextField(
-                value = customSource,
-                onValueChange = { customSource = it },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSubmitting,
-                singleLine = true,
-                label = { Text("기타 source") },
-                placeholder = { Text("예: naver-cafe") },
-            )
-        }
-
+        Text(text = "URL로 거래 기록 시작", style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(
-            value = productId,
-            onValueChange = { productId = it },
+            value = startUrl,
+            onValueChange = { startUrl = it },
             modifier = Modifier.fillMaxWidth(),
             enabled = !isSubmitting,
             singleLine = true,
-            label = { Text("product_id") },
-            placeholder = { Text("예: 228826879") },
+            label = { Text("중고나라 URL") },
+            placeholder = { Text("예: https://web.joongna.com/product/228826879") },
         )
 
         Button(
             onClick = {
-                val sourceValue = if (selectedSource == "기타") customSource.toOptionalText() else selectedSource
-                onCreateFromProduct(sourceValue ?: "", productId)
+                onStartFromUrl(startUrl)
             },
             enabled = !isSubmitting,
             modifier = Modifier.fillMaxWidth(),
@@ -486,9 +479,17 @@ fun ResaleTradeInputScreen(
             if (isSubmitting) {
                 CircularProgressIndicator(strokeWidth = 2.dp)
             } else {
-                Text("자동으로 불러오기")
+                Text("거래 기록 시작")
             }
         }
+
+        val sourceText = selectedJourney?.source?.takeIf { it.isNotBlank() } ?: "-"
+        val productIdText = selectedJourney?.product_id?.takeIf { it.isNotBlank() } ?: "-"
+        Text(
+            text = "내부 식별값: ${sourceText} / ${productIdText}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
@@ -591,10 +592,10 @@ fun ResaleTradeInputScreen(
         Text(text = "완료된 거래", style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
-                onClick = onLoadCompleted,
-                enabled = !isLoadingCompleted,
+                onClick = onLoadHistory,
+                enabled = !isLoadingCompleted && !isLoadingPurchased,
             ) {
-                if (isLoadingCompleted) {
+                if (isLoadingCompleted || isLoadingPurchased) {
                     CircularProgressIndicator(strokeWidth = 2.dp)
                 } else {
                     Text("목록 새로고침")
@@ -611,6 +612,10 @@ fun ResaleTradeInputScreen(
             }
         }
 
+        if (completedJourneys.isEmpty()) {
+            Text(text = "완료된 거래가 없습니다.")
+        }
+
         completedJourneys.forEach { item ->
             val itemId = item.id ?: return@forEach
             val selected = selectedCompletedIds.contains(itemId)
@@ -625,7 +630,27 @@ fun ResaleTradeInputScreen(
                 },
                 label = {
                     Text(
-                        "#${item.id} ${item.title ?: "(제목없음)"} / ${formatWon(item.sale_price_krw)} / ROI ${item.roi_percent ?: "-"}%"
+                        "#${item.id} [${stageLabel(item.current_stage)}] ${item.title ?: "(제목없음)"} / ${formatWon(item.sale_price_krw)} / ROI ${item.roi_percent ?: "-"}%"
+                    )
+                },
+            )
+        }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+        Text(text = "구매 거래 내역 (KEEP 포함)", style = MaterialTheme.typography.titleMedium)
+        if (purchasedJourneys.isEmpty()) {
+            Text(text = "구매 기록이 없습니다.")
+        }
+        purchasedJourneys.forEach { item ->
+            val rowId = item.id ?: return@forEach
+            val isSelectedJourney = selectedJourney?.id == rowId
+            FilterChip(
+                selected = isSelectedJourney,
+                onClick = { onSelectPurchasedJourney(item) },
+                label = {
+                    Text(
+                        "#${item.id} [${stageLabel(item.current_stage)}] ${item.title ?: "(제목없음)"} / 구매 ${formatWon(item.purchase_price_krw)}"
                     )
                 },
             )

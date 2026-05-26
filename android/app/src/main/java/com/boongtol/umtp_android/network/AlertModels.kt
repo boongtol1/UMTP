@@ -2,6 +2,8 @@ package com.boongtol.umtp_android.network
 
 data class AlertItem(
     val id: Long = 0L,
+    val alert_event_id: Long? = null,
+    val read_archive_event_id: Long? = null,
     val user_id: String? = null,
     val title: String? = null,
     val message: String? = null,
