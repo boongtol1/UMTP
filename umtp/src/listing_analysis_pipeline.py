@@ -832,11 +832,7 @@ def maybe_create_alert_event(
     normalized_sort_date = _coerce_datetime(sort_date)
     normalized_change_fingerprint = _normalize_optional_text(change_fingerprint)
     normalized_trigger_reason = _normalize_optional_text(trigger_reason)
-    identity_scope = (
-        "user_product"
-        if _is_content_change_trigger_reason(normalized_trigger_reason)
-        else "watch_rule"
-    )
+    identity_scope = "watch_rule"
     if normalized_change_fingerprint is None:
         normalized_change_fingerprint = _build_alert_change_fingerprint(
             trigger_reason=normalized_trigger_reason,

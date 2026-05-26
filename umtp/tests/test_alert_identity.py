@@ -110,7 +110,7 @@ class AlertIdentityTest(unittest.TestCase):
         self.assertEqual(result.get("reason"), "duplicate_identity_alert")
         self.assertEqual(result.get("alert_id"), 17)
 
-    def test_content_change_family_dedupe_lookup_ignores_watch_rule_id(self):
+    def test_content_change_family_dedupe_lookup_keeps_watch_rule_id(self):
         fake_cursor = _FakeCursor(duplicate_row=None, lastrowid=11)
 
         maybe_create_alert_event(
@@ -132,7 +132,7 @@ class AlertIdentityTest(unittest.TestCase):
 
         first_query = " ".join((fake_cursor.executed[0][0] or "").split()).lower()
         self.assertIn("from alert_events", first_query)
-        self.assertNotIn("watch_rule_id", first_query)
+        self.assertIn("watch_rule_id", first_query)
 
     def test_non_content_changed_dedupe_lookup_keeps_watch_rule_id(self):
         fake_cursor = _FakeCursor(duplicate_row=None, lastrowid=12)
