@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -30,6 +31,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,8 +68,19 @@ fun AlertFeedScreen(
     onTargetAlertFound: () -> Unit = {},
 ) {
     var selectedAlert by remember { mutableStateOf<AlertItem?>(null) }
+    var isSelectionMode by remember { mutableStateOf(false) }
+    var selectedAlertIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var isMarkingSelectedRead by remember { mutableStateOf(false) }
+    val visibleAlertIds = remember(alerts) { collectVisibleAlertIds(alerts) }
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+
+    LaunchedEffect(visibleAlertIds) {
+        selectedAlertIds = selectedAlertIds.filterTo(mutableSetOf()) { it in visibleAlertIds }
+        if (selectedAlertIds.isEmpty()) {
+            isSelectionMode = false
+        }
+    }
 
     LaunchedEffect(initialTargetAlertId, alerts) {
         if (initialTargetAlertId != null && alerts.isNotEmpty()) {
@@ -129,9 +142,78 @@ fun AlertFeedScreen(
                 fontWeight = FontWeight.Bold,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(
+                    onClick = {
+                        isSelectionMode = !isSelectionMode
+                        if (!isSelectionMode) {
+                            selectedAlertIds = emptySet()
+                        }
+                    },
+                    enabled = visibleAlertIds.isNotEmpty() && !isMarkingSelectedRead,
+                ) {
+                    Text(if (isSelectionMode) "선택 해제" else "선택")
+                }
+                if (isSelectionMode) {
+                    val isAllVisibleSelected = visibleAlertIds.isNotEmpty() &&
+                        selectedAlertIds.size == visibleAlertIds.size &&
+                        selectedAlertIds.containsAll(visibleAlertIds)
+                    TextButton(
+                        onClick = {
+                            selectedAlertIds = if (isAllVisibleSelected) {
+                                emptySet()
+                            } else {
+                                visibleAlertIds
+                            }
+                        },
+                        enabled = visibleAlertIds.isNotEmpty() && !isMarkingSelectedRead,
+                    ) {
+                        Text(if (isAllVisibleSelected) "전체 해제" else "전체 선택")
+                    }
+                }
+                TextButton(
+                    onClick = {
+                        if (selectedAlertIds.isEmpty()) {
+                            return@TextButton
+                        }
+                        val targetIds = selectedAlertIds.toList()
+                        var successCount = 0
+                        isMarkingSelectedRead = true
+
+                        fun markNext(index: Int) {
+                            if (index >= targetIds.size) {
+                                isMarkingSelectedRead = false
+                                selectedAlertIds = emptySet()
+                                isSelectionMode = false
+                                onRefresh()
+                                Toast.makeText(
+                                    context,
+                                    "${successCount}건 읽음 처리했어요.",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                                return
+                            }
+
+                            onMarkAlertRead(targetIds[index]) { success ->
+                                if (success) {
+                                    successCount += 1
+                                }
+                                markNext(index + 1)
+                            }
+                        }
+
+                        markNext(0)
+                    },
+                    enabled = isSelectionMode && selectedAlertIds.isNotEmpty() && !isMarkingSelectedRead,
+                ) {
+                    if (isMarkingSelectedRead) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("선택 읽음")
+                    }
+                }
                 IconButton(
                     onClick = onMarkAllAsRead,
-                    enabled = !isMarkingAllRead && alerts.isNotEmpty(),
+                    enabled = !isMarkingAllRead && alerts.isNotEmpty() && !isMarkingSelectedRead,
                 ) {
                     if (isMarkingAllRead) {
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -190,10 +272,22 @@ fun AlertFeedScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(alerts) { alert ->
+                val isSelectable = alert.id > 0L
+                val isSelected = selectedAlertIds.contains(alert.id)
                 AlertCard(
                     alert = alert,
                     onOpenDetails = {
-                        selectedAlert = alert
+                        if (isSelectionMode) {
+                            if (isSelectable) {
+                                selectedAlertIds = if (isSelected) {
+                                    selectedAlertIds - alert.id
+                                } else {
+                                    selectedAlertIds + alert.id
+                                }
+                            }
+                        } else {
+                            selectedAlert = alert
+                        }
                     },
                     onStartTradeJourney = {
                         onStartTradeJourney(alert.id) { success ->
@@ -216,6 +310,17 @@ fun AlertFeedScreen(
                             Toast.makeText(context, "이미지 URL을 복사했어요.", Toast.LENGTH_SHORT).show()
                         }
                     },
+                    isSelectionMode = isSelectionMode,
+                    isSelected = isSelected,
+                    onSelectionChange = { checked ->
+                        if (isSelectable) {
+                            selectedAlertIds = if (checked) {
+                                selectedAlertIds + alert.id
+                            } else {
+                                selectedAlertIds - alert.id
+                            }
+                        }
+                    },
                 )
             }
         }
@@ -229,6 +334,9 @@ fun AlertCard(
     onStartTradeJourney: () -> Unit,
     onCopyUrl: () -> Unit,
     onCopyImageUrl: () -> Unit,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onSelectionChange: (Boolean) -> Unit = {},
 ) {
     val listingImageUrl = alert.listing_image_url?.takeIf { it.isNotBlank() }
     val isReferenceNotice = isConditionChangeCandidateNotice(alert)
@@ -262,6 +370,12 @@ fun AlertCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (isSelectionMode) {
+                    Checkbox(
+                        checked = isSelected,
+                        onCheckedChange = onSelectionChange,
+                    )
+                }
                 Text(
                     text = titleText,
                     style = MaterialTheme.typography.titleMedium,
@@ -347,35 +461,37 @@ fun AlertCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = onStartTradeJourney,
-                    modifier = Modifier.weight(1f),
-                    enabled = alert.id > 0L,
+            if (!isSelectionMode) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("거래 기록 시작")
+                    Button(
+                        onClick = onStartTradeJourney,
+                        modifier = Modifier.weight(1f),
+                        enabled = alert.id > 0L,
+                    ) {
+                        Text("거래 기록 시작")
+                    }
                 }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = onCopyUrl,
-                    modifier = Modifier.weight(1f),
-                    enabled = !resolvedUrl.isNullOrBlank(),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("URL 복사")
-                }
-                Button(
-                    onClick = onCopyImageUrl,
-                    modifier = Modifier.weight(1f),
-                    enabled = !listingImageUrl.isNullOrBlank(),
-                ) {
-                    Text("이미지 URL 복사")
+                    Button(
+                        onClick = onCopyUrl,
+                        modifier = Modifier.weight(1f),
+                        enabled = !resolvedUrl.isNullOrBlank(),
+                    ) {
+                        Text("URL 복사")
+                    }
+                    Button(
+                        onClick = onCopyImageUrl,
+                        modifier = Modifier.weight(1f),
+                        enabled = !listingImageUrl.isNullOrBlank(),
+                    ) {
+                        Text("이미지 URL 복사")
+                    }
                 }
             }
 
@@ -564,6 +680,16 @@ private fun resolveAlertUrl(alert: AlertItem): String? {
 
 private fun resolveAlertImageUrl(alert: AlertItem): String? {
     return alert.listing_image_url?.takeIf { it.isNotBlank() }
+}
+
+private fun collectVisibleAlertIds(alerts: List<AlertItem>): Set<Long> {
+    val ids = mutableSetOf<Long>()
+    alerts.forEach { alert ->
+        if (alert.id > 0L) {
+            ids.add(alert.id)
+        }
+    }
+    return ids
 }
 
 private fun resolveAlertTitle(alert: AlertItem): String {
