@@ -214,7 +214,10 @@ data class ResaleTradeJourneyRow(
 data class ResaleTradeUpsertResponse(
     val ok: Boolean,
     val id: Long? = null,
+    val source: String? = null,
+    val product_id: String? = null,
     val current_stage: String? = null,
+    val row: ResaleTradeJourneyRow? = null,
     val reason: String? = null,
     val message: String? = null,
 )

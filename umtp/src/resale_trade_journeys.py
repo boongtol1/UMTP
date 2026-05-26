@@ -1100,6 +1100,65 @@ def _hydrate_row_by_product(
     return _load_row_detail(cursor, row_id)
 
 
+def _build_prefill_row_by_product(
+    cursor,
+    *,
+    user_id: str,
+    source: str,
+    product_id: str,
+    seed_values: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    alert_event = _build_alert_mapping(_fetch_latest_alert_event(cursor, user_id=user_id, source=source, product_id=product_id))
+    analysis_job = _build_analysis_job_mapping(_fetch_latest_analysis_job(cursor, user_id=user_id, source=source, product_id=product_id))
+    seen_product = _build_seen_product_mapping(_fetch_latest_seen_product(cursor, product_id=product_id))
+    search_result = _build_search_result_mapping(_fetch_latest_search_result(cursor, product_id=product_id), source=source)
+    listing_analysis = _build_listing_analysis_mapping(_fetch_latest_listing_analysis(cursor, source=source, product_id=product_id))
+
+    normalized_seed_values: dict[str, Any] = {}
+    for field, value in dict(seed_values or {}).items():
+        normalized_value = _normalize_for_column(field, value)
+        if normalized_value is not None:
+            normalized_seed_values[field] = normalized_value
+
+    normalized_seed_values.update(
+        {
+            "user_id": user_id,
+            "source": source,
+            "product_id": product_id,
+        }
+    )
+
+    base_row: dict[str, Any] = {
+        "id": None,
+        "user_id": user_id,
+        "source": source,
+        "product_id": product_id,
+        "current_stage": STAGE_DISCOVERED,
+    }
+
+    merged_prefill = _merge_by_priority(
+        user_values=normalized_seed_values,
+        existing_row=base_row,
+        source_candidates=[
+            alert_event,
+            analysis_job,
+            seen_product,
+            search_result,
+            listing_analysis,
+        ],
+        writable_columns=set(AUTO_HYDRATE_FIELDS),
+    )
+
+    prefill_row = dict(base_row)
+    prefill_row.update(merged_prefill)
+    prefill_row["source"] = source
+    prefill_row["product_id"] = product_id
+    prefill_row["user_id"] = user_id
+    if _is_blank(prefill_row.get("current_stage")):
+        prefill_row["current_stage"] = STAGE_DISCOVERED
+    return prefill_row
+
+
 def hydrate_resale_trade_journey_by_product(
     user_id: str,
     source: str,
@@ -1254,6 +1313,81 @@ def create_or_hydrate_resale_trade_journey_from_product(
             connection.close()
 
 
+def start_or_prefill_resale_trade_journey_from_product(
+    *,
+    user_id: str,
+    source: str,
+    product_id: str,
+    seed_values: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    normalized_user_id, normalized_source, normalized_product_id = _normalize_identity(
+        user_id=user_id,
+        source=source,
+        product_id=product_id,
+    )
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        _, writable_columns = _get_resale_columns(cursor)
+
+        existing_row = _fetch_journey_by_key(
+            cursor,
+            user_id=normalized_user_id,
+            source=normalized_source,
+            product_id=normalized_product_id,
+            for_update=True,
+        )
+        existing_row_id = _normalize_optional_int((existing_row or {}).get("id"))
+
+        if existing_row_id is not None and existing_row_id > 0:
+            hydrated_row = _hydrate_row_by_product(
+                cursor,
+                row=existing_row,
+                user_id=normalized_user_id,
+                source=normalized_source,
+                product_id=normalized_product_id,
+                user_values=seed_values or {},
+                writable_columns=writable_columns,
+            )
+            connection.commit()
+            return {
+                "ok": True,
+                "existing": True,
+                "trade_journey_id": existing_row_id,
+                "id": existing_row_id,
+                "source": normalized_source,
+                "product_id": normalized_product_id,
+                "current_stage": hydrated_row.get("current_stage"),
+                "row": hydrated_row,
+            }
+
+        prefill_row = _build_prefill_row_by_product(
+            cursor,
+            user_id=normalized_user_id,
+            source=normalized_source,
+            product_id=normalized_product_id,
+            seed_values=seed_values,
+        )
+        return {
+            "ok": True,
+            "existing": False,
+            "trade_journey_id": None,
+            "id": None,
+            "source": normalized_source,
+            "product_id": normalized_product_id,
+            "current_stage": prefill_row.get("current_stage"),
+            "row": prefill_row,
+        }
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
 def start_resale_trade_journey_from_url(*, user_id: str, url: str) -> dict[str, Any]:
     normalized_user_id = _normalize_optional_text(user_id)
     normalized_url = _normalize_optional_text(url)
@@ -1267,7 +1401,7 @@ def start_resale_trade_journey_from_url(*, user_id: str, url: str) -> dict[str, 
         return {"ok": False, "reason": "invalid_product_id"}
 
     source = _infer_source_from_url(normalized_url)
-    result = create_or_hydrate_resale_trade_journey_from_product(
+    result = start_or_prefill_resale_trade_journey_from_product(
         user_id=normalized_user_id,
         source=source,
         product_id=product_id,
@@ -1276,10 +1410,7 @@ def start_resale_trade_journey_from_url(*, user_id: str, url: str) -> dict[str, 
             "source": source,
             "product_id": product_id,
         },
-        include_existing=True,
     )
-    if result.get("ok"):
-        result.setdefault("trade_journey_id", result.get("id"))
     return result
 
 
@@ -1322,15 +1453,12 @@ def start_resale_trade_journey_from_alert(*, user_id: str, alert_event_id: int) 
     seed_values["source"] = source
     seed_values["product_id"] = product_id
 
-    result = create_or_hydrate_resale_trade_journey_from_product(
+    result = start_or_prefill_resale_trade_journey_from_product(
         user_id=normalized_user_id,
         source=source,
         product_id=product_id,
         seed_values=seed_values,
-        include_existing=True,
     )
-    if result.get("ok"):
-        result.setdefault("trade_journey_id", result.get("id"))
     return result
 
 
@@ -1396,15 +1524,12 @@ def start_resale_trade_journey_from_read_archive(*, user_id: str, read_archive_e
     seed_values["source"] = source
     seed_values["product_id"] = product_id
 
-    result = create_or_hydrate_resale_trade_journey_from_product(
+    result = start_or_prefill_resale_trade_journey_from_product(
         user_id=normalized_user_id,
         source=source,
         product_id=product_id,
         seed_values=seed_values,
-        include_existing=True,
     )
-    if result.get("ok"):
-        result.setdefault("trade_journey_id", result.get("id"))
     return result
 
 

@@ -339,10 +339,10 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         self.assertEqual(stage, "INSPECTED")
 
     @patch(
-        "src.resale_trade_journeys.create_or_hydrate_resale_trade_journey_from_product",
+        "src.resale_trade_journeys.start_or_prefill_resale_trade_journey_from_product",
         return_value={"ok": True, "id": 14, "trade_journey_id": 14, "existing": False},
     )
-    def test_start_resale_trade_journey_from_url(self, mock_create):
+    def test_start_resale_trade_journey_from_url(self, mock_start_or_prefill):
         response = journeys.start_resale_trade_journey_from_url(
             user_id="boongtol",
             url="https://web.joongna.com/product/228826879",
@@ -350,7 +350,7 @@ class ResaleTradeJourneysTest(unittest.TestCase):
 
         self.assertTrue(response.get("ok"))
         self.assertEqual(response.get("trade_journey_id"), 14)
-        kwargs = mock_create.call_args.kwargs
+        kwargs = mock_start_or_prefill.call_args.kwargs
         self.assertEqual(kwargs.get("user_id"), "boongtol")
         self.assertEqual(kwargs.get("source"), "joongna")
         self.assertEqual(kwargs.get("product_id"), "228826879")
@@ -358,7 +358,74 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             kwargs.get("seed_values", {}).get("url"),
             "https://web.joongna.com/product/228826879",
         )
-        self.assertTrue(kwargs.get("include_existing"))
+
+    @patch("src.resale_trade_journeys._build_prefill_row_by_product", return_value={"current_stage": journeys.STAGE_DISCOVERED})
+    @patch("src.resale_trade_journeys._hydrate_row_by_product")
+    @patch("src.resale_trade_journeys._fetch_journey_by_key", return_value=None)
+    @patch("src.resale_trade_journeys._get_resale_columns", return_value=(set(), set()))
+    @patch("src.resale_trade_journeys.get_connection")
+    def test_start_or_prefill_does_not_create_row_when_not_existing(
+        self,
+        mock_get_connection,
+        _mock_columns,
+        _mock_fetch,
+        mock_hydrate,
+        _mock_prefill,
+    ):
+        cursor = MagicMock()
+        connection = MagicMock()
+        connection.cursor.return_value = cursor
+        connection.is_connected.return_value = True
+        mock_get_connection.return_value = connection
+
+        response = journeys.start_or_prefill_resale_trade_journey_from_product(
+            user_id="boongtol",
+            source="joongna",
+            product_id="228826879",
+            seed_values={"url": "https://web.joongna.com/product/228826879"},
+        )
+
+        self.assertTrue(response.get("ok"))
+        self.assertFalse(response.get("existing"))
+        self.assertIsNone(response.get("id"))
+        self.assertIsNone(response.get("trade_journey_id"))
+        mock_hydrate.assert_not_called()
+        connection.commit.assert_not_called()
+        cursor.execute.assert_not_called()
+
+    @patch("src.resale_trade_journeys._build_prefill_row_by_product")
+    @patch("src.resale_trade_journeys._hydrate_row_by_product", return_value={"id": 55, "current_stage": journeys.STAGE_INSPECTED})
+    @patch("src.resale_trade_journeys._fetch_journey_by_key", return_value={"id": 55, "source": "joongna", "product_id": "228826879"})
+    @patch("src.resale_trade_journeys._get_resale_columns", return_value=(set(), {"current_stage"}))
+    @patch("src.resale_trade_journeys.get_connection")
+    def test_start_or_prefill_opens_existing_row_without_creating_new(
+        self,
+        mock_get_connection,
+        _mock_columns,
+        _mock_fetch,
+        mock_hydrate,
+        mock_prefill,
+    ):
+        cursor = MagicMock()
+        connection = MagicMock()
+        connection.cursor.return_value = cursor
+        connection.is_connected.return_value = True
+        mock_get_connection.return_value = connection
+
+        response = journeys.start_or_prefill_resale_trade_journey_from_product(
+            user_id="boongtol",
+            source="joongna",
+            product_id="228826879",
+            seed_values={"title": "M2"},
+        )
+
+        self.assertTrue(response.get("ok"))
+        self.assertTrue(response.get("existing"))
+        self.assertEqual(response.get("id"), 55)
+        self.assertEqual(response.get("trade_journey_id"), 55)
+        mock_hydrate.assert_called_once()
+        mock_prefill.assert_not_called()
+        connection.commit.assert_called_once()
 
     def test_build_read_archive_mapping(self):
         mapped = journeys._build_read_archive_mapping(
