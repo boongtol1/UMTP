@@ -160,6 +160,48 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             },
         )
 
+    def test_prepare_sparse_updates_purchase_fields_include_manual_verification_fields(self):
+        updates = journeys._prepare_sparse_updates(
+            {
+                "serial_number": " C02XX0ABC123 ",
+                "model_number": "A3113",
+                "cpu_core_count": "8",
+                "gpu_core_count": "10",
+                "battery_cycle_count": "121",
+                "battery_health_percent": "96",
+                "applecare_status": "2027-01-31",
+                "activation_lock_off": "true",
+                "mdm_lock_none": "false",
+            },
+            journeys.PURCHASE_PATCH_FIELDS,
+            {
+                "serial_number",
+                "model_number",
+                "cpu_core_count",
+                "gpu_core_count",
+                "battery_cycle_count",
+                "battery_health_percent",
+                "applecare_status",
+                "activation_lock_off",
+                "mdm_lock_none",
+            },
+        )
+
+        self.assertEqual(
+            updates,
+            {
+                "serial_number": "C02XX0ABC123",
+                "model_number": "A3113",
+                "cpu_core_count": 8,
+                "gpu_core_count": 10,
+                "battery_cycle_count": 121,
+                "battery_health_percent": 96,
+                "applecare_status": "2027-01-31",
+                "activation_lock_off": True,
+                "mdm_lock_none": False,
+            },
+        )
+
     def test_prepare_sparse_updates_resale_record_allows_sold_fields(self):
         updates = journeys._prepare_sparse_updates(
             {

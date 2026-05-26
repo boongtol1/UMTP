@@ -102,6 +102,7 @@ SPEC_CONTEXT_KEYWORDS = [
 
 RAM_SHORT_TOKENS = ["8g", "16g", "24g", "32g"]
 SSD_SHORT_TOKENS = ["1t", "2t", "4t"]
+SELF_CHECK_SPEC_SOURCE_KEYS = ("모델명", "램 용량", "SSD용량", "CPU종류", "컬러")
 
 _SPEC_WINDOW_SIZE = 20
 
@@ -364,6 +365,18 @@ def _normalize_self_check_fields(self_check_fields):
     return normalized
 
 
+def _collect_self_check_spec_segments(normalized_self_check):
+    if not isinstance(normalized_self_check, dict):
+        return []
+
+    segments = []
+    for key in SELF_CHECK_SPEC_SOURCE_KEYS:
+        value = normalized_self_check.get(key)
+        if value:
+            segments.append(value)
+    return segments
+
+
 def _contains_product_type(text):
     return bool(_detect_product_types(text))
 
@@ -501,7 +514,8 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
     self_check_segments = []
     if isinstance(self_check_text, str) and self_check_text.strip():
         self_check_segments.append(self_check_text)
-    self_check_segments.extend(value for value in normalized_self_check.values() if value)
+    # 가격 판단용 핵심 스펙 키만 자동 파싱 재료로 사용한다.
+    self_check_segments.extend(_collect_self_check_spec_segments(normalized_self_check))
 
     combined_text = _normalize_text(" ".join([title, body_text or "", " ".join(self_check_segments)]))
     normalized_text, removed_noise_fragments = _normalize_for_spec_parsing_with_meta(combined_text)

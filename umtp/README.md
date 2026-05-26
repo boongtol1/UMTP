@@ -798,6 +798,8 @@ mysql -u <DB_USER> -p < sql/add_parser_confidence_columns.sql
 
 - 셀프검수는 `dl/dt/dd` 구조를 key-value로 파싱해 `self_check_fields`로 저장합니다.
 - `self_check_fields` 값(모델명/CPU종류/램 용량/SSD용량)을 제목/본문 파싱보다 우선합니다.
+- 정책: “가격 판단용 핵심 스펙만 자동 파싱하고, 정확 확인 정보는 사용자 수동 입력으로 관리한다.”
+- 정확 확인 정보(`serial_number`, `model_number`, `cpu_core_count`, `gpu_core_count`, `battery_cycle_count`, `battery_health_percent`, `applecare_status`, `activation_lock_off`, `mdm_lock_none`)는 자동 파싱/자동 채움 대상에서 제외합니다.
 - 부족한 항목만 `numeric_candidate_extractor.py`로 제목+본문 숫자 후보를 보조 파싱합니다.
 - 숫자 후보 분리 규칙: 화면 `13/15`, RAM `8/16/24/32`, SSD `256/512/1024/2048/4096`.
 - `1/2/4`는 단독 숫자로 SSD 후보에 넣지 않고 `1TB/2TB/4TB`(`t/테라`)일 때만 `1024/2048/4096`으로 변환합니다.

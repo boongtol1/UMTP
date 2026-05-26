@@ -231,6 +231,20 @@ class SpecParserBaseModelFallbackTest(unittest.TestCase):
         self.assertEqual(parsed["ram_gb"], 16)
         self.assertEqual(parsed["ssd_gb"], 512)
 
+    def test_parse_listing_text_ignores_manual_verification_self_check_keys(self):
+        parsed = parse_listing_text(
+            title="맥북에어 M2",
+            self_check_fields={
+                "배터리 사이클 수": "24",
+                "배터리 성능 최대치 %": "1024",
+                "일련번호": "C02XX0ABC123",
+            },
+        )
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["chip"], "M2")
+        self.assertEqual(parsed["ram_gb"], 8)
+        self.assertEqual(parsed["ssd_gb"], 256)
+
 
 if __name__ == "__main__":
     unittest.main()

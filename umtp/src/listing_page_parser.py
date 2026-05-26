@@ -21,6 +21,23 @@ DEFAULT_HEADERS = {
 }
 SELF_CHECK_PRIORITY_KEYS = ("모델명", "램 용량", "SSD용량", "CPU종류", "컬러")
 SELF_CHECK_IGNORED_TOKENS = ("스펙보기",)
+MANUAL_VERIFICATION_SELF_CHECK_KEYWORDS = (
+    "일련번호",
+    "시리얼",
+    "serial",
+    "모델번호",
+    "modelnumber",
+    "cpu코어",
+    "gpu코어",
+    "배터리사이클",
+    "배터리효율",
+    "배터리성능",
+    "applecare",
+    "애플케어",
+    "활성화잠금",
+    "activationlock",
+    "mdm",
+)
 
 
 def fetch_html(url):
@@ -101,6 +118,15 @@ def _clean_self_check_dd_text(dd_tag):
     return _normalize_text(text)
 
 
+def _is_manual_verification_self_check_key(key_text):
+    normalized_key = _normalize_text(key_text)
+    if not normalized_key:
+        return False
+
+    compact = re.sub(r"[\s/_-]+", "", normalized_key.lower())
+    return any(keyword in compact for keyword in MANUAL_VERIFICATION_SELF_CHECK_KEYWORDS)
+
+
 def extract_self_check_fields(soup):
     # 셀프검수 영역은 선택 정보이므로 실패 시 빈 dict를 반환한다.
     try:
@@ -110,6 +136,8 @@ def extract_self_check_fields(soup):
             for dt_tag in dl_tag.find_all("dt"):
                 key = _normalize_text(dt_tag.get_text(" ", strip=True))
                 if not key:
+                    continue
+                if _is_manual_verification_self_check_key(key):
                     continue
 
                 dd_tag = dt_tag.find_next_sibling("dd")

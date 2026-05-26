@@ -65,6 +65,17 @@ CREATE TABLE IF NOT EXISTS resale_trade_journeys (
   money_received_at DATETIME NULL,
   purchase_account_number VARCHAR(100) NULL,
 
+  -- 정확 확인 정보 (수동 입력)
+  serial_number VARCHAR(100) NULL,
+  model_number VARCHAR(100) NULL,
+  cpu_core_count INT NULL,
+  gpu_core_count INT NULL,
+  battery_cycle_count INT NULL,
+  battery_health_percent INT NULL,
+  applecare_status VARCHAR(100) NULL,
+  activation_lock_off BOOLEAN NULL,
+  mdm_lock_none BOOLEAN NULL,
+
   -- 6. 검수 메모
   inspection_notes LONGTEXT NULL,
 
@@ -304,6 +315,91 @@ PREPARE stmt_resale_account_number FROM @sql_resale_account_number;
 EXECUTE stmt_resale_account_number;
 DEALLOCATE PREPARE stmt_resale_account_number;
 
+SELECT GROUP_CONCAT(add_clause ORDER BY ord SEPARATOR ', ')
+INTO @manual_verification_add_clauses
+FROM (
+  SELECT 1 AS ord, 'ADD COLUMN serial_number VARCHAR(100) NULL AFTER purchase_account_number' AS add_clause
+  WHERE NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = @target_db
+      AND table_name = 'resale_trade_journeys'
+      AND column_name = 'serial_number'
+  )
+  UNION ALL
+  SELECT 2, 'ADD COLUMN model_number VARCHAR(100) NULL AFTER serial_number'
+  WHERE NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = @target_db
+      AND table_name = 'resale_trade_journeys'
+      AND column_name = 'model_number'
+  )
+  UNION ALL
+  SELECT 3, 'ADD COLUMN cpu_core_count INT NULL AFTER model_number'
+  WHERE NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = @target_db
+      AND table_name = 'resale_trade_journeys'
+      AND column_name = 'cpu_core_count'
+  )
+  UNION ALL
+  SELECT 4, 'ADD COLUMN gpu_core_count INT NULL AFTER cpu_core_count'
+  WHERE NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = @target_db
+      AND table_name = 'resale_trade_journeys'
+      AND column_name = 'gpu_core_count'
+  )
+  UNION ALL
+  SELECT 5, 'ADD COLUMN battery_cycle_count INT NULL AFTER gpu_core_count'
+  WHERE NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = @target_db
+      AND table_name = 'resale_trade_journeys'
+      AND column_name = 'battery_cycle_count'
+  )
+  UNION ALL
+  SELECT 6, 'ADD COLUMN battery_health_percent INT NULL AFTER battery_cycle_count'
+  WHERE NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = @target_db
+      AND table_name = 'resale_trade_journeys'
+      AND column_name = 'battery_health_percent'
+  )
+  UNION ALL
+  SELECT 7, 'ADD COLUMN applecare_status VARCHAR(100) NULL AFTER battery_health_percent'
+  WHERE NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = @target_db
+      AND table_name = 'resale_trade_journeys'
+      AND column_name = 'applecare_status'
+  )
+  UNION ALL
+  SELECT 8, 'ADD COLUMN activation_lock_off BOOLEAN NULL AFTER applecare_status'
+  WHERE NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = @target_db
+      AND table_name = 'resale_trade_journeys'
+      AND column_name = 'activation_lock_off'
+  )
+  UNION ALL
+  SELECT 9, 'ADD COLUMN mdm_lock_none BOOLEAN NULL AFTER activation_lock_off'
+  WHERE NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = @target_db
+      AND table_name = 'resale_trade_journeys'
+      AND column_name = 'mdm_lock_none'
+  )
+) manual_verification_columns;
+
+SET @sql_add_manual_verification_columns = IF(
+  @manual_verification_add_clauses IS NULL OR LENGTH(@manual_verification_add_clauses) = 0,
+  'SELECT ''manual verification columns exist''',
+  CONCAT('ALTER TABLE resale_trade_journeys ', @manual_verification_add_clauses)
+);
+PREPARE stmt_add_manual_verification_columns FROM @sql_add_manual_verification_columns;
+EXECUTE stmt_add_manual_verification_columns;
+DEALLOCATE PREPARE stmt_add_manual_verification_columns;
+
 -- 기존 공통 필드를 신규 분리 필드로 백필 (legacy 컬럼이 있을 때만)
 SELECT COUNT(*) INTO @has_legacy_contact_record
 FROM information_schema.columns
@@ -406,15 +502,6 @@ WHERE table_schema = @target_db
     'expected_sale_price_krw',
     'expected_net_profit_krw',
     'expected_sale_duration_days',
-    'serial_number',
-    'model_number',
-    'applecare_status',
-    'activation_lock_off',
-    'mdm_lock_none',
-    'cpu_core_count',
-    'gpu_core_count',
-    'battery_health_percent',
-    'battery_cycle_count',
     'battery_condition',
     'truetone_ok',
     'display_condition',

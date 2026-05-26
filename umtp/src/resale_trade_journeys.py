@@ -93,6 +93,19 @@ JSON_TEXT_FIELDS = {
     "common_objections",
 }
 
+# 정확 확인 정보는 자동 하이드레이션 대상에서 제외하고 수동 입력으로만 관리한다.
+MANUAL_VERIFICATION_FIELDS = {
+    "serial_number",
+    "model_number",
+    "cpu_core_count",
+    "gpu_core_count",
+    "battery_cycle_count",
+    "battery_health_percent",
+    "applecare_status",
+    "activation_lock_off",
+    "mdm_lock_none",
+}
+
 IDENTITY_FIELDS = {"user_id", "source", "product_id", "url"}
 
 AUTO_HYDRATE_FIELDS = {
@@ -137,6 +150,15 @@ PURCHASE_PATCH_FIELDS = {
     "payment_method",
     "money_sent_at",
     "inspection_notes",
+    "serial_number",
+    "model_number",
+    "cpu_core_count",
+    "gpu_core_count",
+    "battery_cycle_count",
+    "battery_health_percent",
+    "applecare_status",
+    "activation_lock_off",
+    "mdm_lock_none",
     "current_stage",
     "final_result_notes",
 }

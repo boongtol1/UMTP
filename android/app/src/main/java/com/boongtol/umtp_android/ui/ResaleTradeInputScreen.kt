@@ -48,6 +48,12 @@ private fun formatWon(value: Int?): String {
     return "%,d".format(value)
 }
 
+private data class LabeledInputField(
+    val key: String,
+    val label: String,
+    val helperText: String? = null,
+)
+
 private val AUTO_DISABLED_FIELDS = listOf(
     "id",
     "user_id",
@@ -86,6 +92,36 @@ private val AUTO_DISABLED_FIELDS = listOf(
     "response_time_minutes",
     "first_inquiry_delay_minutes",
 )
+
+private val PRODUCT_BASE_SPEC_FIELDS = listOf(
+    LabeledInputField("product_type", "제품 기본 스펙 - 제품 유형"),
+    LabeledInputField("chip", "제품 기본 스펙 - 칩"),
+    LabeledInputField("screen_inch", "제품 기본 스펙 - 화면 크기(인치)"),
+    LabeledInputField("ram_gb", "제품 기본 스펙 - RAM (GB)"),
+    LabeledInputField("ssd_gb", "제품 기본 스펙 - SSD (GB)"),
+)
+
+private val EXACT_VERIFICATION_FIELDS = listOf(
+    LabeledInputField("serial_number", "일련번호"),
+    LabeledInputField("model_number", "정확한 모델번호"),
+    LabeledInputField("cpu_core_count", "CPU 코어 수"),
+    LabeledInputField("gpu_core_count", "GPU 코어 수"),
+    LabeledInputField("battery_cycle_count", "배터리 사이클 수"),
+    LabeledInputField("battery_health_percent", "배터리 성능 최대치 %"),
+    LabeledInputField("applecare_status", "AppleCare 상태"),
+    LabeledInputField(
+        "activation_lock_off",
+        "활성화 잠금 해제 확인",
+        "이전 Apple ID 잠금 없음",
+    ),
+    LabeledInputField(
+        "mdm_lock_none",
+        "MDM 잠금 없음 확인",
+        "회사/학교 관리 기기 아님",
+    ),
+)
+
+private val EXACT_VERIFICATION_FIELD_KEYS = EXACT_VERIFICATION_FIELDS.map { it.key }
 
 private val PURCHASE_INPUT_FIELDS = listOf(
     "contacted_at",
@@ -131,7 +167,7 @@ private val RESALE_INPUT_FIELDS = listOf(
     "current_stage",
 )
 
-private val ALL_MANUAL_FIELDS = (PURCHASE_INPUT_FIELDS + RESALE_INPUT_FIELDS).distinct()
+private val ALL_MANUAL_FIELDS = (PURCHASE_INPUT_FIELDS + RESALE_INPUT_FIELDS + EXACT_VERIFICATION_FIELD_KEYS).distinct()
 
 private val INT_INPUT_FIELDS = setOf(
     "purchase_price_krw",
@@ -143,9 +179,16 @@ private val INT_INPUT_FIELDS = setOf(
     "sale_price_krw",
     "final_shipping_cost_krw",
     "platform_fee_krw",
+    "cpu_core_count",
+    "gpu_core_count",
+    "battery_cycle_count",
+    "battery_health_percent",
 )
 
-private val BOOL_INPUT_FIELDS = emptySet<String>()
+private val BOOL_INPUT_FIELDS = setOf(
+    "activation_lock_off",
+    "mdm_lock_none",
+)
 
 private fun parseInputValue(field: String, rawValue: String): Any? {
     val normalized = rawValue.trim()
@@ -168,11 +211,19 @@ private fun parseInputValue(field: String, rawValue: String): Any? {
     return normalized
 }
 
-private fun buildManualUpdates(fields: List<String>, values: Map<String, String>): Map<String, Any?> {
+private fun buildManualUpdates(
+    fields: List<String>,
+    values: Map<String, String>,
+    baselineValues: Map<String, String> = emptyMap(),
+): Map<String, Any?> {
     val updates = mutableMapOf<String, Any?>()
     fields.forEach { field ->
         val parsed = parseInputValue(field, values[field] ?: "")
         if (parsed != null) {
+            val baselineParsed = parseInputValue(field, baselineValues[field] ?: "")
+            if (baselineParsed == parsed) {
+                return@forEach
+            }
             updates[field] = parsed
         }
     }
@@ -212,12 +263,40 @@ private fun buildJourneyValueMap(row: ResaleTradeJourneyRow?): Map<String, Strin
 }
 
 @Composable
+private fun ProductBaseSpecCard(
+    rowValues: Map<String, String>,
+) {
+    Text(text = "제품 기본 스펙", style = MaterialTheme.typography.titleMedium)
+
+    val visibleFields = PRODUCT_BASE_SPEC_FIELDS
+        .filter { field -> !rowValues[field.key].isNullOrBlank() }
+
+    if (visibleFields.isEmpty()) {
+        Text(text = "자동 파싱된 제품 기본 스펙이 아직 없습니다.")
+        return
+    }
+
+    visibleFields.forEach { field ->
+        OutlinedTextField(
+            value = rowValues[field.key] ?: "",
+            onValueChange = {},
+            modifier = Modifier.fillMaxWidth(),
+            enabled = false,
+            label = { Text(field.label) },
+            singleLine = true,
+        )
+    }
+}
+
+@Composable
 private fun ReadOnlyFieldCard(
     rowValues: Map<String, String>,
 ) {
     Text(text = "자동채움 정보", style = MaterialTheme.typography.titleMedium)
 
+    val baseSpecKeys = PRODUCT_BASE_SPEC_FIELDS.map { it.key }.toSet()
     val visibleReadonlyFields = AUTO_DISABLED_FIELDS
+        .filterNot { it in baseSpecKeys }
         .filter { key -> !rowValues[key].isNullOrBlank() }
 
     if (visibleReadonlyFields.isEmpty()) {
@@ -251,6 +330,63 @@ private fun EditableFieldList(
             enabled = !isSubmitting,
             label = { Text(key) },
             singleLine = !key.endsWith("_text"),
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ExactVerificationInputSection(
+    values: MutableMap<String, String>,
+    isSubmitting: Boolean,
+) {
+    Text(text = "정확 확인 정보", style = MaterialTheme.typography.titleMedium)
+    Text(
+        text = "판매자에게 직접 확인한 정보만 입력하세요. 모르는 경우 비워둘 수 있습니다.",
+        style = MaterialTheme.typography.bodySmall,
+    )
+
+    EXACT_VERIFICATION_FIELDS.forEach { field ->
+        if (field.key in BOOL_INPUT_FIELDS) {
+            val normalizedValue = parseInputValue(field.key, values[field.key] ?: "") as? Boolean
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = normalizedValue == true,
+                    onClick = { values[field.key] = "true" },
+                    enabled = !isSubmitting,
+                    label = { Text("${field.label} - 예") },
+                )
+                FilterChip(
+                    selected = normalizedValue == false,
+                    onClick = { values[field.key] = "false" },
+                    enabled = !isSubmitting,
+                    label = { Text("${field.label} - 아니오") },
+                )
+                FilterChip(
+                    selected = normalizedValue == null,
+                    onClick = { values[field.key] = "" },
+                    enabled = !isSubmitting,
+                    label = { Text("${field.label} - 미입력") },
+                )
+            }
+            if (!field.helperText.isNullOrBlank()) {
+                Text(text = field.helperText, style = MaterialTheme.typography.bodySmall)
+            }
+            return@forEach
+        }
+
+        OutlinedTextField(
+            value = values[field.key] ?: "",
+            onValueChange = { values[field.key] = it },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isSubmitting,
+            label = { Text(field.label) },
+            singleLine = !field.key.endsWith("_text"),
+            supportingText = {
+                if (!field.helperText.isNullOrBlank()) {
+                    Text(field.helperText)
+                }
+            },
         )
     }
 }
@@ -356,8 +492,21 @@ fun ResaleTradeInputScreen(
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
+        ProductBaseSpecCard(
+            rowValues = journeyValueMap,
+        )
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
         ReadOnlyFieldCard(
             rowValues = journeyValueMap,
+        )
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+        ExactVerificationInputSection(
+            values = manualInputs,
+            isSubmitting = isSubmitting,
         )
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -385,7 +534,16 @@ fun ResaleTradeInputScreen(
 
             Button(
                 onClick = {
-                    onSubmitPurchase(buildManualUpdates(PURCHASE_INPUT_FIELDS, manualInputs))
+                    val updates = buildManualUpdates(
+                        PURCHASE_INPUT_FIELDS,
+                        manualInputs,
+                        baselineValues = journeyValueMap,
+                    ) + buildManualUpdates(
+                        EXACT_VERIFICATION_FIELD_KEYS,
+                        manualInputs,
+                        baselineValues = journeyValueMap,
+                    )
+                    onSubmitPurchase(updates)
                 },
                 enabled = !isSubmitting,
                 modifier = Modifier.fillMaxWidth(),
@@ -406,7 +564,15 @@ fun ResaleTradeInputScreen(
 
             Button(
                 onClick = {
-                    val updates = buildManualUpdates(RESALE_INPUT_FIELDS, manualInputs)
+                    val updates = buildManualUpdates(
+                        RESALE_INPUT_FIELDS,
+                        manualInputs,
+                        baselineValues = journeyValueMap,
+                    ) + buildManualUpdates(
+                        EXACT_VERIFICATION_FIELD_KEYS,
+                        manualInputs,
+                        baselineValues = journeyValueMap,
+                    )
                     onSubmitResale(updates)
                 },
                 enabled = !isSubmitting,
