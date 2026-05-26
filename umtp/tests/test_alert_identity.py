@@ -74,7 +74,7 @@ class AlertIdentityTest(unittest.TestCase):
 
         self.assertTrue(result.get("created"))
         self.assertEqual(result.get("alert_id"), 9)
-        self.assertIn("sort_date", fake_cursor.executed[0][0].lower())
+        self.assertIn("change_fingerprint", fake_cursor.executed[0][0].lower())
 
     def test_duplicate_insert_error_returns_existing_alert(self):
         class _DynamicCursor(_FakeCursor):
@@ -109,6 +109,53 @@ class AlertIdentityTest(unittest.TestCase):
         self.assertFalse(result.get("created"))
         self.assertEqual(result.get("reason"), "duplicate_identity_alert")
         self.assertEqual(result.get("alert_id"), 17)
+
+    def test_content_changed_dedupe_lookup_ignores_watch_rule_id(self):
+        fake_cursor = _FakeCursor(duplicate_row=None, lastrowid=11)
+
+        maybe_create_alert_event(
+            fake_cursor,
+            analysis_job_id=1,
+            user_id="u1",
+            watch_rule_id=99,
+            product_id="p1",
+            url="https://web.joongna.com/product/1",
+            title="title",
+            price_krw=100,
+            fair_price_krw=200,
+            target_price_krw=150,
+            drop_rate_percent=50.0,
+            trigger_reason="content_changed",
+            change_fingerprint="cfp-1",
+            message="msg",
+        )
+
+        first_query = " ".join((fake_cursor.executed[0][0] or "").split()).lower()
+        self.assertIn("from alert_events", first_query)
+        self.assertNotIn("watch_rule_id", first_query)
+
+    def test_non_content_changed_dedupe_lookup_keeps_watch_rule_id(self):
+        fake_cursor = _FakeCursor(duplicate_row=None, lastrowid=12)
+
+        maybe_create_alert_event(
+            fake_cursor,
+            analysis_job_id=1,
+            user_id="u1",
+            watch_rule_id=99,
+            product_id="p1",
+            url="https://web.joongna.com/product/1",
+            title="title",
+            price_krw=100,
+            fair_price_krw=200,
+            target_price_krw=150,
+            drop_rate_percent=50.0,
+            trigger_reason="price_changed",
+            change_fingerprint="cfp-2",
+            message="msg",
+        )
+
+        first_query = " ".join((fake_cursor.executed[0][0] or "").split()).lower()
+        self.assertIn("watch_rule_id", first_query)
 
 
 if __name__ == "__main__":

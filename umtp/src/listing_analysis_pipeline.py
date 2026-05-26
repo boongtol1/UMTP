@@ -615,88 +615,147 @@ def _find_alert_event_by_identity(
     sort_date=None,
     change_fingerprint=None,
     include_sort_date=True,
+    identity_scope="watch_rule",
 ):
     normalized_user_id = _normalize_optional_text(user_id)
     normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
     normalized_product_id = _normalize_optional_text(product_id)
     normalized_sort_date = _coerce_datetime(sort_date)
     normalized_change_fingerprint = _normalize_optional_text(change_fingerprint)
+    normalized_identity_scope = _normalize_optional_text(identity_scope)
+    use_user_product_scope = normalized_identity_scope == "user_product"
 
     if normalized_user_id is None or normalized_product_id is None:
         return None
 
     try:
         if normalized_change_fingerprint is not None:
-            cursor.execute(
-                """
-                SELECT id
-                FROM alert_events
-                WHERE user_id = %s
-                  AND (
-                        (watch_rule_id IS NULL AND %s IS NULL)
-                     OR watch_rule_id = %s
-                  )
-                  AND product_id = %s
-                  AND change_fingerprint = %s
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (
-                    normalized_user_id,
-                    normalized_watch_rule_id,
-                    normalized_watch_rule_id,
-                    normalized_product_id,
-                    normalized_change_fingerprint,
-                ),
-            )
+            if use_user_product_scope:
+                cursor.execute(
+                    """
+                    SELECT id
+                    FROM alert_events
+                    WHERE user_id = %s
+                      AND product_id = %s
+                      AND change_fingerprint = %s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        normalized_user_id,
+                        normalized_product_id,
+                        normalized_change_fingerprint,
+                    ),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT id
+                    FROM alert_events
+                    WHERE user_id = %s
+                      AND (
+                            (watch_rule_id IS NULL AND %s IS NULL)
+                         OR watch_rule_id = %s
+                      )
+                      AND product_id = %s
+                      AND change_fingerprint = %s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        normalized_user_id,
+                        normalized_watch_rule_id,
+                        normalized_watch_rule_id,
+                        normalized_product_id,
+                        normalized_change_fingerprint,
+                    ),
+                )
         elif include_sort_date:
-            cursor.execute(
-                """
-                SELECT id
-                FROM alert_events
-                WHERE user_id = %s
-                  AND (
-                        (watch_rule_id IS NULL AND %s IS NULL)
-                     OR watch_rule_id = %s
-                  )
-                  AND product_id = %s
-                  AND (
-                        (sort_date IS NULL AND %s IS NULL)
-                     OR sort_date = %s
-                  )
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (
-                    normalized_user_id,
-                    normalized_watch_rule_id,
-                    normalized_watch_rule_id,
-                    normalized_product_id,
-                    normalized_sort_date,
-                    normalized_sort_date,
-                ),
-            )
+            if use_user_product_scope:
+                cursor.execute(
+                    """
+                    SELECT id
+                    FROM alert_events
+                    WHERE user_id = %s
+                      AND product_id = %s
+                      AND (
+                            (sort_date IS NULL AND %s IS NULL)
+                         OR sort_date = %s
+                      )
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        normalized_user_id,
+                        normalized_product_id,
+                        normalized_sort_date,
+                        normalized_sort_date,
+                    ),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT id
+                    FROM alert_events
+                    WHERE user_id = %s
+                      AND (
+                            (watch_rule_id IS NULL AND %s IS NULL)
+                         OR watch_rule_id = %s
+                      )
+                      AND product_id = %s
+                      AND (
+                            (sort_date IS NULL AND %s IS NULL)
+                         OR sort_date = %s
+                      )
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        normalized_user_id,
+                        normalized_watch_rule_id,
+                        normalized_watch_rule_id,
+                        normalized_product_id,
+                        normalized_sort_date,
+                        normalized_sort_date,
+                    ),
+                )
         else:
-            cursor.execute(
-                """
-                SELECT id
-                FROM alert_events
-                WHERE user_id = %s
-                  AND (
-                        (watch_rule_id IS NULL AND %s IS NULL)
-                     OR watch_rule_id = %s
-                  )
-                  AND product_id = %s
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (
-                    normalized_user_id,
-                    normalized_watch_rule_id,
-                    normalized_watch_rule_id,
-                    normalized_product_id,
-                ),
-            )
+            if use_user_product_scope:
+                cursor.execute(
+                    """
+                    SELECT id
+                    FROM alert_events
+                    WHERE user_id = %s
+                      AND product_id = %s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        normalized_user_id,
+                        normalized_product_id,
+                    ),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT id
+                    FROM alert_events
+                    WHERE user_id = %s
+                      AND (
+                            (watch_rule_id IS NULL AND %s IS NULL)
+                         OR watch_rule_id = %s
+                      )
+                      AND product_id = %s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        normalized_user_id,
+                        normalized_watch_rule_id,
+                        normalized_watch_rule_id,
+                        normalized_product_id,
+                    ),
+                )
     except Exception as exc:
         if "unknown column" not in str(exc).lower():
             raise
@@ -752,9 +811,15 @@ def maybe_create_alert_event(
     normalized_product_id = _normalize_optional_text(product_id)
     normalized_sort_date = _coerce_datetime(sort_date)
     normalized_change_fingerprint = _normalize_optional_text(change_fingerprint)
+    normalized_trigger_reason = _normalize_optional_text(trigger_reason)
+    identity_scope = (
+        "user_product"
+        if normalized_trigger_reason == CHANGE_REASON_CONTENT_CHANGED
+        else "watch_rule"
+    )
     if normalized_change_fingerprint is None:
         normalized_change_fingerprint = _build_alert_change_fingerprint(
-            trigger_reason=trigger_reason,
+            trigger_reason=normalized_trigger_reason,
             sort_date=normalized_sort_date,
             content_revision_hash=None,
             title=title,
@@ -768,6 +833,7 @@ def maybe_create_alert_event(
         product_id=normalized_product_id,
         sort_date=normalized_sort_date,
         change_fingerprint=normalized_change_fingerprint,
+        identity_scope=identity_scope,
     )
     if duplicate is not None:
         return {
@@ -850,7 +916,7 @@ def maybe_create_alert_event(
                 _normalize_optional_text(body_excerpt),
                 _normalize_optional_text(body_text),
                 normalized_sort_date,
-                _normalize_optional_text(trigger_reason),
+                normalized_trigger_reason,
                 normalized_change_fingerprint,
                 _normalize_optional_text(message),
             ),
@@ -932,7 +998,7 @@ def maybe_create_alert_event(
                         _normalize_optional_text(risk_result.get("trade_type")),
                         _normalize_optional_text(body_excerpt),
                         normalized_sort_date,
-                        _normalize_optional_text(trigger_reason),
+                        normalized_trigger_reason,
                         normalized_change_fingerprint,
                         _normalize_optional_text(message),
                     ),
@@ -974,7 +1040,7 @@ def maybe_create_alert_event(
                     _normalize_optional_int(fair_price_krw),
                     _normalize_optional_int(target_price_krw),
                     _normalize_optional_float(drop_rate_percent),
-                    _normalize_optional_text(trigger_reason),
+                    normalized_trigger_reason,
                     _normalize_optional_text(message),
                 ),
             )
@@ -991,6 +1057,7 @@ def maybe_create_alert_event(
                 product_id=normalized_product_id,
                 sort_date=normalized_sort_date,
                 change_fingerprint=normalized_change_fingerprint,
+                identity_scope=identity_scope,
             )
             if duplicate is None:
                 duplicate = _find_alert_event_by_identity(
@@ -999,6 +1066,7 @@ def maybe_create_alert_event(
                     watch_rule_id=normalized_watch_rule_id,
                     product_id=normalized_product_id,
                     include_sort_date=False,
+                    identity_scope=identity_scope,
                 )
             if duplicate is not None:
                 return {
