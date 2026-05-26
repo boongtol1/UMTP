@@ -1550,10 +1550,6 @@ def analyze_product_for_watch_rule(job):
         elif alert_skip_reason is None:
             alert_skip_reason = "price_condition_missing"
 
-        if is_content_changed_alert:
-            is_alert_target = True
-            alert_skip_reason = None
-
         alert_create_result = {
             "created": False,
             "alert_id": None,

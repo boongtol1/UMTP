@@ -101,9 +101,11 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
             },
         )
 
-    def _run_pipeline_for_price_rule(self, *, listing_price_krw, resolved_fair_price):
+    def _run_pipeline_for_price_rule(self, *, listing_price_krw, resolved_fair_price, trigger_reason="price_changed"):
         fake_cursor = _FakeCursor()
         fake_connection = _FakeConnection(fake_cursor)
+        job = self._build_job()
+        job["trigger_reason"] = trigger_reason
 
         with patch("src.listing_analysis_pipeline.fetch_html", return_value="<html></html>"):
             with patch(
@@ -134,7 +136,7 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
                                             "src.listing_analysis_pipeline.maybe_create_alert_event",
                                             return_value={"created": True, "alert_id": 71},
                                         ) as mock_create_alert:
-                                            result = analyze_product_for_watch_rule(self._build_job())
+                                            result = analyze_product_for_watch_rule(job)
         return result, mock_create_alert.call_count
 
     def test_fair_price_missing_does_not_create_alert(self):
@@ -592,6 +594,24 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
         self.assertTrue(result.get("ok"))
         self.assertTrue(result.get("is_alert_target"))
         self.assertEqual(create_alert_call_count, 1)
+
+    def test_content_changed_alert_respects_price_condition(self):
+        result, create_alert_call_count = self._run_pipeline_for_price_rule(
+            listing_price_krw=1050000,
+            resolved_fair_price={
+                "fair_price_krw": 1000000,
+                "alert_drop_rate_percent": -10.00,
+                "target_buy_price_krw": 1100000,
+                "alert_price_direction": "ABOVE_OR_EQUAL",
+                "source": "user_fair_prices",
+            },
+            trigger_reason="content_changed",
+        )
+
+        self.assertTrue(result.get("ok"))
+        self.assertFalse(result.get("is_alert_target"))
+        self.assertEqual(result.get("alert_skip_reason"), "price_below_threshold")
+        self.assertEqual(create_alert_call_count, 0)
 
     def test_should_fetch_detail_for_new_listing(self):
         should_fetch, reason = should_fetch_detail(
