@@ -75,7 +75,7 @@ class _NoticeInsertCursor:
 
 
 class UserSettingsNoticeDeliveryStatusTest(unittest.TestCase):
-    def _call_insert_notice(self, cursor):
+    def _call_insert_notice(self, cursor, *, listing_trigger_reason=None):
         return _insert_condition_change_candidate_notice_alert_event(
             cursor,
             user_id="boongtol",
@@ -97,6 +97,7 @@ class UserSettingsNoticeDeliveryStatusTest(unittest.TestCase):
             listing_source="joongna",
             listing_price_krw=1_380_000,
             listing_sort_date=datetime(2026, 5, 20, 19, 40, 0),
+            listing_trigger_reason=listing_trigger_reason,
         )
 
     def test_primary_insert_uses_pending_status(self):
@@ -183,6 +184,21 @@ class UserSettingsNoticeDeliveryStatusTest(unittest.TestCase):
         self.assertEqual(result.get("alert_id"), 321)
         insert_queries = [query for query, _params in cursor.executed if "insert into alert_events" in query]
         self.assertEqual(insert_queries, [])
+
+    def test_refresh_based_notice_includes_refresh_notice_text(self):
+        cursor = _NoticeInsertCursor()
+
+        result = self._call_insert_notice(cursor, listing_trigger_reason="sort_date_changed")
+
+        self.assertTrue(result.get("created"))
+        insert_params = [
+            params
+            for query, params in cursor.executed
+            if "insert into alert_events" in query
+        ][0]
+        self.assertTrue(
+            any("끌올된 정보를 사용한 알림입니다" in str(value) for value in insert_params)
+        )
 
 
 if __name__ == "__main__":

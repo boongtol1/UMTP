@@ -169,6 +169,40 @@ class NotificationWorkerTest(unittest.TestCase):
             self.assertGreater(current_index, last_index, msg=f"order mismatch at: {token}")
             last_index = current_index
 
+    def test_build_telegram_message_marks_refresh_based_alerts(self):
+        message = _build_telegram_message(
+            {
+                "source": "joongna",
+                "title": "끌올된 매물",
+                "url": "https://web.joongna.com/product/2001",
+                "trigger_reason": "sort_date_changed",
+                "risk_level": "LOW",
+                "risk_keywords": "[]",
+                "trade_type_flags": {
+                    "is_exchange": False,
+                    "is_free": False,
+                    "is_suspicious": False,
+                },
+            }
+        )
+
+        self.assertIn("특이사항\n끌올된 정보를 사용한 알림입니다", message)
+
+    def test_build_telegram_message_keeps_refresh_notice_for_condition_change_notice(self):
+        message = _build_telegram_message(
+            {
+                "source": "umtp_notice",
+                "title": "조건 변경 사이 후보",
+                "url": "https://web.joongna.com/product/2002",
+                "trigger_reason": "condition_change_candidate_notice",
+                "message": "조건 변경 후보\n끌올된 정보를 사용한 알림입니다",
+                "risk_level": "LOW",
+                "risk_keywords": "[]",
+            }
+        )
+
+        self.assertIn("특이사항\n끌올된 정보를 사용한 알림입니다", message)
+
     def test_send_alert_event_app_only_when_alerts_disabled(self):
         with patch(
             "src.notification_worker.resolve_user_alert_delivery_policy",

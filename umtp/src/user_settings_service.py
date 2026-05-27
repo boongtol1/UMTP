@@ -43,6 +43,11 @@ DEFAULT_CONDITION_CHANGE_CANDIDATE_NOTICE_ENABLED = False
 CONDITION_CHANGE_CANDIDATE_NOTICE_TRIGGER_REASON = "condition_change_candidate_notice"
 CONDITION_CHANGE_CANDIDATE_NOTICE_SOURCE = "umtp_notice"
 CONDITION_CHANGE_CANDIDATE_REEVALUATION_DAYS = 7
+REFRESH_INFO_NOTICE_TEXT = "끌올된 정보를 사용한 알림입니다"
+REFRESH_INFO_TRIGGER_REASONS = {
+    "sort_date_changed",
+    "refresh_key_changed",
+}
 WATCH_PRIORITY_FAST = "FAST"
 WATCH_PRIORITY_NORMAL = "NORMAL"
 WATCH_PRIORITY_LOW = "LOW"
@@ -251,6 +256,22 @@ def _safe_text(value):
         return cleaned or None
     cleaned = str(value).strip()
     return cleaned or None
+
+
+def _is_refresh_info_trigger_reason(trigger_reason):
+    normalized_trigger = _safe_text(trigger_reason)
+    if normalized_trigger is None:
+        return False
+    return normalized_trigger.lower() in REFRESH_INFO_TRIGGER_REASONS
+
+
+def _prepend_refresh_notice_text(value):
+    normalized = _safe_text(value)
+    if normalized is None:
+        return REFRESH_INFO_NOTICE_TEXT
+    if REFRESH_INFO_NOTICE_TEXT in normalized:
+        return normalized
+    return f"{REFRESH_INFO_NOTICE_TEXT}\n{normalized}"
 
 
 def _normalize_optional_search_keyword(search_keyword):
@@ -841,12 +862,16 @@ def _insert_condition_change_candidate_notice_alert_event(
     listing_source=None,
     listing_price_krw=None,
     listing_sort_date=None,
+    listing_trigger_reason=None,
 ):
     normalized_user_id = _safe_text(user_id)
     normalized_rule_id = _safe_int(watch_rule_id)
     normalized_notice_sort_date = _coerce_datetime(sort_date) or datetime.now()
     normalized_sort_date = _coerce_datetime(listing_sort_date) or normalized_notice_sort_date
     normalized_message = _format_saved_at_notice_message(missed_candidate_count)
+    used_refresh_info = _is_refresh_info_trigger_reason(listing_trigger_reason)
+    if used_refresh_info:
+        normalized_message = _prepend_refresh_notice_text(normalized_message)
 
     if normalized_user_id is None or normalized_rule_id is None or normalized_rule_id <= 0:
         return {"created": False, "reason": "invalid_reference_notice_context"}
@@ -916,6 +941,8 @@ def _insert_condition_change_candidate_notice_alert_event(
         or _build_body_excerpt_from_text(detail_body_text)
         or normalized_message
     )
+    if used_refresh_info:
+        body_excerpt = _prepend_refresh_notice_text(body_excerpt)
     analyzed_at = _coerce_datetime(detail_enrichment.get("analyzed_at")) or normalized_notice_sort_date
     risk_level = _safe_text(detail_enrichment.get("risk_level")) or "NONE"
     risk_score = _safe_int_or_none(detail_enrichment.get("risk_score"))
@@ -1537,6 +1564,7 @@ def _collect_missed_candidates_between_saved_windows(
             aj.title,
             aj.url,
             aj.source,
+            aj.trigger_reason,
             lar.product_type,
             lar.chip,
             lar.screen_inch,
@@ -1607,6 +1635,7 @@ def _collect_missed_candidates_between_saved_windows(
                 "title": _safe_text(raw_row.get("title")),
                 "url": _safe_text(raw_row.get("url")),
                 "source": _safe_text(raw_row.get("source")),
+                "trigger_reason": _safe_text(raw_row.get("trigger_reason")),
                 "product_type": _safe_text(raw_row.get("product_type")),
                 "chip": _safe_text(raw_row.get("chip")),
                 "screen_inch": _safe_int(raw_row.get("screen_inch")),
@@ -1625,12 +1654,13 @@ def _collect_missed_candidates_between_saved_windows(
                 "title": _safe_text(raw_row[6]) if len(raw_row) > 6 else None,
                 "url": _safe_text(raw_row[7]) if len(raw_row) > 7 else None,
                 "source": _safe_text(raw_row[8]) if len(raw_row) > 8 else None,
-                "product_type": _safe_text(raw_row[9]) if len(raw_row) > 9 else None,
-                "chip": _safe_text(raw_row[10]) if len(raw_row) > 10 else None,
-                "screen_inch": _safe_int(raw_row[11]) if len(raw_row) > 11 else None,
-                "ram_gb": _safe_int(raw_row[12]) if len(raw_row) > 12 else None,
-                "ssd_gb": _safe_int(raw_row[13]) if len(raw_row) > 13 else None,
-                "analyzed_at": _coerce_datetime(raw_row[14]) if len(raw_row) > 14 else None,
+                "trigger_reason": _safe_text(raw_row[9]) if len(raw_row) > 9 else None,
+                "product_type": _safe_text(raw_row[10]) if len(raw_row) > 10 else None,
+                "chip": _safe_text(raw_row[11]) if len(raw_row) > 11 else None,
+                "screen_inch": _safe_int(raw_row[12]) if len(raw_row) > 12 else None,
+                "ram_gb": _safe_int(raw_row[13]) if len(raw_row) > 13 else None,
+                "ssd_gb": _safe_int(raw_row[14]) if len(raw_row) > 14 else None,
+                "analyzed_at": _coerce_datetime(raw_row[15]) if len(raw_row) > 15 else None,
             }
         return None
 
@@ -3164,6 +3194,9 @@ def upsert_user_fair_price_setting(
                         listing_source=candidate.get("source") if isinstance(candidate, dict) else None,
                         listing_price_krw=candidate.get("price_krw") if isinstance(candidate, dict) else None,
                         listing_sort_date=candidate.get("sort_date") if isinstance(candidate, dict) else None,
+                        listing_trigger_reason=(
+                            candidate.get("trigger_reason") if isinstance(candidate, dict) else None
+                        ),
                     )
 
                     if isinstance(notice_insert_result, dict) and notice_insert_result.get("created") is True:

@@ -725,13 +725,27 @@ private fun resolveAlertSourceText(alert: AlertItem): String {
 }
 
 private fun resolveAlertBodyPreview(alert: AlertItem): String? {
+    val refreshNotice = if (isRefreshInfoAlert(alert)) {
+        resolveRefreshNoticeText(alert)
+    } else {
+        null
+    }
     val excerpt = alert.body_excerpt?.trim()
     if (!excerpt.isNullOrEmpty()) {
+        if (!refreshNotice.isNullOrEmpty() && !excerpt.contains(refreshNotice)) {
+            return "$refreshNotice\n$excerpt"
+        }
         return excerpt
     }
     val fullText = alert.body_text?.trim()
     if (!fullText.isNullOrEmpty()) {
+        if (!refreshNotice.isNullOrEmpty() && !fullText.contains(refreshNotice)) {
+            return "$refreshNotice\n$fullText"
+        }
         return fullText
+    }
+    if (!refreshNotice.isNullOrEmpty()) {
+        return refreshNotice
     }
     return null
 }
@@ -862,7 +876,15 @@ private fun resolveSsdText(alert: AlertItem): String {
 }
 
 private fun resolveSpecialNotesText(alert: AlertItem): String {
+    val explicitSpecialNotes = alert.special_notes_text?.trim()
+    if (!explicitSpecialNotes.isNullOrEmpty()) {
+        return explicitSpecialNotes
+    }
+
     val notes = mutableListOf<String>()
+    if (isRefreshInfoAlert(alert)) {
+        notes += resolveRefreshNoticeText(alert)
+    }
     val riskLabel = resolveRiskLabel(alert)
     if (riskLabel == "주의" || riskLabel == "위험") {
         notes += "위험도 $riskLabel"
@@ -882,6 +904,34 @@ private fun resolveSpecialNotesText(alert: AlertItem): String {
         return "특이사항 없음"
     }
     return notes.joinToString(" / ")
+}
+
+private fun resolveRefreshNoticeText(alert: AlertItem): String {
+    return alert.refresh_notice_text?.trim().takeUnless { it.isNullOrEmpty() }
+        ?: refreshInfoNoticeText
+}
+
+private fun isRefreshInfoAlert(alert: AlertItem): Boolean {
+    if (alert.used_refresh_info == true) {
+        return true
+    }
+    if (!alert.refresh_notice_text.isNullOrBlank()) {
+        return true
+    }
+    if (refreshInfoTriggerReasons.contains((alert.trigger_reason ?: "").trim().lowercase())) {
+        return true
+    }
+
+    val markerSources = listOf(
+        alert.message,
+        alert.body_excerpt,
+        alert.body_text,
+        alert.special_notes_text,
+    )
+    return markerSources.any { value ->
+        val normalized = value?.trim().orEmpty()
+        normalized.contains(refreshInfoNoticeText)
+    }
 }
 
 private fun buildAlertDetailRows(
@@ -972,3 +1022,10 @@ private val contentChangeTriggerReasons = setOf(
     "body_changed",
     "self_check_changed",
 )
+
+private val refreshInfoTriggerReasons = setOf(
+    "sort_date_changed",
+    "refresh_key_changed",
+)
+
+private const val refreshInfoNoticeText = "끌올된 정보를 사용한 알림입니다"

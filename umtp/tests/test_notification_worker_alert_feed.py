@@ -268,6 +268,91 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
         self.assertEqual(item.get("alert_condition_label"), "이 가격 이상이면 알림")
         self.assertTrue(item.get("is_alert_target"))
 
+    @patch("src.notification_worker.get_connection", return_value=_FakeConnection())
+    @patch(
+        "src.notification_worker._fetch_alert_rows",
+        return_value=(
+            [
+                {
+                    "id": 15,
+                    "user_id": "boongtol",
+                    "watch_rule_id": 5,
+                    "analysis_job_id": 103,
+                    "product_id": "p15",
+                    "url": "https://web.joongna.com/product/15",
+                    "title": "끌올된 매물",
+                    "price_krw": 780000,
+                    "fair_price_krw": 900000,
+                    "target_price_krw": 820000,
+                    "drop_rate_percent": 13.33,
+                    "alert_drop_rate_percent": 10.0,
+                    "alert_price_direction": "BELOW_OR_EQUAL",
+                    "trigger_reason": "sort_date_changed",
+                    "message": "정식 알림 메시지",
+                    "body_excerpt": "본문 요약",
+                    "status": "pending",
+                    "send_attempts": 0,
+                    "error_message": None,
+                    "created_at": "2026-05-21T11:00:00",
+                    "sent_at": None,
+                    "updated_at": "2026-05-21T11:00:00",
+                }
+            ],
+            True,
+        ),
+    )
+    def test_refresh_based_alert_includes_refresh_notice_fields(self, _mock_rows, _mock_conn):
+        items = list_alert_events_for_user("boongtol", limit=20)
+
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertTrue(item.get("used_refresh_info"))
+        self.assertEqual(item.get("refresh_notice_text"), "끌올된 정보를 사용한 알림입니다")
+        self.assertIn("끌올된 정보를 사용한 알림입니다", item.get("body_excerpt"))
+        self.assertIn("끌올된 정보를 사용한 알림입니다", item.get("special_notes_text"))
+
+    @patch("src.notification_worker.get_connection", return_value=_FakeConnection())
+    @patch(
+        "src.notification_worker._fetch_alert_rows",
+        return_value=(
+            [
+                {
+                    "id": 16,
+                    "user_id": "boongtol",
+                    "watch_rule_id": 6,
+                    "analysis_job_id": None,
+                    "product_id": "p16",
+                    "url": "https://web.joongna.com/product/16",
+                    "title": "조건 변경 사이 후보",
+                    "price_krw": 980000,
+                    "fair_price_krw": 1050000,
+                    "target_price_krw": 990000,
+                    "drop_rate_percent": 6.67,
+                    "alert_drop_rate_percent": 5.0,
+                    "alert_price_direction": "BELOW_OR_EQUAL",
+                    "trigger_reason": "condition_change_candidate_notice",
+                    "message": "조건 변경 후보\n끌올된 정보를 사용한 알림입니다",
+                    "body_excerpt": "조건 변경 후보 안내",
+                    "status": "pending",
+                    "send_attempts": 0,
+                    "error_message": None,
+                    "created_at": "2026-05-21T12:00:00",
+                    "sent_at": None,
+                    "updated_at": "2026-05-21T12:00:00",
+                }
+            ],
+            True,
+        ),
+    )
+    def test_condition_change_notice_can_carry_refresh_notice(self, _mock_rows, _mock_conn):
+        items = list_alert_events_for_user("boongtol", limit=20)
+
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertTrue(item.get("used_refresh_info"))
+        self.assertEqual(item.get("refresh_notice_text"), "끌올된 정보를 사용한 알림입니다")
+        self.assertIn("끌올된 정보를 사용한 알림입니다", item.get("special_notes_text"))
+
 
 if __name__ == "__main__":
     unittest.main()

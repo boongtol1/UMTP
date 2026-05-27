@@ -46,6 +46,11 @@ CONTENT_CHANGE_TRIGGER_REASONS = {
     "self_check_changed",
 }
 CONTENT_CHANGE_ALERT_TYPE_LABEL = "내용 변경 알림"
+REFRESH_INFO_NOTICE_TEXT = "끌올된 정보를 사용한 알림입니다"
+REFRESH_INFO_TRIGGER_REASONS = {
+    "sort_date_changed",
+    "refresh_key_changed",
+}
 
 
 def _normalize_optional_text(value):
@@ -130,6 +135,60 @@ def _is_content_change_trigger_reason(trigger_reason):
     if normalized_trigger is None:
         return False
     return normalized_trigger in CONTENT_CHANGE_TRIGGER_REASONS
+
+
+def _is_refresh_info_trigger_reason(trigger_reason):
+    normalized_trigger = _normalize_optional_text(trigger_reason)
+    if normalized_trigger is None:
+        return False
+    return normalized_trigger.lower() in REFRESH_INFO_TRIGGER_REASONS
+
+
+def _contains_refresh_info_notice_text(value):
+    normalized = _normalize_optional_text(value)
+    if normalized is None:
+        return False
+    return REFRESH_INFO_NOTICE_TEXT in normalized
+
+
+def _resolve_used_refresh_info(alert):
+    if not isinstance(alert, dict):
+        return False
+
+    explicit_flag = alert.get("used_refresh_info")
+    if isinstance(explicit_flag, bool):
+        return explicit_flag
+    explicit_text = _normalize_optional_text(explicit_flag)
+    if explicit_text is not None:
+        lowered = explicit_text.lower()
+        if lowered in {"1", "true", "yes", "y"}:
+            return True
+        if lowered in {"0", "false", "no", "n"}:
+            return False
+
+    if _is_refresh_info_trigger_reason(alert.get("trigger_reason")):
+        return True
+
+    if _contains_refresh_info_notice_text(alert.get("refresh_notice_text")):
+        return True
+    if _contains_refresh_info_notice_text(alert.get("message")):
+        return True
+    if _contains_refresh_info_notice_text(alert.get("body_excerpt")):
+        return True
+    if _contains_refresh_info_notice_text(alert.get("body_text")):
+        return True
+    return False
+
+
+def _prepend_refresh_notice_to_body_excerpt(body_excerpt, *, used_refresh_info):
+    normalized_excerpt = _normalize_optional_text(body_excerpt)
+    if not used_refresh_info:
+        return normalized_excerpt
+    if normalized_excerpt is None:
+        return REFRESH_INFO_NOTICE_TEXT
+    if REFRESH_INFO_NOTICE_TEXT in normalized_excerpt:
+        return normalized_excerpt
+    return f"{REFRESH_INFO_NOTICE_TEXT}\n{normalized_excerpt}"
 
 
 def _build_alert_type_label(trigger_reason):
@@ -623,8 +682,11 @@ def _resolve_special_notes_text_for_display(alert, *, risk_label=None, risk_keyw
     resolved_risk_label = risk_label or _resolve_risk_label_for_display(alert)
     resolved_risk_keywords_text = risk_keywords_text or _resolve_risk_keywords_text_for_display(alert)
     resolved_trade_flags_text = trade_flags_text or _resolve_trade_flags_text_for_display(alert)
+    used_refresh_info = _resolve_used_refresh_info(alert)
 
     notes = []
+    if used_refresh_info:
+        notes.append(REFRESH_INFO_NOTICE_TEXT)
     if resolved_risk_label in {"주의", "위험"}:
         notes.append(f"위험도 {resolved_risk_label}")
     if resolved_trade_flags_text not in {"특이사항 없음", "정보 없음"}:
@@ -2507,6 +2569,32 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
                 risk_level=risk_level,
             )
             risk_keywords_display = risk_keywords if risk_keywords else []
+            used_refresh_info = _resolve_used_refresh_info(
+                {
+                    "trigger_reason": trigger_reason,
+                    "message": row.get("message"),
+                    "body_excerpt": body_excerpt,
+                    "body_text": body_text,
+                }
+            )
+            refresh_notice_text = REFRESH_INFO_NOTICE_TEXT if used_refresh_info else None
+            body_excerpt_for_feed = _prepend_refresh_notice_to_body_excerpt(
+                body_excerpt,
+                used_refresh_info=used_refresh_info,
+            )
+            message_for_feed = _prepend_refresh_notice_to_body_excerpt(
+                row.get("message"),
+                used_refresh_info=used_refresh_info,
+            )
+            special_notes_text = _resolve_special_notes_text_for_display(
+                {
+                    "trigger_reason": trigger_reason,
+                    "used_refresh_info": used_refresh_info,
+                    "risk_level": risk_level,
+                    "risk_keywords": risk_keywords_display,
+                    "trade_type_flags": trade_type_flags,
+                }
+            )
             listing_image_url = _resolve_listing_image_url(
                 row.get("product_id"),
                 listing_image_url_map,
@@ -2550,7 +2638,7 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
                         alert_price_direction,
                     ),
                     "trigger_reason": trigger_reason,
-                    "message": row.get("message"),
+                    "message": message_for_feed,
                     "risk_level": risk_level,
                     "formatted_risk_label": _build_formatted_risk_label(risk_level),
                     "risk_score": risk_score,
@@ -2558,8 +2646,11 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
                     "trade_type_flags": trade_type_flags,
                     "is_exchange_post": bool(is_exchange_post) if is_exchange_post is not None else False,
                     "trade_type": trade_type,
-                    "body_excerpt": body_excerpt,
+                    "body_excerpt": body_excerpt_for_feed,
                     "body_text": body_text,
+                    "refresh_notice_text": refresh_notice_text,
+                    "used_refresh_info": used_refresh_info,
+                    "special_notes_text": special_notes_text,
                     "analyzed_at": analyzed_at,
                     "confidence_score": confidence_score,
                     "status": row.get("status"),
