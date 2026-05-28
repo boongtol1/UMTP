@@ -18,7 +18,9 @@ CREATE TABLE IF NOT EXISTS url_analysis_logs (
   is_alert_target BOOLEAN NULL,
   status VARCHAR(20) NOT NULL,
   reason VARCHAR(255) NULL,
+  content_signature VARCHAR(64) NOT NULL DEFAULT '',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_user_url_created_at (user_id, url(255), created_at),
-  KEY idx_status_created_at (status, created_at)
+  KEY idx_status_created_at (status, created_at),
+  UNIQUE KEY uq_url_analysis_logs_user_signature (user_id, content_signature)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

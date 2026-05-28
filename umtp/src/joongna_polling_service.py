@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 
 try:
@@ -156,6 +157,7 @@ def _build_poll_stats(search_words):
         "analysis_jobs_processed": 0,
         "analysis_jobs_process_failed": 0,
         "search_results_saved": 0,
+        "search_results_skipped_unchanged": 0,
         "search_results_save_errors": 0,
     }
 
@@ -213,6 +215,341 @@ def _safe_json_dumps(value):
         return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     except Exception:
         return "{}"
+
+
+def _is_unknown_column_error(exc):
+    lowered = str(exc).lower()
+    return "unknown column" in lowered or "doesn't exist" in lowered
+
+
+def _normalize_sort_date_for_signature(value):
+    normalized = _coerce_datetime(value)
+    if normalized is None:
+        return None
+    return normalized.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _build_search_result_content_signature(
+    *,
+    title,
+    price,
+    sort_date,
+    url,
+    refresh_key,
+    seller_store_seq,
+    seller_store_name,
+    seller_profile_image_url,
+    seller_store_level,
+    seller_trust_score,
+    seller_review_count,
+    raw_json,
+):
+    payload = {
+        "title": _safe_text(title),
+        "price": _safe_int(price),
+        "sort_date": _normalize_sort_date_for_signature(sort_date),
+        "url": _safe_text(url) or "",
+        "refresh_key": _safe_text(refresh_key),
+        "seller_store_seq": _safe_int(seller_store_seq),
+        "seller_store_name": _safe_text(seller_store_name),
+        "seller_profile_image_url": _safe_text(seller_profile_image_url),
+        "seller_store_level": _safe_text(seller_store_level),
+        "seller_trust_score": _safe_int(seller_trust_score),
+        "seller_review_count": _safe_int(seller_review_count),
+        "raw_json_sha256": hashlib.sha256((raw_json or "{}").encode("utf-8")).hexdigest(),
+    }
+    signature_source = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(signature_source.encode("utf-8")).hexdigest()
+
+
+def _row_value(row, key, index):
+    if isinstance(row, dict):
+        return row.get(key)
+    if isinstance(row, (tuple, list)):
+        if index < len(row):
+            return row[index]
+    return None
+
+
+def _fetch_latest_search_result_content_signature(cursor, *, search_query_id, product_id):
+    try:
+        cursor.execute(
+            """
+            SELECT
+                content_signature,
+                title,
+                price,
+                sort_date,
+                url,
+                refresh_key,
+                seller_store_seq,
+                seller_store_name,
+                seller_profile_image_url,
+                seller_store_level,
+                seller_trust_score,
+                seller_review_count,
+                raw_json
+            FROM search_results
+            WHERE search_query_id = %s
+              AND product_id = %s
+            ORDER BY fetched_at DESC, id DESC
+            LIMIT 1
+            """,
+            (search_query_id, product_id),
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            existing_signature = _safe_text(_row_value(row, "content_signature", 0))
+            if existing_signature:
+                return existing_signature
+            return _build_search_result_content_signature(
+                title=_row_value(row, "title", 1),
+                price=_row_value(row, "price", 2),
+                sort_date=_row_value(row, "sort_date", 3),
+                url=_row_value(row, "url", 4),
+                refresh_key=_row_value(row, "refresh_key", 5),
+                seller_store_seq=_row_value(row, "seller_store_seq", 6),
+                seller_store_name=_row_value(row, "seller_store_name", 7),
+                seller_profile_image_url=_row_value(row, "seller_profile_image_url", 8),
+                seller_store_level=_row_value(row, "seller_store_level", 9),
+                seller_trust_score=_row_value(row, "seller_trust_score", 10),
+                seller_review_count=_row_value(row, "seller_review_count", 11),
+                raw_json=_safe_text(_row_value(row, "raw_json", 12)) or "{}",
+            )
+        return None
+    except Exception as exc:
+        if not _is_unknown_column_error(exc):
+            raise
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                title,
+                price,
+                sort_date,
+                url,
+                seller_store_seq,
+                seller_store_name,
+                seller_profile_image_url,
+                seller_store_level,
+                seller_trust_score,
+                seller_review_count,
+                raw_json
+            FROM search_results
+            WHERE search_query_id = %s
+              AND product_id = %s
+            ORDER BY fetched_at DESC, id DESC
+            LIMIT 1
+            """,
+            (search_query_id, product_id),
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            return _build_search_result_content_signature(
+                title=_row_value(row, "title", 0),
+                price=_row_value(row, "price", 1),
+                sort_date=_row_value(row, "sort_date", 2),
+                url=_row_value(row, "url", 3),
+                refresh_key=None,
+                seller_store_seq=_row_value(row, "seller_store_seq", 4),
+                seller_store_name=_row_value(row, "seller_store_name", 5),
+                seller_profile_image_url=_row_value(row, "seller_profile_image_url", 6),
+                seller_store_level=_row_value(row, "seller_store_level", 7),
+                seller_trust_score=_row_value(row, "seller_trust_score", 8),
+                seller_review_count=_row_value(row, "seller_review_count", 9),
+                raw_json=_safe_text(_row_value(row, "raw_json", 10)) or "{}",
+            )
+        return None
+    except Exception as exc:
+        if not _is_unknown_column_error(exc):
+            raise
+
+    cursor.execute(
+        """
+        SELECT
+            title,
+            price,
+            sort_date,
+            url,
+            raw_json
+        FROM search_results
+        WHERE search_query_id = %s
+          AND product_id = %s
+        ORDER BY fetched_at DESC, id DESC
+        LIMIT 1
+        """,
+        (search_query_id, product_id),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    return _build_search_result_content_signature(
+        title=_row_value(row, "title", 0),
+        price=_row_value(row, "price", 1),
+        sort_date=_row_value(row, "sort_date", 2),
+        url=_row_value(row, "url", 3),
+        refresh_key=None,
+        seller_store_seq=None,
+        seller_store_name=None,
+        seller_profile_image_url=None,
+        seller_store_level=None,
+        seller_trust_score=None,
+        seller_review_count=None,
+        raw_json=_safe_text(_row_value(row, "raw_json", 4)) or "{}",
+    )
+
+
+def _insert_search_result_row(
+    cursor,
+    *,
+    search_query_id,
+    product_id,
+    title,
+    price,
+    sort_date,
+    url,
+    refresh_key,
+    seller_store_seq,
+    seller_store_name,
+    seller_profile_image_url,
+    seller_store_level,
+    seller_trust_score,
+    seller_review_count,
+    raw_json,
+    content_signature,
+    fetched_at,
+):
+    try:
+        cursor.execute(
+            """
+            INSERT INTO search_results (
+                search_query_id,
+                product_id,
+                title,
+                price,
+                sort_date,
+                url,
+                refresh_key,
+                seller_store_seq,
+                seller_store_name,
+                seller_profile_image_url,
+                seller_store_level,
+                seller_trust_score,
+                seller_review_count,
+                raw_json,
+                content_signature,
+                fetched_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                fetched_at = GREATEST(fetched_at, VALUES(fetched_at)),
+                title = VALUES(title),
+                price = VALUES(price),
+                sort_date = VALUES(sort_date),
+                url = VALUES(url),
+                refresh_key = VALUES(refresh_key),
+                seller_store_seq = VALUES(seller_store_seq),
+                seller_store_name = VALUES(seller_store_name),
+                seller_profile_image_url = VALUES(seller_profile_image_url),
+                seller_store_level = VALUES(seller_store_level),
+                seller_trust_score = VALUES(seller_trust_score),
+                seller_review_count = VALUES(seller_review_count),
+                raw_json = VALUES(raw_json)
+            """,
+            (
+                search_query_id,
+                product_id,
+                title,
+                price,
+                sort_date,
+                url,
+                refresh_key,
+                seller_store_seq,
+                seller_store_name,
+                seller_profile_image_url,
+                seller_store_level,
+                seller_trust_score,
+                seller_review_count,
+                raw_json,
+                content_signature,
+                fetched_at,
+            ),
+        )
+        return int(cursor.rowcount or 0)
+    except Exception as exc:
+        if not _is_unknown_column_error(exc):
+            raise
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO search_results (
+                search_query_id,
+                product_id,
+                title,
+                price,
+                sort_date,
+                url,
+                seller_store_seq,
+                seller_store_name,
+                seller_profile_image_url,
+                seller_store_level,
+                seller_trust_score,
+                seller_review_count,
+                raw_json,
+                fetched_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                search_query_id,
+                product_id,
+                title,
+                price,
+                sort_date,
+                url,
+                seller_store_seq,
+                seller_store_name,
+                seller_profile_image_url,
+                seller_store_level,
+                seller_trust_score,
+                seller_review_count,
+                raw_json,
+                fetched_at,
+            ),
+        )
+        return int(cursor.rowcount or 0)
+    except Exception as exc:
+        if not _is_unknown_column_error(exc):
+            raise
+
+    cursor.execute(
+        """
+        INSERT INTO search_results (
+            search_query_id,
+            product_id,
+            title,
+            price,
+            sort_date,
+            url,
+            raw_json,
+            fetched_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            search_query_id,
+            product_id,
+            title,
+            price,
+            sort_date,
+            url,
+            raw_json,
+            fetched_at,
+        ),
+    )
+    return int(cursor.rowcount or 0)
 
 
 def _extract_single_value_row(row):
@@ -351,7 +688,7 @@ def _filter_unchanged_targets_needing_backfill(cursor, observed_product, eligibl
 
 def _is_schema_missing_error(exc):
     lowered = str(exc).lower()
-    return "unknown column" in lowered or "unknown table" in lowered or "doesn't exist" in lowered
+    return "unknown table" in lowered or _is_unknown_column_error(exc)
 
 
 def _fetch_store_profile_cache_row(cursor, store_seq):
@@ -583,7 +920,13 @@ def save_group_search_results(
     normalized_source = _normalize_source(source)
     normalized_keyword = normalize_search_keyword(search_keyword)
     if cursor is None or not normalized_keyword:
-        return {"ok": False, "reason": "invalid_scope", "search_query_id": None, "inserted_count": 0}
+        return {
+            "ok": False,
+            "reason": "invalid_scope",
+            "search_query_id": None,
+            "inserted_count": 0,
+            "skipped_unchanged_count": 0,
+        }
 
     normalized_fetched_at = _coerce_datetime(fetched_at) or datetime.now()
     search_query_id = _upsert_search_query(
@@ -594,9 +937,17 @@ def save_group_search_results(
         status=status,
     )
     if search_query_id is None:
-        return {"ok": False, "reason": "search_query_upsert_failed", "search_query_id": None, "inserted_count": 0}
+        return {
+            "ok": False,
+            "reason": "search_query_upsert_failed",
+            "search_query_id": None,
+            "inserted_count": 0,
+            "skipped_unchanged_count": 0,
+        }
 
     inserted_count = 0
+    skipped_unchanged_count = 0
+    latest_signature_by_product = {}
     for item in items or []:
         if not isinstance(item, dict):
             continue
@@ -641,81 +992,66 @@ def save_group_search_results(
         price = _safe_int(item.get("price"))
         sort_date = _coerce_datetime(item.get("sort_date"))
         url = _safe_text(item.get("product_url")) or ""
+        refresh_key = _safe_text(item.get("refresh_key"))
         raw_json = _safe_json_dumps(item)
+        content_signature = _build_search_result_content_signature(
+            title=title,
+            price=price,
+            sort_date=sort_date,
+            url=url,
+            refresh_key=refresh_key,
+            seller_store_seq=seller_store_seq,
+            seller_store_name=seller_store_name,
+            seller_profile_image_url=seller_profile_image_url,
+            seller_store_level=seller_store_level,
+            seller_trust_score=seller_trust_score,
+            seller_review_count=seller_review_count,
+            raw_json=raw_json,
+        )
 
-        try:
-            cursor.execute(
-                """
-                INSERT INTO search_results (
-                    search_query_id,
-                    product_id,
-                    title,
-                    price,
-                    sort_date,
-                    url,
-                    seller_store_seq,
-                    seller_store_name,
-                    seller_profile_image_url,
-                    seller_store_level,
-                    seller_trust_score,
-                    seller_review_count,
-                    raw_json,
-                    fetched_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    search_query_id,
-                    product_id,
-                    title,
-                    price,
-                    sort_date,
-                    url,
-                    seller_store_seq,
-                    seller_store_name,
-                    seller_profile_image_url,
-                    seller_store_level,
-                    seller_trust_score,
-                    seller_review_count,
-                    raw_json,
-                    normalized_fetched_at,
-                ),
+        previous_signature = latest_signature_by_product.get(product_id)
+        if previous_signature is None:
+            previous_signature = _fetch_latest_search_result_content_signature(
+                cursor,
+                search_query_id=search_query_id,
+                product_id=product_id,
             )
-        except Exception as exc:
-            if "unknown column" not in str(exc).lower():
-                raise
-            cursor.execute(
-                """
-                INSERT INTO search_results (
-                    search_query_id,
-                    product_id,
-                    title,
-                    price,
-                    sort_date,
-                    url,
-                    raw_json,
-                    fetched_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    search_query_id,
-                    product_id,
-                    title,
-                    price,
-                    sort_date,
-                    url,
-                    raw_json,
-                    normalized_fetched_at,
-                ),
-            )
-        inserted_count += 1
+            latest_signature_by_product[product_id] = previous_signature
+
+        if previous_signature is not None and previous_signature == content_signature:
+            skipped_unchanged_count += 1
+            continue
+
+        row_count = _insert_search_result_row(
+            cursor,
+            search_query_id=search_query_id,
+            product_id=product_id,
+            title=title,
+            price=price,
+            sort_date=sort_date,
+            url=url,
+            refresh_key=refresh_key,
+            seller_store_seq=seller_store_seq,
+            seller_store_name=seller_store_name,
+            seller_profile_image_url=seller_profile_image_url,
+            seller_store_level=seller_store_level,
+            seller_trust_score=seller_trust_score,
+            seller_review_count=seller_review_count,
+            raw_json=raw_json,
+            content_signature=content_signature,
+            fetched_at=normalized_fetched_at,
+        )
+
+        if row_count == 1:
+            inserted_count += 1
+        latest_signature_by_product[product_id] = content_signature
 
     return {
         "ok": True,
         "reason": "saved",
         "search_query_id": search_query_id,
         "inserted_count": inserted_count,
+        "skipped_unchanged_count": skipped_unchanged_count,
     }
 
 
@@ -1183,7 +1519,11 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                         if save_result.get("ok"):
                             connection.commit()
                             inserted_count = int(save_result.get("inserted_count") or 0)
+                            skipped_unchanged_count = int(
+                                save_result.get("skipped_unchanged_count") or 0
+                            )
                             stats["search_results_saved"] += inserted_count
+                            stats["search_results_skipped_unchanged"] += skipped_unchanged_count
                         else:
                             stats["search_results_save_errors"] += 1
                             print(
@@ -1325,6 +1665,7 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
     print(
         "[polling] search_cache_summary "
         f"search_results_saved={stats.get('search_results_saved', 0)} "
+        f"search_results_skipped_unchanged={stats.get('search_results_skipped_unchanged', 0)} "
         f"search_results_save_errors={stats.get('search_results_save_errors', 0)}"
     )
 

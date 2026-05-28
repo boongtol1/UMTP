@@ -7,7 +7,7 @@ SET SQL_SAFE_UPDATES = 0;
 -- - alert_events / alert_read_archive_events: 전량 보존 (삭제 없음)
 -- - search_queries: 전량 보존 (삭제 없음)
 -- - search_results: (search_query_id, product_id) 최신 1행만 유지
--- - url_analysis_logs: (user_id, url) 최신 1행만 유지
+-- - url_analysis_logs: 완전 동일(content_signature 동일)한 행만 중복 제거
 -- - joongna_seen_products: 활성 키워드와 일치하는 행만 유지
 
 -- 1) 활성 키워드(현재 enabled watch rule) 집합
@@ -43,7 +43,8 @@ SELECT ROW_COUNT() AS deleted_search_results;
 
 SELECT 0 AS deleted_search_queries;
 
--- 3) 유지할 url_analysis_logs: (user_id, url) 최신 1행
+-- 3) 유지할 url_analysis_logs: (user_id, content_signature) 최신 1행
+-- 참고: migrate_url_analysis_logs_change_only_recording.sql 실행 후 사용 권장
 CREATE TEMPORARY TABLE tmp_keep_url_log_ids (
   id BIGINT UNSIGNED NOT NULL,
   PRIMARY KEY (id)
@@ -52,7 +53,32 @@ CREATE TEMPORARY TABLE tmp_keep_url_log_ids (
 INSERT INTO tmp_keep_url_log_ids (id)
 SELECT MAX(ual.id) AS keep_id
 FROM url_analysis_logs ual
-GROUP BY ual.user_id, ual.url;
+GROUP BY
+  ual.user_id,
+  COALESCE(
+    NULLIF(TRIM(ual.content_signature), ''),
+    SHA2(
+      CONCAT_WS(
+        '|',
+        IFNULL(ual.user_id, ''),
+        IFNULL(ual.url, ''),
+        IFNULL(ual.source, ''),
+        IFNULL(ual.title, ''),
+        IFNULL(CAST(ual.listing_price_krw AS CHAR), ''),
+        IFNULL(ual.product_type, ''),
+        IFNULL(ual.chip, ''),
+        IFNULL(CAST(ual.screen_inch AS CHAR), ''),
+        IFNULL(CAST(ual.ram_gb AS CHAR), ''),
+        IFNULL(CAST(ual.ssd_gb AS CHAR), ''),
+        IFNULL(CAST(ual.fair_price_krw AS CHAR), ''),
+        IFNULL(CAST(ual.diff_ratio AS CHAR), ''),
+        IFNULL(CAST(ual.is_alert_target AS CHAR), ''),
+        IFNULL(ual.status, ''),
+        IFNULL(ual.reason, '')
+      ),
+      256
+    )
+  );
 
 DELETE ual
 FROM url_analysis_logs ual
