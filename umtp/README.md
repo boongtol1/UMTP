@@ -239,6 +239,26 @@ DB 저장 완료
 `.env`에는 실제 DB 비밀번호 등 민감 정보가 들어갑니다.  
 `.env` 파일은 절대 git에 올리지 마세요.
 
+### 6) `UMTP_RB` -> `umtp_history` 이중 적재(히스토리 보관)
+
+`UMTP_RB`는 정리(cleanup)하고, `umtp_history`에는 전체 이력을 계속 적재하려면 아래 스크립트를 1회 실행하세요.
+
+```bash
+python src/run_setup_umtp_history_capture.py
+```
+
+옵션 예시:
+
+```bash
+python src/run_setup_umtp_history_capture.py \
+  --source-db UMTP_RB \
+  --target-db umtp_history \
+  --trigger-schema UMTP_RB
+```
+
+스크립트는 source DB의 모든 BASE TABLE에 대해 히스토리 테이블/트리거를 설치하고,
+이후 INSERT/UPDATE/DELETE를 `umtp_history`에 append-only로 누적합니다.
+
 ---
 
 ## Outbound rate limiting
