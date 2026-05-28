@@ -33,7 +33,7 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
         self.assertTrue(should_analyze_listing("title_changed"))
         self.assertTrue(should_analyze_listing("body_changed"))
         self.assertTrue(should_analyze_listing("self_check_changed"))
-        self.assertTrue(should_analyze_listing("refresh_key_changed"))
+        self.assertFalse(should_analyze_listing("refresh_key_changed"))
         self.assertTrue(should_analyze_listing("body_maybe_changed"))
         self.assertFalse(should_analyze_listing("unchanged"))
 
@@ -94,7 +94,7 @@ class ShouldAnalyzeSeenProductTest(unittest.TestCase):
                 "refresh_key": "rk-2",
             },
         )
-        self.assertTrue(should_analyze)
+        self.assertFalse(should_analyze)
         self.assertEqual(reason, "refresh_key_changed")
 
     def test_sort_date_changed_detects_reexposure(self):

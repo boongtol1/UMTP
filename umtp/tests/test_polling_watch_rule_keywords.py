@@ -633,7 +633,7 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(stats.get("analysis_jobs_skipped_duplicate"), 1)
         self.assertEqual(stats.get("created_alert_count"), 0)
 
-    def test_poll_once_changed_listing_keeps_duplicate_skip_count(self):
+    def test_poll_once_refresh_key_only_change_skips_analysis_queue(self):
         due_rules = [
             {
                 "id": 41,
@@ -666,16 +666,12 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
                     with patch("src.joongna_polling_service.get_seen_product", return_value=existing_seen):
                         with patch("src.joongna_polling_service.upsert_seen_product_observation"):
                             with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
-                                mock_enqueue.return_value = {
-                                    "ok": True,
-                                    "created_jobs": [],
-                                    "skipped_jobs": [{"reason": "duplicate_identity_job"}],
-                                }
                                 stats = poll_once()
 
-        self.assertEqual(mock_enqueue.call_count, 1)
+        self.assertEqual(mock_enqueue.call_count, 0)
         self.assertEqual(stats.get("changed_count"), 1)
-        self.assertEqual(stats.get("analysis_jobs_skipped_duplicate"), 1)
+        self.assertEqual(stats.get("analysis_jobs_skipped_duplicate"), 0)
+        self.assertEqual(stats.get("analyzed_count"), 0)
         self.assertEqual(stats.get("created_alert_count"), 0)
 
     def test_poll_once_saves_search_results_per_group(self):
