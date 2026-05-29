@@ -134,6 +134,7 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 1.8 진행 현황: polling은 감지된 매물을 `analysis_jobs`에 enqueue하고, analysis worker가 pending job을 처리해 `listing_analysis_results` 및 `alert_events`를 생성합니다.
 - 1.8 polling 구조: 같은 `source + search_keyword`는 같은 polling cycle에서 외부 Search API를 1회만 호출하고, 결과를 저장한 뒤 여러 설정(`user_fair_prices`)은 저장 결과를 내부 매칭으로 공유합니다.
 - 1.8 검색 캐시 구조: 공유 polling 결과는 `search_queries`(검색어 스코프) + `search_results`(조회 결과 스냅샷) 테이블에도 저장됩니다.
+- 1.8 immediate enqueue 옵션: `ENABLE_IMMEDIATE_ANALYSIS_ENQUEUE=true`면 검색 결과 매칭 직후 `trigger_reason=immediate_search_result`로 `analysis_jobs`를 선등록합니다. 이 경로는 `unchanged_backfill`을 제거하는 대체 로직이 아니라, 누락과 지연을 줄이기 위한 빠른 보조 경로입니다.
 - 1.8 중고나라 판매자명 구조: Search API 응답에는 판매자 닉네임 필드가 직접 없고 `storeSeq`만 내려올 수 있습니다.
 - 1.8 판매자 프로필 조회: `storeSeq`가 있으면 `GET https://main-api.joongna.com/user/info/product-detail?storeSeq={storeSeq}`를 추가 호출해 `nickName(storeName)`을 판매자 표시 이름으로 저장합니다.
 - 1.8 판매자 캐시 정책: `joongna_store_profiles` 테이블에 `storeSeq -> store_name`을 장기 캐시하고, 캐시 hit 시 외부 API 재호출 없이 DB 값을 재사용합니다.

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 
 try:
     from src.db import get_connection
@@ -40,6 +41,8 @@ except ModuleNotFoundError:
 
 STORE_PROFILE_RETRY_MINUTES = 30
 STORE_PROFILE_SUCCESS_TTL_HOURS = 24
+ENABLE_IMMEDIATE_ANALYSIS_ENQUEUE_ENV = "ENABLE_IMMEDIATE_ANALYSIS_ENQUEUE"
+IMMEDIATE_ANALYSIS_TRIGGER_REASON = "immediate_search_result"
 
 
 def _normalize_search_words(search_words):
@@ -47,6 +50,17 @@ def _normalize_search_words(search_words):
         return []
 
     return dedupe_keywords_keep_order(search_words)
+
+
+def _is_truthy_env(value):
+    normalized = _safe_text(value)
+    if normalized is None:
+        return False
+    return normalized.lower() in {"1", "true", "yes", "on"}
+
+
+def _is_immediate_analysis_enqueue_enabled():
+    return _is_truthy_env(os.getenv(ENABLE_IMMEDIATE_ANALYSIS_ENQUEUE_ENV, "false"))
 
 
 def _normalize_optional_user_id(user_id):
@@ -580,6 +594,32 @@ def _target_setting_id(target):
     return _normalize_setting_id(target.get("setting_id") or target.get("rule_id"))
 
 
+def _target_identity_key(target):
+    if not isinstance(target, dict):
+        return None
+    user_id = _normalize_optional_user_id(target.get("user_id"))
+    setting_id = _target_setting_id(target)
+    if user_id is None or setting_id is None:
+        return None
+    return user_id, setting_id
+
+
+def _observed_product_match_key(observed_product):
+    product_id = _safe_text(
+        (observed_product or {}).get("product_id")
+        or (observed_product or {}).get("seq")
+    )
+    if product_id is None:
+        return None
+    normalized_sort_date = _coerce_datetime((observed_product or {}).get("sort_date"))
+    normalized_sort_date_text = (
+        normalized_sort_date.strftime("%Y-%m-%d %H:%M:%S")
+        if normalized_sort_date is not None
+        else None
+    )
+    return product_id, normalized_sort_date_text
+
+
 def _has_analysis_job_for_target(cursor, target, product_id, sort_date=None):
     if cursor is None or not isinstance(target, dict):
         return False
@@ -685,6 +725,94 @@ def _filter_unchanged_targets_needing_backfill(cursor, observed_product, eligibl
             continue
         backfill_targets.append(target)
     return backfill_targets
+
+
+def enqueue_immediate_analysis_jobs_for_matches(matches, *, cursor):
+    covered_target_keys_by_match_key = {}
+    if cursor is None:
+        return covered_target_keys_by_match_key
+
+    for match in matches or []:
+        observed_product = (match or {}).get("observed_product") or {}
+        eligible_targets = (match or {}).get("eligible_targets") or []
+        match_key = _observed_product_match_key(observed_product)
+        if match_key is None:
+            continue
+
+        product_id = match_key[0]
+        sort_date = _coerce_datetime(observed_product.get("sort_date"))
+        targets_to_enqueue = []
+        covered_target_keys = set()
+
+        for target in eligible_targets:
+            target_key = _target_identity_key(target)
+            if target_key is None:
+                continue
+
+            if _has_analysis_job_for_target(
+                cursor,
+                target,
+                product_id,
+                sort_date=sort_date,
+            ):
+                covered_target_keys.add(target_key)
+                continue
+
+            targets_to_enqueue.append(target)
+
+        if targets_to_enqueue:
+            try:
+                enqueue_analysis_for_product(
+                    observed_product,
+                    targets_to_enqueue,
+                    IMMEDIATE_ANALYSIS_TRIGGER_REASON,
+                )
+                for target in targets_to_enqueue:
+                    target_key = _target_identity_key(target)
+                    if target_key is not None:
+                        covered_target_keys.add(target_key)
+            except Exception as exc:
+                search_keyword = _safe_text(observed_product.get("search_keyword")) or "-"
+                print(
+                    "[polling] immediate enqueue 실패 "
+                    f"(keyword={search_keyword}, seq={product_id}): {exc}"
+                )
+
+        if covered_target_keys:
+            covered_target_keys_by_match_key[match_key] = covered_target_keys
+
+    return covered_target_keys_by_match_key
+
+
+def filter_matches_excluding_covered_targets(matches, covered_target_keys_by_match_key):
+    if not covered_target_keys_by_match_key:
+        return matches or []
+
+    filtered_matches = []
+    for match in matches or []:
+        observed_product = (match or {}).get("observed_product") or {}
+        match_key = _observed_product_match_key(observed_product)
+        covered_target_keys = covered_target_keys_by_match_key.get(match_key) or set()
+        if not covered_target_keys:
+            filtered_matches.append(match)
+            continue
+
+        eligible_targets = (match or {}).get("eligible_targets") or []
+        remaining_targets = []
+        for target in eligible_targets:
+            target_key = _target_identity_key(target)
+            if target_key is not None and target_key in covered_target_keys:
+                continue
+            remaining_targets.append(target)
+
+        if not remaining_targets:
+            continue
+
+        next_match = dict(match or {})
+        next_match["eligible_targets"] = remaining_targets
+        filtered_matches.append(next_match)
+
+    return filtered_matches
 
 
 def _is_schema_missing_error(exc):
@@ -1632,7 +1760,18 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                     targets_for_word,
                     stats=stats,
                 )
+                immediate_covered_target_keys_by_match_key = {}
+                if _is_immediate_analysis_enqueue_enabled():
+                    immediate_covered_target_keys_by_match_key = enqueue_immediate_analysis_jobs_for_matches(
+                        matches,
+                        cursor=cursor,
+                    )
                 selected_matches = select_matches_for_analysis(matches, cursor=cursor, stats=stats)
+                if immediate_covered_target_keys_by_match_key:
+                    selected_matches = filter_matches_excluding_covered_targets(
+                        selected_matches,
+                        immediate_covered_target_keys_by_match_key,
+                    )
                 create_alerts_for_matches(selected_matches, stats=stats)
             finally:
                 if search_completed_for_word:

@@ -10,6 +10,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.joongna_polling_service import (  # noqa: E402
+    IMMEDIATE_ANALYSIS_TRIGGER_REASON,
     _has_analysis_job_for_target,
     _build_keyword_targets_from_watch_rules,
     parse_sort_date,
@@ -22,14 +23,20 @@ class _FakeCursor:
         self.executed = []
         self._search_query_id = 1
         self._fetchone_result = None
+        self.rowcount = 0
 
     def execute(self, query, params=None):
         self.executed.append((query, params))
         normalized = " ".join((query or "").split()).lower()
         if normalized.startswith("select id from search_queries"):
             self._fetchone_result = (self._search_query_id,)
+            self.rowcount = 1
         else:
             self._fetchone_result = None
+            if normalized.startswith("insert into"):
+                self.rowcount = 1
+            else:
+                self.rowcount = 0
 
     def fetchone(self):
         return self._fetchone_result
@@ -673,6 +680,156 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(stats.get("analysis_jobs_skipped_duplicate"), 0)
         self.assertEqual(stats.get("analyzed_count"), 0)
         self.assertEqual(stats.get("created_alert_count"), 0)
+
+    def test_poll_once_feature_flag_false_keeps_existing_enqueue_path(self):
+        due_rules = [
+            {
+                "id": 501,
+                "user_id": "u1",
+                "search_keyword": "맥북 m2",
+                "saved_at": "2026-05-15 10:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 8001,
+            "product_id": 8001,
+            "title": "맥북에어 M2 16GB 512GB",
+            "price": 1190000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-8001",
+            "product_url": "https://web.joongna.com/product/8001",
+            "image_url": "",
+        }
+
+        with patch.dict(os.environ, {"ENABLE_IMMEDIATE_ANALYSIS_ENQUEUE": "false"}):
+            with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+                with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                    with patch("src.joongna_polling_service.get_connection", return_value=_FakeConnection()):
+                        with patch("src.joongna_polling_service.get_seen_product", return_value=None):
+                            with patch("src.joongna_polling_service.upsert_seen_product_observation"):
+                                with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                                    mock_enqueue.return_value = {
+                                        "ok": True,
+                                        "created_jobs": [{"job_id": 1}],
+                                        "skipped_jobs": [],
+                                    }
+                                    poll_once()
+
+        self.assertEqual(mock_enqueue.call_count, 1)
+        self.assertEqual(mock_enqueue.call_args.args[2], "new")
+
+    def test_poll_once_feature_flag_true_enqueues_immediately(self):
+        due_rules = [
+            {
+                "id": 502,
+                "user_id": "u1",
+                "search_keyword": "맥북 m2",
+                "saved_at": "2026-05-15 10:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 8002,
+            "product_id": 8002,
+            "title": "맥북에어 M2 16GB 512GB",
+            "price": 1190000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-8002",
+            "product_url": "https://web.joongna.com/product/8002",
+            "image_url": "",
+        }
+
+        with patch.dict(os.environ, {"ENABLE_IMMEDIATE_ANALYSIS_ENQUEUE": "true"}):
+            with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+                with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                    with patch("src.joongna_polling_service.get_connection", return_value=_FakeConnection()):
+                        with patch("src.joongna_polling_service.get_seen_product", return_value=None):
+                            with patch("src.joongna_polling_service.upsert_seen_product_observation"):
+                                with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                                    mock_enqueue.return_value = {
+                                        "ok": True,
+                                        "created_jobs": [{"job_id": 1}],
+                                        "skipped_jobs": [],
+                                    }
+                                    poll_once()
+
+        self.assertEqual(mock_enqueue.call_count, 1)
+        self.assertEqual(mock_enqueue.call_args.args[2], IMMEDIATE_ANALYSIS_TRIGGER_REASON)
+
+    def test_poll_once_feature_flag_true_dedupes_same_rule_product_sort_date(self):
+        due_rules = [
+            {
+                "id": 503,
+                "user_id": "u1",
+                "search_keyword": "맥북 m2",
+                "saved_at": "2026-05-15 10:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 8003,
+            "product_id": 8003,
+            "title": "맥북에어 M2 16GB 512GB",
+            "price": 1190000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-8003",
+            "product_url": "https://web.joongna.com/product/8003",
+            "image_url": "",
+        }
+        existing_seen = {
+            "seq": 8003,
+            "last_title": "맥북에어 M2 16GB 512GB",
+            "last_price_krw": 1190000,
+            "last_refresh_key": "rk-8003",
+            "last_sort_date": "2026-05-15 12:28:52",
+        }
+
+        existing_job_keys = set()
+
+        def _normalize_sort_date(value):
+            if isinstance(value, datetime):
+                return value.strftime("%Y-%m-%d %H:%M:%S")
+            if value is None:
+                return None
+            return str(value).strip()
+
+        def _job_key(target, product_id, sort_date):
+            user_id = target.get("user_id")
+            watch_rule_id = target.get("setting_id") or target.get("rule_id")
+            return (str(user_id), int(watch_rule_id), str(product_id), _normalize_sort_date(sort_date))
+
+        def _mock_has_job(cursor, target, product_id, sort_date=None):
+            return _job_key(target, product_id, sort_date) in existing_job_keys
+
+        def _mock_enqueue(product, targets, trigger_reason):
+            for target in targets or []:
+                existing_job_keys.add(
+                    _job_key(target, product.get("product_id"), product.get("sort_date"))
+                )
+            return {
+                "ok": True,
+                "created_jobs": [{"job_id": 1}] if targets else [],
+                "skipped_jobs": [],
+            }
+
+        with patch.dict(os.environ, {"ENABLE_IMMEDIATE_ANALYSIS_ENQUEUE": "true"}):
+            with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+                with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                    with patch("src.joongna_polling_service.get_connection", return_value=_FakeConnection()):
+                        with patch("src.joongna_polling_service.get_seen_product", return_value=existing_seen):
+                            with patch("src.joongna_polling_service.upsert_seen_product_observation"):
+                                with patch(
+                                    "src.joongna_polling_service._has_analysis_job_for_target",
+                                    side_effect=_mock_has_job,
+                                ):
+                                    with patch(
+                                        "src.joongna_polling_service.enqueue_analysis_for_product",
+                                        side_effect=_mock_enqueue,
+                                    ) as mock_enqueue:
+                                        poll_once()
+                                        poll_once()
+
+        self.assertEqual(mock_enqueue.call_count, 1)
+        self.assertEqual(mock_enqueue.call_args.args[2], IMMEDIATE_ANALYSIS_TRIGGER_REASON)
+        self.assertEqual(len(existing_job_keys), 1)
 
     def test_poll_once_saves_search_results_per_group(self):
         due_rules = [
