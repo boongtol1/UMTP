@@ -735,6 +735,14 @@ def enqueue_immediate_analysis_jobs_for_matches(matches, *, cursor):
     for match in matches or []:
         observed_product = (match or {}).get("observed_product") or {}
         eligible_targets = (match or {}).get("eligible_targets") or []
+        change_reason = _safe_text((match or {}).get("change_reason"))
+        should_analyze_change = should_analyze_listing(change_reason)
+
+        # 기존 큐 정책과 동일하게, 분석 대상 reason 또는 unchanged(백필 보강)만 즉시 enqueue 대상으로 본다.
+        if not should_analyze_change and change_reason != "unchanged":
+            continue
+
+        trigger_reason = change_reason if should_analyze_change else IMMEDIATE_ANALYSIS_TRIGGER_REASON
         match_key = _observed_product_match_key(observed_product)
         if match_key is None:
             continue
@@ -765,7 +773,7 @@ def enqueue_immediate_analysis_jobs_for_matches(matches, *, cursor):
                 enqueue_analysis_for_product(
                     observed_product,
                     targets_to_enqueue,
-                    IMMEDIATE_ANALYSIS_TRIGGER_REASON,
+                    trigger_reason,
                 )
                 for target in targets_to_enqueue:
                     target_key = _target_identity_key(target)
