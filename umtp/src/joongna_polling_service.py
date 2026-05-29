@@ -39,6 +39,7 @@ except ModuleNotFoundError:
 
 
 STORE_PROFILE_RETRY_MINUTES = 30
+STORE_PROFILE_SUCCESS_TTL_HOURS = 24
 
 
 def _normalize_search_words(search_words):
@@ -812,20 +813,26 @@ def resolve_store_profile_for_store_seq(cursor, store_seq, *, store_profile_cach
         return store_profile_cache.get(normalized_store_seq)
 
     cached_row = _fetch_store_profile_cache_row(cursor, normalized_store_seq)
+    now_dt = datetime.now()
     stale_store_name = None
     if isinstance(cached_row, dict):
         stale_store_name = _safe_text(cached_row.get("store_name"))
+        last_fetched_at = _coerce_datetime(cached_row.get("last_fetched_at"))
         next_retry_at = _coerce_datetime(cached_row.get("next_retry_at"))
-        if stale_store_name is not None:
-            result = {
-                "store_seq": normalized_store_seq,
-                "store_name": stale_store_name,
-            }
-            if isinstance(store_profile_cache, dict):
-                store_profile_cache[normalized_store_seq] = result
-            return result
+        # 성공 캐시는 TTL 내에서만 재사용하고, 만료되면 재조회 시도한다.
+        if stale_store_name is not None and last_fetched_at is not None:
+            elapsed = now_dt - last_fetched_at
+            if elapsed < timedelta(hours=STORE_PROFILE_SUCCESS_TTL_HOURS):
+                result = {
+                    "store_seq": normalized_store_seq,
+                    "store_name": stale_store_name,
+                }
+                if isinstance(store_profile_cache, dict):
+                    store_profile_cache[normalized_store_seq] = result
+                return result
 
-        if next_retry_at is not None and next_retry_at > datetime.now():
+        # 최근 실패한 storeSeq는 backoff 윈도우 동안 stale 값(또는 None)을 그대로 반환한다.
+        if next_retry_at is not None and next_retry_at > now_dt:
             result = {
                 "store_seq": normalized_store_seq,
                 "store_name": stale_store_name,
