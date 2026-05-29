@@ -76,11 +76,11 @@ UMTP(Used Market Tracker Project)의 Android 클라이언트 앱입니다.
 - 알림 클릭 시 해당 매물의 상세 정보로 이동합니다.
 
 ### 서버 주소 설정
-- 기본 서버 주소는 `http://183.111.181.122:8000/` 입니다.
+- 기본 서버 주소는 `https://umtp.duckdns.org/` 입니다.
 - 다른 서버를 쓰려면 `android/gradle.properties` 또는 사용자 전역 `~/.gradle/gradle.properties`에 아래를 추가하세요.
 
 ```properties
-UMTP_BASE_URL=http://<SERVER_HOST>:8000/
+UMTP_BASE_URL=https://<SERVER_HOST>/
 ```
 
 - 주소 끝 `/`는 없어도 자동 보정됩니다.

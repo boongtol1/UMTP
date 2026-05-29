@@ -7,7 +7,7 @@ plugins {
 val configuredBaseUrl = (project.findProperty("UMTP_BASE_URL") as String?)
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
-    ?: "http://183.111.181.122:8000/"
+    ?: "https://umtp.duckdns.org/"
 
 android {
     namespace = "com.boongtol.umtp_android"

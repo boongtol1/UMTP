@@ -7,7 +7,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
 object UmtpApiClient {
-    private const val FALLBACK_BASE_URL = "http://183.111.181.122:8000/"
+    private const val FALLBACK_BASE_URL = "https://umtp.duckdns.org/"
 
     private fun normalizeBaseUrl(raw: String?): String {
         val trimmed = raw?.trim().orEmpty()
