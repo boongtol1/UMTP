@@ -841,6 +841,143 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(mock_enqueue.call_args.args[2], IMMEDIATE_ANALYSIS_TRIGGER_REASON)
         self.assertEqual(len(existing_job_keys), 1)
 
+    def test_poll_once_feature_flag_true_price_changed_bypasses_sort_date_precheck(self):
+        due_rules = [
+            {
+                "id": 505,
+                "user_id": "u1",
+                "search_keyword": "맥북 m2",
+                "saved_at": "2026-05-15 10:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 8101,
+            "product_id": 8101,
+            "title": "맥북에어 M2 16GB 512GB",
+            "price": 1200000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-8101",
+            "product_url": "https://web.joongna.com/product/8101",
+            "image_url": "",
+        }
+        existing_seen = {
+            "seq": 8101,
+            "last_title": "맥북에어 M2 16GB 512GB",
+            "last_price_krw": 1190000,
+            "last_refresh_key": "rk-8101",
+            "last_sort_date": "2026-05-15 12:28:52",
+        }
+
+        with patch.dict(os.environ, {"ENABLE_IMMEDIATE_ANALYSIS_ENQUEUE": "true"}):
+            with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+                with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                    with patch("src.joongna_polling_service.get_connection", return_value=_FakeConnection()):
+                        with patch("src.joongna_polling_service.get_seen_product", return_value=existing_seen):
+                            with patch("src.joongna_polling_service.upsert_seen_product_observation"):
+                                with patch(
+                                    "src.joongna_polling_service._has_analysis_job_for_target",
+                                    return_value=True,
+                                ) as mock_sort_date_lookup:
+                                    with patch(
+                                        "src.joongna_polling_service._has_analysis_or_alert_fingerprint_for_target",
+                                        return_value=False,
+                                    ) as mock_fingerprint_lookup:
+                                        with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                                            mock_enqueue.return_value = {
+                                                "ok": True,
+                                                "created_jobs": [{"job_id": 1}],
+                                                "skipped_jobs": [],
+                                            }
+                                            poll_once()
+
+        self.assertEqual(mock_enqueue.call_count, 1)
+        self.assertEqual(mock_enqueue.call_args.args[2], "price_changed")
+        self.assertGreaterEqual(mock_fingerprint_lookup.call_count, 1)
+        self.assertEqual(mock_sort_date_lookup.call_count, 0)
+
+    def test_poll_once_feature_flag_true_skips_price_changed_when_fingerprint_exists(self):
+        due_rules = [
+            {
+                "id": 506,
+                "user_id": "u1",
+                "search_keyword": "맥북 m2",
+                "saved_at": "2026-05-15 10:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 8102,
+            "product_id": 8102,
+            "title": "맥북에어 M2 16GB 512GB",
+            "price": 1200000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-8102",
+            "product_url": "https://web.joongna.com/product/8102",
+            "image_url": "",
+        }
+        existing_seen = {
+            "seq": 8102,
+            "last_title": "맥북에어 M2 16GB 512GB",
+            "last_price_krw": 1190000,
+            "last_refresh_key": "rk-8102",
+            "last_sort_date": "2026-05-15 12:28:52",
+        }
+
+        with patch.dict(os.environ, {"ENABLE_IMMEDIATE_ANALYSIS_ENQUEUE": "true"}):
+            with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+                with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                    with patch("src.joongna_polling_service.get_connection", return_value=_FakeConnection()):
+                        with patch("src.joongna_polling_service.get_seen_product", return_value=existing_seen):
+                            with patch("src.joongna_polling_service.upsert_seen_product_observation"):
+                                with patch(
+                                    "src.joongna_polling_service._has_analysis_or_alert_fingerprint_for_target",
+                                    return_value=True,
+                                ) as mock_fingerprint_lookup:
+                                    with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                                        poll_once()
+
+        self.assertGreaterEqual(mock_fingerprint_lookup.call_count, 1)
+        self.assertEqual(mock_enqueue.call_count, 0)
+
+    def test_poll_once_feature_flag_true_keeps_sort_date_precheck_for_new(self):
+        due_rules = [
+            {
+                "id": 507,
+                "user_id": "u1",
+                "search_keyword": "맥북 m2",
+                "saved_at": "2026-05-15 10:00:00",
+            }
+        ]
+        mock_item = {
+            "seq": 8103,
+            "product_id": 8103,
+            "title": "맥북에어 M2 16GB 512GB",
+            "price": 1200000,
+            "sort_date": "2026-05-15 12:28:52",
+            "refresh_key": "rk-8103",
+            "product_url": "https://web.joongna.com/product/8103",
+            "image_url": "",
+        }
+
+        with patch.dict(os.environ, {"ENABLE_IMMEDIATE_ANALYSIS_ENQUEUE": "true"}):
+            with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
+                with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
+                    with patch("src.joongna_polling_service.get_connection", return_value=_FakeConnection()):
+                        with patch("src.joongna_polling_service.get_seen_product", return_value=None):
+                            with patch("src.joongna_polling_service.upsert_seen_product_observation"):
+                                with patch(
+                                    "src.joongna_polling_service._has_analysis_job_for_target",
+                                    return_value=True,
+                                ) as mock_sort_date_lookup:
+                                    with patch(
+                                        "src.joongna_polling_service._has_analysis_or_alert_fingerprint_for_target",
+                                    ) as mock_fingerprint_lookup:
+                                        with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
+                                            poll_once()
+
+        self.assertGreaterEqual(mock_sort_date_lookup.call_count, 1)
+        self.assertEqual(mock_fingerprint_lookup.call_count, 0)
+        self.assertEqual(mock_enqueue.call_count, 0)
+
     def test_poll_once_feature_flag_true_uses_immediate_reason_only_for_unchanged(self):
         due_rules = [
             {

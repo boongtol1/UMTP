@@ -43,6 +43,15 @@ STORE_PROFILE_RETRY_MINUTES = 30
 STORE_PROFILE_SUCCESS_TTL_HOURS = 24
 ENABLE_IMMEDIATE_ANALYSIS_ENQUEUE_ENV = "ENABLE_IMMEDIATE_ANALYSIS_ENQUEUE"
 IMMEDIATE_ANALYSIS_TRIGGER_REASON = "immediate_search_result"
+CONTENT_CHANGE_DEDUPE_CHANGE_REASONS = frozenset(
+    {
+        "price_changed",
+        "title_changed",
+        "body_changed",
+        "self_check_changed",
+        "content_changed",
+    }
+)
 
 
 def _normalize_search_words(search_words):
@@ -705,6 +714,123 @@ def _has_analysis_job_for_target(cursor, target, product_id, sort_date=None):
     return False
 
 
+def _build_analysis_job_change_fingerprint_for_observed_product(
+    observed_product,
+    *,
+    trigger_reason,
+):
+    normalized_sort_date = _coerce_datetime((observed_product or {}).get("sort_date"))
+    payload = {
+        "trigger_reason": _safe_text(trigger_reason) or "",
+        "sort_date": str(normalized_sort_date) if normalized_sort_date is not None else "",
+        "title": _safe_text((observed_product or {}).get("title")) or "",
+        "price_krw": _safe_int((observed_product or {}).get("price")),
+        "url": _safe_text((observed_product or {}).get("product_url")) or "",
+        "refresh_key": _safe_text((observed_product or {}).get("refresh_key")) or "",
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _build_alert_event_change_fingerprint_for_observed_product(
+    observed_product,
+    *,
+    trigger_reason,
+):
+    normalized_sort_date = _coerce_datetime((observed_product or {}).get("sort_date"))
+    payload = {
+        "trigger_reason": _safe_text(trigger_reason) or "",
+        "sort_date": str(normalized_sort_date) if normalized_sort_date is not None else "",
+        "content_revision_hash": _safe_text((observed_product or {}).get("content_revision_hash")) or "",
+        "title": _safe_text((observed_product or {}).get("title")) or "",
+        "price_krw": _safe_int((observed_product or {}).get("price")),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _has_analysis_or_alert_fingerprint_for_target(cursor, target, product_id, fingerprints):
+    if cursor is None or not isinstance(target, dict):
+        return False
+
+    user_id = _normalize_optional_user_id(target.get("user_id"))
+    setting_id = _target_setting_id(target)
+    normalized_product_id = _safe_text(product_id)
+    normalized_fingerprints = []
+    for fingerprint in fingerprints or []:
+        normalized = _safe_text(fingerprint)
+        if normalized and normalized not in normalized_fingerprints:
+            normalized_fingerprints.append(normalized)
+    if (
+        user_id is None
+        or setting_id is None
+        or normalized_product_id is None
+        or not normalized_fingerprints
+    ):
+        return False
+
+    placeholders = ", ".join(["%s"] * len(normalized_fingerprints))
+    base_params = [user_id, setting_id, setting_id, normalized_product_id]
+    fingerprint_params = list(normalized_fingerprints)
+
+    try:
+        cursor.execute(
+            f"""
+            SELECT id
+            FROM analysis_jobs
+            WHERE user_id = %s
+              AND (
+                    (watch_rule_id IS NULL AND %s IS NULL)
+                 OR watch_rule_id = %s
+              )
+              AND product_id = %s
+              AND change_fingerprint IN ({placeholders})
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            tuple(base_params + fingerprint_params),
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            return True
+    except Exception as exc:
+        lowered = str(exc).lower()
+        if "unknown column" not in lowered or "change_fingerprint" not in lowered:
+            return False
+
+    try:
+        cursor.execute(
+            f"""
+            SELECT id
+            FROM alert_events
+            WHERE user_id = %s
+              AND (
+                    (watch_rule_id IS NULL AND %s IS NULL)
+                 OR watch_rule_id = %s
+              )
+              AND product_id = %s
+              AND change_fingerprint IN ({placeholders})
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            tuple(base_params + fingerprint_params),
+        )
+        row = cursor.fetchone()
+        return row is not None
+    except Exception as exc:
+        lowered = str(exc).lower()
+        if "unknown column" not in lowered or "change_fingerprint" not in lowered:
+            return False
+        return False
+
+
+def _should_use_content_change_fingerprint_dedupe(change_reason):
+    normalized_change_reason = _safe_text(change_reason)
+    if normalized_change_reason is None:
+        return False
+    return normalized_change_reason in CONTENT_CHANGE_DEDUPE_CHANGE_REASONS
+
+
 def _filter_unchanged_targets_needing_backfill(cursor, observed_product, eligible_targets):
     product_id = _safe_text(
         (observed_product or {}).get("product_id")
@@ -751,18 +877,48 @@ def enqueue_immediate_analysis_jobs_for_matches(matches, *, cursor):
         sort_date = _coerce_datetime(observed_product.get("sort_date"))
         targets_to_enqueue = []
         covered_target_keys = set()
+        use_content_change_fingerprint_dedupe = _should_use_content_change_fingerprint_dedupe(
+            change_reason
+        )
+
+        analysis_job_change_fingerprint = None
+        alert_event_change_fingerprint = None
+        if use_content_change_fingerprint_dedupe:
+            analysis_job_change_fingerprint = _build_analysis_job_change_fingerprint_for_observed_product(
+                observed_product,
+                trigger_reason=trigger_reason,
+            )
+            alert_event_change_fingerprint = _build_alert_event_change_fingerprint_for_observed_product(
+                observed_product,
+                trigger_reason=trigger_reason,
+            )
+            observed_product["change_fingerprint"] = analysis_job_change_fingerprint
 
         for target in eligible_targets:
             target_key = _target_identity_key(target)
             if target_key is None:
                 continue
 
-            if _has_analysis_job_for_target(
-                cursor,
-                target,
-                product_id,
-                sort_date=sort_date,
-            ):
+            has_duplicate = False
+            if use_content_change_fingerprint_dedupe:
+                has_duplicate = _has_analysis_or_alert_fingerprint_for_target(
+                    cursor,
+                    target,
+                    product_id,
+                    (
+                        analysis_job_change_fingerprint,
+                        alert_event_change_fingerprint,
+                    ),
+                )
+            else:
+                has_duplicate = _has_analysis_job_for_target(
+                    cursor,
+                    target,
+                    product_id,
+                    sort_date=sort_date,
+                )
+
+            if has_duplicate:
                 covered_target_keys.add(target_key)
                 continue
 
