@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from hashlib import sha256
 from bisect import bisect_left
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -24,6 +25,13 @@ DEFAULT_MIN_CHECK_INTERVAL_MINUTES = 30
 DEFAULT_LOOKBACK_DAYS = 14
 DEFAULT_LISTING_CANDIDATE_LIMIT = 10000
 INACTIVE_LABEL_MAX_MINUTES = 7 * 24 * 60
+
+STORE_MY_STORE_URL_TEMPLATE = "https://main-api.joongna.com/v2/my-store/{store_id}"
+STORE_MY_STORE_REQUEST_TIMEOUT_SECONDS = 10
+STORE_MY_STORE_HEADERS = {
+    "accept": "application/json",
+    "user-agent": "Mozilla/5.0",
+}
 
 STORE_RSC_URL_TEMPLATE = "https://web.joongna.com/store/{store_id}?_rsc=1"
 STORE_PAGE_REFERER_TEMPLATE = "https://web.joongna.com/store/{store_id}"
@@ -60,6 +68,7 @@ SUSPENDED_MARKERS = (
 DELETED_MARKERS = (
     "존재하지 않는 상점",
     "찾을 수 없는 상점",
+    "페이지를 찾을 수 없습니다",
     "삭제된 상점",
     "탈퇴한 회원",
     "존재하지 않는 회원",
@@ -99,6 +108,34 @@ def _safe_int(value: Any) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_bool_int(value: Any) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return 1 if value else 0
+    normalized = _safe_text(value)
+    if normalized is None:
+        return None
+    lowered = normalized.lower()
+    if lowered in {"1", "true", "yes", "y", "on"}:
+        return 1
+    if lowered in {"0", "false", "no", "n", "off"}:
+        return 0
+    parsed = _safe_int(value)
+    if parsed is None:
+        return None
+    return 1 if parsed != 0 else 0
 
 
 def _safe_datetime(value: Any) -> Optional[datetime]:
@@ -170,6 +207,53 @@ def _normalize_store_id(value: Any) -> Optional[str]:
     if text is None:
         return None
     return text
+
+
+def _normalize_store_name(name: Any) -> Optional[str]:
+    normalized = _safe_text(name)
+    if normalized is None:
+        return None
+    collapsed = re.sub(r"\s+", " ", normalized).strip()
+    return collapsed or None
+
+
+def _sha256_hex(value: str) -> str:
+    return sha256(value.encode("utf-8")).hexdigest()
+
+
+def _build_store_name_fingerprint(store_id: str, store_name: str) -> str:
+    normalized_name = _normalize_store_name(store_name) or ""
+    return _sha256_hex(f"{store_id}|{normalized_name}")
+
+
+def _build_profile_fingerprint(store_id: str, profile: Dict[str, Any]) -> str:
+    normalized_name = _normalize_store_name(profile.get("store_name")) or ""
+    tokens = [
+        store_id,
+        normalized_name,
+        _safe_text(profile.get("profile_image_url")) or "",
+        str(_safe_int(profile.get("review_count")) or ""),
+        str(_safe_int(profile.get("reliability_score")) or ""),
+        str(_safe_int(profile.get("activity_score")) or ""),
+        str(_safe_int(profile.get("trust_score")) or ""),
+        str(_safe_int(profile.get("safe_trade_count")) or ""),
+        str(_safe_int(profile.get("store_level_number")) or ""),
+    ]
+    return _sha256_hex("|".join(tokens))
+
+
+def _is_unknown_column_error(exc: Exception) -> bool:
+    lowered = str(exc).lower()
+    return "unknown column" in lowered
+
+
+def _is_missing_table_error(exc: Exception) -> bool:
+    lowered = str(exc).lower()
+    return "unknown table" in lowered or "doesn't exist" in lowered
+
+
+def _is_schema_missing_error(exc: Exception) -> bool:
+    return _is_unknown_column_error(exc) or _is_missing_table_error(exc)
 
 
 def get_fraud_store_monitor_config() -> Dict[str, Any]:
@@ -343,6 +427,97 @@ def _is_due_for_check(
     return (checked_at - last_checked_at) >= min_gap
 
 
+def _extract_meta_from_json(payload: Any) -> Tuple[Optional[int], Optional[str]]:
+    if not isinstance(payload, dict):
+        return None, None
+    meta = payload.get("meta")
+    if not isinstance(meta, dict):
+        return None, None
+    return _safe_int(meta.get("code")), _safe_text(meta.get("message"))
+
+
+def _extract_my_store_profile(store_id: str, payload: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    profile_image_url = _safe_text(data.get("profileImageUrl")) or _safe_text(data.get("storeImgUrl"))
+    store_name = _normalize_store_name(data.get("storeName")) or _normalize_store_name(data.get("nickName"))
+    return {
+        "store_id": store_id,
+        "store_name": store_name,
+        "store_name_fingerprint": _build_store_name_fingerprint(store_id, store_name) if store_name else None,
+        "profile_image_url": profile_image_url,
+        "has_default_profile_image": 1 if "default/profile_" in (profile_image_url or "").lower() else 0,
+        "store_level": _safe_text(data.get("storeLevel")),
+        "store_level_number": _safe_int(data.get("storeLevelNumber")),
+        "review_count": _safe_int(data.get("reviewCount")),
+        "reliability_score": _safe_int(data.get("reliabilityScore")),
+        "activity_score": _safe_int(data.get("activityScore")),
+        "notified_score": _safe_int(data.get("notifiedScore")),
+        "safe_trade_count": _safe_int(data.get("safeTradeCount")),
+        "trust_score": _safe_int(data.get("trustScore")),
+        "chat_response_ratio": _safe_text(data.get("chatResponseRatio")),
+        "chat_response_time": _safe_int(data.get("chatResponseTime")),
+        "chat_response_time_text": _safe_text(data.get("chatResponseTimeText")),
+        "visit_today_count": _safe_int(data.get("visitTodayCount")),
+        "visit_total_count": _safe_int(data.get("visitTotalCount")),
+        "store_grade": _safe_float(data.get("storeGrade")),
+        "user_type": _safe_int(data.get("userType")),
+        "partner_center_seller_yn": _safe_bool_int(data.get("partnerCenterSellerYn")),
+        "is_official_account": _safe_bool_int(data.get("isOfficialAccount")),
+        "store_desc": _safe_text(data.get("storeDesc")) or _safe_text(data.get("storeAbout")),
+        "raw_json": data,
+    }
+
+
+def _summarize_my_store_response(
+    *,
+    url: str,
+    status_code: int,
+    meta_code: Optional[int],
+    meta_message: Optional[str],
+    payload: Any,
+) -> Dict[str, Any]:
+    if isinstance(payload, dict):
+        data = payload.get("data")
+    else:
+        data = None
+    snippet_obj = payload if isinstance(payload, (dict, list)) else {"value": _safe_text(payload)}
+    snippet_text = ""
+    try:
+        snippet_text = json.dumps(snippet_obj, ensure_ascii=False)[:240]
+    except Exception:
+        snippet_text = _safe_text(snippet_obj) or ""
+    return {
+        "my_store_url": url,
+        "http_status": status_code,
+        "meta_code": meta_code,
+        "meta_message": meta_message,
+        "has_data_object": isinstance(data, dict),
+        "data_keys": sorted(list(data.keys())) if isinstance(data, dict) else [],
+        "payload_excerpt": snippet_text,
+    }
+
+
+def _classify_store_status_from_my_store(
+    *,
+    status_code: int,
+    meta_code: Optional[int],
+    meta_message: Optional[str],
+    profile: Optional[Dict[str, Any]],
+) -> Tuple[str, str]:
+    lowered_message = (meta_message or "").lower()
+    if status_code in (404, 410):
+        return STATUS_DELETED, f"http_{status_code}"
+    if meta_code == 0 and isinstance(profile, dict):
+        return STATUS_ACTIVE, "my_store_success"
+    if meta_code == 400999 or "이용제한" in (meta_message or "") or "restricted" in lowered_message:
+        return STATUS_SUSPENDED, "my_store_suspended_message"
+    return STATUS_UNKNOWN, "my_store_unknown"
+
+
 def _find_marker(lowered_text: str, markers: Iterable[str]) -> Optional[str]:
     for marker in markers:
         lowered_marker = marker.lower()
@@ -446,6 +621,74 @@ def _probe_store_status(store_id: str) -> Dict[str, Any]:
             "raw_status_text": "invalid_store_id",
             "raw_response_json": {"reason": "invalid_store_id"},
             "error_message": "invalid_store_id",
+            "source": "my_store_api",
+            "http_status": None,
+            "meta_code": None,
+            "meta_message": "invalid_store_id",
+            "raw_snippet": "invalid_store_id",
+            "profile": None,
+        }
+
+    my_store_url = STORE_MY_STORE_URL_TEMPLATE.format(store_id=normalized_store_id)
+    my_store_summary: Dict[str, Any] = {}
+    my_store_status = STATUS_UNKNOWN
+    my_store_reason = "my_store_unknown"
+    my_store_http_status: Optional[int] = None
+    my_store_meta_code: Optional[int] = None
+    my_store_meta_message: Optional[str] = None
+    my_store_profile: Optional[Dict[str, Any]] = None
+
+    try:
+        my_store_response = requests.get(
+            my_store_url,
+            headers=STORE_MY_STORE_HEADERS,
+            timeout=STORE_MY_STORE_REQUEST_TIMEOUT_SECONDS,
+        )
+        my_store_http_status = int(my_store_response.status_code)
+        my_store_payload = None
+        try:
+            my_store_payload = my_store_response.json()
+        except Exception:
+            my_store_payload = {"raw_text": _decode_response_body_text(my_store_response)[:240]}
+
+        my_store_meta_code, my_store_meta_message = _extract_meta_from_json(my_store_payload)
+        my_store_profile = _extract_my_store_profile(normalized_store_id, my_store_payload)
+        my_store_status, my_store_reason = _classify_store_status_from_my_store(
+            status_code=my_store_http_status,
+            meta_code=my_store_meta_code,
+            meta_message=my_store_meta_message,
+            profile=my_store_profile,
+        )
+        my_store_summary = _summarize_my_store_response(
+            url=my_store_url,
+            status_code=my_store_http_status,
+            meta_code=my_store_meta_code,
+            meta_message=my_store_meta_message,
+            payload=my_store_payload,
+        )
+    except Exception as exc:
+        my_store_status = STATUS_ERROR
+        my_store_reason = _safe_text(exc) or "my_store_error"
+        my_store_summary = {
+            "my_store_url": my_store_url,
+            "exception_type": type(exc).__name__,
+            "error_message": _safe_text(exc),
+        }
+
+    if my_store_status in {STATUS_ACTIVE, STATUS_SUSPENDED, STATUS_DELETED}:
+        return {
+            "checked_at": checked_at,
+            "status": my_store_status,
+            "is_active": 1 if my_store_status == STATUS_ACTIVE else 0,
+            "raw_status_text": my_store_reason,
+            "raw_response_json": my_store_summary,
+            "error_message": None if my_store_status != STATUS_ERROR else my_store_reason,
+            "source": "my_store_api",
+            "http_status": my_store_http_status,
+            "meta_code": my_store_meta_code,
+            "meta_message": my_store_meta_message,
+            "raw_snippet": _safe_text((my_store_summary or {}).get("payload_excerpt")),
+            "profile": my_store_profile,
         }
 
     rsc_url = STORE_RSC_URL_TEMPLATE.format(store_id=normalized_store_id)
@@ -471,13 +714,28 @@ def _probe_store_status(store_id: str) -> Dict[str, Any]:
             marker=marker,
             status=status,
         )
+        merged_summary = {
+            "my_store": my_store_summary,
+            "rsc": summary,
+        }
+        final_status = status
+        final_marker = marker
+        if my_store_status == STATUS_ERROR and status == STATUS_UNKNOWN:
+            final_status = STATUS_ERROR
+            final_marker = my_store_reason
         return {
             "checked_at": checked_at,
-            "status": status,
-            "is_active": 1 if status == STATUS_ACTIVE else 0,
-            "raw_status_text": marker,
-            "raw_response_json": summary,
-            "error_message": None,
+            "status": final_status,
+            "is_active": 1 if final_status == STATUS_ACTIVE else 0,
+            "raw_status_text": final_marker,
+            "raw_response_json": merged_summary,
+            "error_message": my_store_reason if final_status == STATUS_ERROR else None,
+            "source": "store_rsc",
+            "http_status": status_code,
+            "meta_code": my_store_meta_code,
+            "meta_message": my_store_meta_message,
+            "raw_snippet": _safe_text(summary.get("body_excerpt")),
+            "profile": my_store_profile,
         }
     except Exception as exc:
         message = str(exc)
@@ -487,10 +745,17 @@ def _probe_store_status(store_id: str) -> Dict[str, Any]:
             "is_active": 0,
             "raw_status_text": message,
             "raw_response_json": {
+                "my_store": my_store_summary,
                 "rsc_url": rsc_url,
                 "exception_type": type(exc).__name__,
             },
             "error_message": message,
+            "source": "store_rsc",
+            "http_status": None,
+            "meta_code": my_store_meta_code,
+            "meta_message": my_store_meta_message,
+            "raw_snippet": None,
+            "profile": my_store_profile,
         }
 
 
@@ -506,6 +771,11 @@ def _insert_status_snapshot(
     first_seen_product_id: Optional[str],
     first_seen_sort_date: Optional[datetime],
     error_message: Optional[str],
+    source: Optional[str] = None,
+    http_status: Optional[int] = None,
+    meta_code: Optional[int] = None,
+    meta_message: Optional[str] = None,
+    raw_snippet: Optional[str] = None,
 ):
     raw_json_text = None
     if raw_response_json is not None:
@@ -513,6 +783,53 @@ def _insert_status_snapshot(
             raw_json_text = json.dumps(raw_response_json, ensure_ascii=False)
         except Exception:
             raw_json_text = None
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO fraud_store_status_snapshots (
+                store_id,
+                store_seq,
+                checked_at,
+                status,
+                status_reason,
+                source,
+                is_active,
+                http_status,
+                meta_code,
+                meta_message,
+                raw_status_text,
+                raw_snippet,
+                raw_response_json,
+                first_seen_product_id,
+                first_seen_sort_date,
+                error_message
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                store_id,
+                _safe_int(store_id),
+                checked_at,
+                status,
+                raw_status_text,
+                source,
+                is_active,
+                http_status,
+                meta_code,
+                meta_message,
+                raw_status_text,
+                raw_snippet,
+                raw_json_text,
+                first_seen_product_id,
+                first_seen_sort_date,
+                error_message,
+            ),
+        )
+        return
+    except Exception as exc:
+        if not _is_schema_missing_error(exc):
+            raise
 
     cursor.execute(
         """
@@ -541,6 +858,326 @@ def _insert_status_snapshot(
             error_message,
         ),
     )
+
+
+def _fetch_joongna_store_profile_row(cursor, store_seq: int) -> Dict[str, Any]:
+    try:
+        cursor.execute(
+            """
+            SELECT store_seq, store_name, store_name_fingerprint
+            FROM joongna_store_profiles
+            WHERE store_seq = %s
+            LIMIT 1
+            """,
+            (store_seq,),
+        )
+    except Exception as exc:
+        if not _is_schema_missing_error(exc):
+            raise
+        try:
+            cursor.execute(
+                """
+                SELECT store_seq, store_name
+                FROM joongna_store_profiles
+                WHERE store_seq = %s
+                LIMIT 1
+                """,
+                (store_seq,),
+            )
+        except Exception as fallback_exc:
+            if _is_schema_missing_error(fallback_exc):
+                return {}
+            raise
+    row = cursor.fetchone() or {}
+    if not isinstance(row, dict):
+        return {}
+    return row
+
+
+def _insert_store_name_change(
+    cursor,
+    *,
+    store_seq: int,
+    old_name: Optional[str],
+    new_name: str,
+    old_fingerprint: Optional[str],
+    new_fingerprint: str,
+    changed_at: datetime,
+    source: str,
+):
+    try:
+        cursor.execute(
+            """
+            INSERT INTO joongna_store_name_changes (
+                store_seq,
+                old_name,
+                new_name,
+                old_fingerprint,
+                new_fingerprint,
+                changed_at,
+                source
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                store_seq,
+                old_name,
+                new_name,
+                old_fingerprint,
+                new_fingerprint,
+                changed_at,
+                source,
+            ),
+        )
+    except Exception as exc:
+        if _is_schema_missing_error(exc):
+            return
+        raise
+
+
+def _upsert_joongna_store_profile_snapshot(
+    cursor,
+    *,
+    store_id: str,
+    checked_at: datetime,
+    profile: Dict[str, Any],
+    status: str,
+    status_reason: Optional[str],
+    source: str,
+):
+    store_seq = _safe_int(store_id)
+    if store_seq is None:
+        return
+
+    normalized_store_name = _normalize_store_name(profile.get("store_name"))
+    store_name_fingerprint = (
+        _build_store_name_fingerprint(store_id, normalized_store_name)
+        if normalized_store_name is not None
+        else None
+    )
+    profile_fingerprint = _build_profile_fingerprint(
+        store_id,
+        {
+            "store_name": normalized_store_name,
+            "profile_image_url": profile.get("profile_image_url"),
+            "review_count": profile.get("review_count"),
+            "reliability_score": profile.get("reliability_score"),
+            "activity_score": profile.get("activity_score"),
+            "trust_score": profile.get("trust_score"),
+            "safe_trade_count": profile.get("safe_trade_count"),
+            "store_level_number": profile.get("store_level_number"),
+        },
+    )
+
+    existing_row = _fetch_joongna_store_profile_row(cursor, store_seq)
+    old_name = _normalize_store_name(existing_row.get("store_name"))
+    old_fingerprint = _safe_text(existing_row.get("store_name_fingerprint"))
+    if normalized_store_name is not None and (
+        old_fingerprint != store_name_fingerprint
+        or (old_fingerprint is None and old_name != normalized_store_name)
+    ):
+        _insert_store_name_change(
+            cursor,
+            store_seq=store_seq,
+            old_name=old_name,
+            new_name=normalized_store_name,
+            old_fingerprint=old_fingerprint,
+            new_fingerprint=store_name_fingerprint,
+            changed_at=checked_at,
+            source=source,
+        )
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO joongna_store_profiles (
+                store_seq,
+                store_name,
+                store_name_fingerprint,
+                profile_fingerprint,
+                profile_image_url,
+                store_level,
+                store_level_number,
+                review_count,
+                reliability_score,
+                activity_score,
+                notified_score,
+                safe_trade_count,
+                trust_score,
+                chat_response_ratio,
+                chat_response_time,
+                chat_response_time_text,
+                visit_today_count,
+                visit_total_count,
+                store_grade,
+                user_type,
+                partner_center_seller_yn,
+                is_official_account,
+                store_desc,
+                fetch_status,
+                error_message,
+                last_status,
+                last_status_reason,
+                last_status_checked_at,
+                last_seen_at,
+                last_fetched_at,
+                next_retry_at
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, 'success', NULL, %s, %s, %s, %s, %s, NULL
+            )
+            ON DUPLICATE KEY UPDATE
+                store_name = VALUES(store_name),
+                store_name_fingerprint = VALUES(store_name_fingerprint),
+                profile_fingerprint = VALUES(profile_fingerprint),
+                profile_image_url = VALUES(profile_image_url),
+                store_level = VALUES(store_level),
+                store_level_number = VALUES(store_level_number),
+                review_count = VALUES(review_count),
+                reliability_score = VALUES(reliability_score),
+                activity_score = VALUES(activity_score),
+                notified_score = VALUES(notified_score),
+                safe_trade_count = VALUES(safe_trade_count),
+                trust_score = VALUES(trust_score),
+                chat_response_ratio = VALUES(chat_response_ratio),
+                chat_response_time = VALUES(chat_response_time),
+                chat_response_time_text = VALUES(chat_response_time_text),
+                visit_today_count = VALUES(visit_today_count),
+                visit_total_count = VALUES(visit_total_count),
+                store_grade = VALUES(store_grade),
+                user_type = VALUES(user_type),
+                partner_center_seller_yn = VALUES(partner_center_seller_yn),
+                is_official_account = VALUES(is_official_account),
+                store_desc = VALUES(store_desc),
+                fetch_status = 'success',
+                error_message = NULL,
+                last_status = VALUES(last_status),
+                last_status_reason = VALUES(last_status_reason),
+                last_status_checked_at = VALUES(last_status_checked_at),
+                last_seen_at = VALUES(last_seen_at),
+                last_fetched_at = VALUES(last_fetched_at),
+                next_retry_at = NULL
+            """,
+            (
+                store_seq,
+                normalized_store_name,
+                store_name_fingerprint,
+                profile_fingerprint,
+                _safe_text(profile.get("profile_image_url")),
+                _safe_text(profile.get("store_level")),
+                _safe_int(profile.get("store_level_number")),
+                _safe_int(profile.get("review_count")),
+                _safe_int(profile.get("reliability_score")),
+                _safe_int(profile.get("activity_score")),
+                _safe_int(profile.get("notified_score")),
+                _safe_int(profile.get("safe_trade_count")),
+                _safe_int(profile.get("trust_score")),
+                _safe_text(profile.get("chat_response_ratio")),
+                _safe_int(profile.get("chat_response_time")),
+                _safe_text(profile.get("chat_response_time_text")),
+                _safe_int(profile.get("visit_today_count")),
+                _safe_int(profile.get("visit_total_count")),
+                _safe_float(profile.get("store_grade")),
+                _safe_int(profile.get("user_type")),
+                _safe_bool_int(profile.get("partner_center_seller_yn")),
+                _safe_bool_int(profile.get("is_official_account")),
+                _safe_text(profile.get("store_desc")),
+                status,
+                _safe_text(status_reason),
+                checked_at,
+                checked_at,
+                checked_at,
+            ),
+        )
+        return
+    except Exception as exc:
+        if not _is_schema_missing_error(exc):
+            raise
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO joongna_store_profiles (
+                store_seq,
+                store_name,
+                fetch_status,
+                error_message,
+                last_fetched_at,
+                next_retry_at
+            )
+            VALUES (%s, %s, 'success', NULL, %s, NULL)
+            ON DUPLICATE KEY UPDATE
+                store_name = VALUES(store_name),
+                fetch_status = 'success',
+                error_message = NULL,
+                last_fetched_at = VALUES(last_fetched_at),
+                next_retry_at = NULL
+            """,
+            (
+                store_seq,
+                normalized_store_name,
+                checked_at,
+            ),
+        )
+    except Exception as fallback_exc:
+        if _is_schema_missing_error(fallback_exc):
+            return
+        raise
+
+
+def _upsert_joongna_store_profile_status(
+    cursor,
+    *,
+    store_id: str,
+    checked_at: datetime,
+    status: str,
+    status_reason: Optional[str],
+    error_message: Optional[str],
+):
+    store_seq = _safe_int(store_id)
+    if store_seq is None:
+        return
+    try:
+        cursor.execute(
+            """
+            INSERT INTO joongna_store_profiles (
+                store_seq,
+                store_name,
+                fetch_status,
+                error_message,
+                last_status,
+                last_status_reason,
+                last_status_checked_at,
+                last_seen_at,
+                last_fetched_at,
+                next_retry_at
+            )
+            VALUES (%s, NULL, 'success', %s, %s, %s, %s, %s, %s, NULL)
+            ON DUPLICATE KEY UPDATE
+                fetch_status = VALUES(fetch_status),
+                error_message = VALUES(error_message),
+                last_status = VALUES(last_status),
+                last_status_reason = VALUES(last_status_reason),
+                last_status_checked_at = VALUES(last_status_checked_at),
+                last_seen_at = VALUES(last_seen_at),
+                last_fetched_at = VALUES(last_fetched_at),
+                next_retry_at = NULL
+            """,
+            (
+                store_seq,
+                _safe_text(error_message),
+                status,
+                _safe_text(status_reason),
+                checked_at,
+                checked_at,
+                checked_at,
+            ),
+        )
+    except Exception as exc:
+        if _is_schema_missing_error(exc):
+            return
+        raise
 
 
 def _compute_activity_snapshot_from_db(
@@ -602,7 +1239,117 @@ def _insert_activity_snapshot(
     activity: Dict[str, int],
     first_seen_product_id: Optional[str],
     first_seen_sort_date: Optional[datetime],
+    profile: Optional[Dict[str, Any]] = None,
 ):
+    normalized_store_name = _normalize_store_name((profile or {}).get("store_name"))
+    store_name_fingerprint = (
+        _build_store_name_fingerprint(store_id, normalized_store_name)
+        if normalized_store_name is not None
+        else None
+    )
+    profile_fingerprint = (
+        _build_profile_fingerprint(store_id, profile)
+        if isinstance(profile, dict)
+        else None
+    )
+    store_desc = _safe_text((profile or {}).get("store_desc"))
+    raw_json_text = None
+    if isinstance(profile, dict):
+        try:
+            raw_json_text = json.dumps(profile.get("raw_json"), ensure_ascii=False)
+        except Exception:
+            raw_json_text = None
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO fraud_store_activity_snapshots (
+                store_id,
+                store_seq,
+                checked_at,
+                observed_at,
+                posts_last_1h,
+                posts_last_6h,
+                posts_last_24h,
+                posts_last_7d,
+                visible_product_count,
+                store_name,
+                store_name_fingerprint,
+                profile_fingerprint,
+                profile_image_url,
+                has_default_profile_image,
+                store_level,
+                store_level_number,
+                review_count,
+                reliability_score,
+                activity_score,
+                notified_score,
+                safe_trade_count,
+                trust_score,
+                chat_response_ratio,
+                chat_response_time,
+                chat_response_time_text,
+                visit_today_count,
+                visit_total_count,
+                store_grade,
+                user_type,
+                partner_center_seller_yn,
+                is_official_account,
+                store_desc,
+                store_desc_length,
+                raw_json,
+                first_seen_product_id,
+                first_seen_sort_date
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            )
+            """,
+            (
+                store_id,
+                _safe_int(store_id),
+                checked_at,
+                checked_at,
+                int(activity.get("posts_last_1h") or 0),
+                int(activity.get("posts_last_6h") or 0),
+                int(activity.get("posts_last_24h") or 0),
+                int(activity.get("posts_last_7d") or 0),
+                _safe_int(activity.get("visible_product_count")),
+                normalized_store_name,
+                store_name_fingerprint,
+                profile_fingerprint,
+                _safe_text((profile or {}).get("profile_image_url")),
+                _safe_int((profile or {}).get("has_default_profile_image")),
+                _safe_text((profile or {}).get("store_level")),
+                _safe_int((profile or {}).get("store_level_number")),
+                _safe_int((profile or {}).get("review_count")),
+                _safe_int((profile or {}).get("reliability_score")),
+                _safe_int((profile or {}).get("activity_score")),
+                _safe_int((profile or {}).get("notified_score")),
+                _safe_int((profile or {}).get("safe_trade_count")),
+                _safe_int((profile or {}).get("trust_score")),
+                _safe_text((profile or {}).get("chat_response_ratio")),
+                _safe_int((profile or {}).get("chat_response_time")),
+                _safe_text((profile or {}).get("chat_response_time_text")),
+                _safe_int((profile or {}).get("visit_today_count")),
+                _safe_int((profile or {}).get("visit_total_count")),
+                _safe_float((profile or {}).get("store_grade")),
+                _safe_int((profile or {}).get("user_type")),
+                _safe_bool_int((profile or {}).get("partner_center_seller_yn")),
+                _safe_bool_int((profile or {}).get("is_official_account")),
+                store_desc,
+                len(store_desc) if store_desc is not None else None,
+                raw_json_text,
+                first_seen_product_id,
+                first_seen_sort_date,
+            ),
+        )
+        return
+    except Exception as exc:
+        if not _is_schema_missing_error(exc):
+            raise
+
     cursor.execute(
         """
         INSERT INTO fraud_store_activity_snapshots (
@@ -846,24 +1593,53 @@ def run_fraud_store_monitor_once(
                     first_seen_product_id=_safe_text(target.get("first_seen_product_id")),
                     first_seen_sort_date=_safe_datetime(target.get("first_seen_sort_date")),
                     error_message=_safe_text(probe.get("error_message")),
-                )
-
-                activity = _compute_activity_snapshot_from_db(
-                    cursor,
-                    store_id=store_id,
-                    checked_at=probe.get("checked_at") or checked_at,
-                    lookback_days=stats["lookback_days"],
-                )
-                _insert_activity_snapshot(
-                    cursor,
-                    store_id=store_id,
-                    checked_at=probe.get("checked_at") or checked_at,
-                    activity=activity,
-                    first_seen_product_id=_safe_text(target.get("first_seen_product_id")),
-                    first_seen_sort_date=_safe_datetime(target.get("first_seen_sort_date")),
+                    source=_safe_text(probe.get("source")),
+                    http_status=_safe_int(probe.get("http_status")),
+                    meta_code=_safe_int(probe.get("meta_code")),
+                    meta_message=_safe_text(probe.get("meta_message")),
+                    raw_snippet=_safe_text(probe.get("raw_snippet")),
                 )
 
                 normalized_status = (_safe_text(probe.get("status")) or STATUS_UNKNOWN).lower()
+                probe_checked_at = probe.get("checked_at") or checked_at
+                profile = probe.get("profile")
+                if isinstance(profile, dict):
+                    _upsert_joongna_store_profile_snapshot(
+                        cursor,
+                        store_id=store_id,
+                        checked_at=probe_checked_at,
+                        profile=profile,
+                        status=normalized_status,
+                        status_reason=_safe_text(probe.get("raw_status_text")),
+                        source=_safe_text(probe.get("source")) or "my_store_api",
+                    )
+                else:
+                    _upsert_joongna_store_profile_status(
+                        cursor,
+                        store_id=store_id,
+                        checked_at=probe_checked_at,
+                        status=normalized_status,
+                        status_reason=_safe_text(probe.get("raw_status_text")),
+                        error_message=_safe_text(probe.get("error_message")),
+                    )
+
+                if normalized_status == STATUS_ACTIVE and isinstance(profile, dict):
+                    activity = _compute_activity_snapshot_from_db(
+                        cursor,
+                        store_id=store_id,
+                        checked_at=probe_checked_at,
+                        lookback_days=stats["lookback_days"],
+                    )
+                    _insert_activity_snapshot(
+                        cursor,
+                        store_id=store_id,
+                        checked_at=probe_checked_at,
+                        activity=activity,
+                        first_seen_product_id=_safe_text(target.get("first_seen_product_id")),
+                        first_seen_sort_date=_safe_datetime(target.get("first_seen_sort_date")),
+                        profile=profile,
+                    )
+
                 if normalized_status == STATUS_ACTIVE:
                     stats["active_count"] += 1
                 elif normalized_status in INACTIVE_STORE_STATUSES:
@@ -890,6 +1666,8 @@ def run_fraud_store_monitor_once(
                         first_seen_product_id=_safe_text(target.get("first_seen_product_id")),
                         first_seen_sort_date=_safe_datetime(target.get("first_seen_sort_date")),
                         error_message=_safe_text(exc),
+                        source="worker",
+                        raw_snippet=_safe_text(exc),
                     )
                 except Exception:
                     pass

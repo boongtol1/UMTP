@@ -75,12 +75,26 @@ class _LabelCalcCursor:
 
 
 class _FakeHttpResponse:
-    def __init__(self, status_code=200, text="", content=None, encoding=None, apparent_encoding=None):
+    def __init__(
+        self,
+        status_code=200,
+        text="",
+        content=None,
+        encoding=None,
+        apparent_encoding=None,
+        json_payload=None,
+    ):
         self.status_code = status_code
         self.text = text
         self.content = content if content is not None else text.encode("utf-8")
         self.encoding = encoding
         self.apparent_encoding = apparent_encoding
+        self._json_payload = json_payload
+
+    def json(self):
+        if self._json_payload is None:
+            raise ValueError("no json payload")
+        return self._json_payload
 
 
 class FraudStoreMonitorServiceTest(unittest.TestCase):
@@ -107,6 +121,23 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
             "raw_status_text": "ok",
             "raw_response_json": {"meta": {"code": 200}},
             "error_message": None,
+            "source": "my_store_api",
+            "http_status": 200,
+            "meta_code": 0,
+            "meta_message": "SUCCESS",
+            "raw_snippet": "ok",
+            "profile": {
+                "store_id": "200",
+                "store_name": "테스트상점",
+                "profile_image_url": "https://img2.joongna.com/common/Profile/Default/profile_m.png",
+                "store_level_number": 1,
+                "review_count": 0,
+                "reliability_score": 0,
+                "activity_score": 0,
+                "trust_score": 0,
+                "safe_trade_count": 0,
+                "raw_json": {"storeName": "테스트상점"},
+            },
         }
 
         with patch("src.fraud_store_monitor_service.get_connection", return_value=_FakeConnection()):
@@ -121,29 +152,34 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
                     with patch("src.fraud_store_monitor_service._probe_store_status", return_value=probe_result):
                         with patch("src.fraud_store_monitor_service._insert_status_snapshot") as mock_insert_status:
                             with patch(
-                                "src.fraud_store_monitor_service._compute_activity_snapshot_from_db",
-                                return_value={
-                                    "posts_last_1h": 1,
-                                    "posts_last_6h": 2,
-                                    "posts_last_24h": 3,
-                                    "posts_last_7d": 4,
-                                    "visible_product_count": 5,
-                                },
-                            ):
-                                with patch("src.fraud_store_monitor_service._insert_activity_snapshot") as mock_insert_activity:
+                                "src.fraud_store_monitor_service._upsert_joongna_store_profile_snapshot"
+                            ) as mock_upsert_profile:
+                                with patch(
+                                    "src.fraud_store_monitor_service._compute_activity_snapshot_from_db",
+                                    return_value={
+                                        "posts_last_1h": 1,
+                                        "posts_last_6h": 2,
+                                        "posts_last_24h": 3,
+                                        "posts_last_7d": 4,
+                                        "visible_product_count": 5,
+                                    },
+                                ):
                                     with patch(
-                                        "src.fraud_store_monitor_service._upsert_training_label_candidates",
-                                        return_value=2,
-                                    ):
+                                        "src.fraud_store_monitor_service._insert_activity_snapshot"
+                                    ) as mock_insert_activity:
                                         with patch(
-                                            "src.fraud_store_monitor_service._refresh_training_labels_for_candidates",
+                                            "src.fraud_store_monitor_service._upsert_training_label_candidates",
                                             return_value=2,
                                         ):
-                                            stats = run_fraud_store_monitor_once(
-                                                force_enabled=True,
-                                                min_check_interval_minutes=30,
-                                                lookback_days=14,
-                                            )
+                                            with patch(
+                                                "src.fraud_store_monitor_service._refresh_training_labels_for_candidates",
+                                                return_value=2,
+                                            ):
+                                                stats = run_fraud_store_monitor_once(
+                                                    force_enabled=True,
+                                                    min_check_interval_minutes=30,
+                                                    lookback_days=14,
+                                                )
 
         self.assertEqual(stats.get("candidate_listing_count"), 2)
         self.assertEqual(stats.get("target_store_count"), 2)
@@ -155,6 +191,7 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
         self.assertEqual(stats.get("label_candidates_upserted"), 2)
         self.assertEqual(stats.get("label_rows_updated"), 2)
         self.assertEqual(mock_insert_status.call_count, 1)
+        self.assertEqual(mock_upsert_profile.call_count, 1)
         self.assertEqual(mock_insert_activity.call_count, 1)
 
     def test_refresh_training_labels_assigns_positive_negative_and_pending(self):
@@ -222,58 +259,76 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
         self.assertEqual(pc[3], "pending_observation")
 
     def test_probe_store_status_suspended_by_full_phrase(self):
-        response = _FakeHttpResponse(
+        my_store = _FakeHttpResponse(
             status_code=200,
-            text="이용제한된 회원의 가게입니다",
+            json_payload={"meta": {"code": 400999, "message": "이용제한된 회원의 가게입니다"}, "data": ""},
         )
-        with patch("src.fraud_store_monitor_service.requests.get", return_value=response):
+        with patch("src.fraud_store_monitor_service.requests.get", return_value=my_store):
             result = _probe_store_status("2920235")
 
         self.assertEqual(result.get("status"), "suspended")
         self.assertEqual(result.get("is_active"), 0)
+        self.assertEqual(result.get("source"), "my_store_api")
 
     def test_probe_store_status_suspended_from_utf8_bytes_when_text_is_garbled(self):
         phrase = "이용제한된 회원의 가게입니다"
         utf8_bytes = phrase.encode("utf-8")
         garbled_text = utf8_bytes.decode("iso-8859-1", errors="ignore")
-        response = _FakeHttpResponse(
+        my_store = _FakeHttpResponse(
+            status_code=200,
+            json_payload={"meta": {"code": 123, "message": "UNKNOWN"}, "data": ""},
+        )
+        rsc = _FakeHttpResponse(
             status_code=200,
             text=garbled_text,
             content=utf8_bytes,
             encoding="ISO-8859-1",
             apparent_encoding="utf-8",
         )
-        with patch("src.fraud_store_monitor_service.requests.get", return_value=response):
+        with patch("src.fraud_store_monitor_service.requests.get", side_effect=[my_store, rsc]):
             result = _probe_store_status("2920235")
 
         self.assertEqual(result.get("status"), "suspended")
         self.assertEqual(result.get("is_active"), 0)
+        self.assertEqual(result.get("source"), "store_rsc")
 
     def test_probe_store_status_suspended_by_short_phrase(self):
-        response = _FakeHttpResponse(
+        my_store = _FakeHttpResponse(
+            status_code=200,
+            json_payload={"meta": {"code": 111, "message": "UNKNOWN"}, "data": ""},
+        )
+        rsc = _FakeHttpResponse(
             status_code=200,
             text="이 상점은 이용제한 상태입니다",
         )
-        with patch("src.fraud_store_monitor_service.requests.get", return_value=response):
+        with patch("src.fraud_store_monitor_service.requests.get", side_effect=[my_store, rsc]):
             result = _probe_store_status("2920235")
 
         self.assertEqual(result.get("status"), "suspended")
         self.assertEqual(result.get("is_active"), 0)
 
     def test_probe_store_status_deleted_by_phrase(self):
-        response = _FakeHttpResponse(
+        my_store = _FakeHttpResponse(
+            status_code=200,
+            json_payload={"meta": {"code": 111, "message": "UNKNOWN"}, "data": ""},
+        )
+        rsc = _FakeHttpResponse(
             status_code=200,
             text="탈퇴한 회원 입니다",
         )
-        with patch("src.fraud_store_monitor_service.requests.get", return_value=response):
+        with patch("src.fraud_store_monitor_service.requests.get", side_effect=[my_store, rsc]):
             result = _probe_store_status("2920235")
 
         self.assertEqual(result.get("status"), "deleted")
         self.assertEqual(result.get("is_active"), 0)
 
     def test_probe_store_status_deleted_by_http_404(self):
-        response = _FakeHttpResponse(status_code=404, text="")
-        with patch("src.fraud_store_monitor_service.requests.get", return_value=response):
+        my_store = _FakeHttpResponse(
+            status_code=200,
+            json_payload={"meta": {"code": 111, "message": "UNKNOWN"}, "data": ""},
+        )
+        rsc = _FakeHttpResponse(status_code=404, text="")
+        with patch("src.fraud_store_monitor_service.requests.get", side_effect=[my_store, rsc]):
             result = _probe_store_status("2920235")
 
         self.assertEqual(result.get("status"), "deleted")
@@ -282,13 +337,18 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
     def test_probe_store_status_active_when_store_info_exists(self):
         response = _FakeHttpResponse(
             status_code=200,
-            text='{"storeSeq":2920235,"storeName":"테스트상점","nickName":"테스트상점"}',
+            json_payload={
+                "meta": {"code": 0, "message": "SUCCESS"},
+                "data": {"storeSeq": 2920235, "storeName": "테스트상점", "nickName": "테스트상점"},
+            },
         )
         with patch("src.fraud_store_monitor_service.requests.get", return_value=response):
             result = _probe_store_status("2920235")
 
         self.assertEqual(result.get("status"), "active")
         self.assertEqual(result.get("is_active"), 1)
+        self.assertEqual(result.get("source"), "my_store_api")
+        self.assertEqual((result.get("profile") or {}).get("store_name"), "테스트상점")
 
     def test_probe_store_status_error_on_request_exception(self):
         with patch("src.fraud_store_monitor_service.requests.get", side_effect=requests.RequestException("timeout")):

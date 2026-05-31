@@ -968,7 +968,9 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - `user_watch_rules` fanout 기반 job 생성은 현재 구조에서 사용하지 않습니다.
 - 사기탐지 데이터 수집은 `run_fraud_store_monitor_umtp.py`에서 독립 수행하며 기존 polling/analysis/notification 로직과 분리됩니다.
 - 상점 상태 라벨은 `store_id` 상태(active/inactive/suspended/deleted) 기준으로만 계산하며, 게시글 삭제 자체는 양성 라벨 근거로 사용하지 않습니다.
-- 상점 상태 조회는 `https://web.joongna.com/store/{store_id}?_rsc=1` 요청으로 수행하며 로그인/개인 쿠키를 사용하지 않습니다.
+- 상점 상태 조회는 `https://main-api.joongna.com/v2/my-store/{storeSeq}`를 1순위로 사용하고, 판정이 애매할 때만 `https://web.joongna.com/store/{store_id}?_rsc=1` fallback을 사용합니다.
+- fraud monitor는 `joongna_store_profiles`를 주기 갱신해 현재 닉네임/프로필 지표를 유지하며, 과거 `search_results.seller_store_name` 행은 backfill/update 하지 않습니다.
+- 닉네임 fingerprint가 변경되면 `joongna_store_name_changes`에 변경 이력을 저장합니다.
 - RSC 요청 헤더는 `accept`, `referer`, `rsc`, `user-agent` 최소셋만 사용하고 `next-router-state-tree` 헤더는 사용하지 않습니다.
 - 상태 판정은 문구 우선순위 `deleted > suspended > inactive > active > unknown > error`를 따릅니다.
 
