@@ -12,8 +12,10 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.fraud_store_monitor_service import (  # noqa: E402
+    _fetch_latest_product_snapshot_before,
     _probe_store_status,
     _refresh_training_labels_for_candidates,
+    _upsert_product_state_snapshots,
     run_fraud_store_monitor_once,
 )
 
@@ -97,6 +99,76 @@ class _FakeHttpResponse:
         return self._json_payload
 
 
+class _ProductSnapshotCursor:
+    def __init__(self):
+        self.snapshots = []
+        self._fetchone_row = None
+        self._next_id = 1
+
+    def execute(self, query, params):
+        normalized = " ".join(query.lower().split())
+        if "insert into fraud_product_snapshots" in normalized:
+            (
+                product_id,
+                store_id,
+                observed_at,
+                sort_date,
+                price_krw,
+                title,
+                body_hash,
+                title_hash,
+                content_hash,
+                source,
+                url,
+                snapshot_reason,
+                raw_payload_json,
+            ) = params
+            self.snapshots.append(
+                {
+                    "id": self._next_id,
+                    "product_id": product_id,
+                    "store_id": store_id,
+                    "observed_at": observed_at,
+                    "sort_date": sort_date,
+                    "price_krw": price_krw,
+                    "title": title,
+                    "body_hash": body_hash,
+                    "title_hash": title_hash,
+                    "content_hash": content_hash,
+                    "source": source,
+                    "url": url,
+                    "snapshot_reason": snapshot_reason,
+                    "raw_payload_json": raw_payload_json,
+                }
+            )
+            self._next_id += 1
+            self._fetchone_row = None
+            return
+
+        if "from fraud_product_snapshots" in normalized and "observed_at <=" in normalized:
+            product_id, observed_at = params
+            matched = [
+                row
+                for row in self.snapshots
+                if row.get("product_id") == product_id and row.get("observed_at") <= observed_at
+            ]
+            matched.sort(key=lambda row: (row.get("observed_at"), row.get("id")), reverse=True)
+            self._fetchone_row = dict(matched[0]) if matched else {}
+            return
+
+        if "from fraud_product_snapshots" in normalized and "where product_id = %s" in normalized:
+            product_id = params[0]
+            matched = [row for row in self.snapshots if row.get("product_id") == product_id]
+            matched.sort(key=lambda row: (row.get("observed_at"), row.get("id")), reverse=True)
+            self._fetchone_row = dict(matched[0]) if matched else {}
+            return
+
+        raise AssertionError(f"unexpected query: {query}")
+
+    def fetchone(self):
+        return self._fetchone_row
+
+
 class FraudStoreMonitorServiceTest(unittest.TestCase):
     def test_run_once_skips_recently_checked_store_and_checks_due_store(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
@@ -146,40 +218,44 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
                 return_value=listing_candidates,
             ):
                 with patch(
-                    "src.fraud_store_monitor_service._fetch_last_checked_map",
-                    return_value={"100": now - timedelta(minutes=5)},
+                    "src.fraud_store_monitor_service._fetch_recent_product_snapshot_candidates",
+                    return_value=[],
                 ):
-                    with patch("src.fraud_store_monitor_service._probe_store_status", return_value=probe_result):
-                        with patch("src.fraud_store_monitor_service._insert_status_snapshot") as mock_insert_status:
-                            with patch(
-                                "src.fraud_store_monitor_service._upsert_joongna_store_profile_snapshot"
-                            ) as mock_upsert_profile:
+                    with patch(
+                        "src.fraud_store_monitor_service._fetch_last_checked_map",
+                        return_value={"100": now - timedelta(minutes=5)},
+                    ):
+                        with patch("src.fraud_store_monitor_service._probe_store_status", return_value=probe_result):
+                            with patch("src.fraud_store_monitor_service._insert_status_snapshot") as mock_insert_status:
                                 with patch(
-                                    "src.fraud_store_monitor_service._compute_activity_snapshot_from_db",
-                                    return_value={
-                                        "posts_last_1h": 1,
-                                        "posts_last_6h": 2,
-                                        "posts_last_24h": 3,
-                                        "posts_last_7d": 4,
-                                        "visible_product_count": 5,
-                                    },
-                                ):
+                                    "src.fraud_store_monitor_service._upsert_joongna_store_profile_snapshot"
+                                ) as mock_upsert_profile:
                                     with patch(
-                                        "src.fraud_store_monitor_service._insert_activity_snapshot"
-                                    ) as mock_insert_activity:
+                                        "src.fraud_store_monitor_service._compute_activity_snapshot_from_db",
+                                        return_value={
+                                            "posts_last_1h": 1,
+                                            "posts_last_6h": 2,
+                                            "posts_last_24h": 3,
+                                            "posts_last_7d": 4,
+                                            "visible_product_count": 5,
+                                        },
+                                    ):
                                         with patch(
-                                            "src.fraud_store_monitor_service._upsert_training_label_candidates",
-                                            return_value=2,
-                                        ):
+                                            "src.fraud_store_monitor_service._insert_activity_snapshot"
+                                        ) as mock_insert_activity:
                                             with patch(
-                                                "src.fraud_store_monitor_service._refresh_training_labels_for_candidates",
+                                                "src.fraud_store_monitor_service._upsert_training_label_candidates",
                                                 return_value=2,
                                             ):
-                                                stats = run_fraud_store_monitor_once(
-                                                    force_enabled=True,
-                                                    min_check_interval_minutes=30,
-                                                    lookback_days=14,
-                                                )
+                                                with patch(
+                                                    "src.fraud_store_monitor_service._refresh_training_labels_for_candidates",
+                                                    return_value=2,
+                                                ):
+                                                    stats = run_fraud_store_monitor_once(
+                                                        force_enabled=True,
+                                                        min_check_interval_minutes=30,
+                                                        lookback_days=14,
+                                                    )
 
         self.assertEqual(stats.get("candidate_listing_count"), 2)
         self.assertEqual(stats.get("target_store_count"), 2)
@@ -190,9 +266,192 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
         self.assertEqual(stats.get("error_count"), 0)
         self.assertEqual(stats.get("label_candidates_upserted"), 2)
         self.assertEqual(stats.get("label_rows_updated"), 2)
+        self.assertEqual(stats.get("product_snapshot_candidate_count"), 0)
+        self.assertEqual(stats.get("product_snapshots_upserted"), 0)
         self.assertEqual(mock_insert_status.call_count, 1)
         self.assertEqual(mock_upsert_profile.call_count, 1)
         self.assertEqual(mock_insert_activity.call_count, 1)
+
+    def test_product_snapshot_inserts_first_seen_for_new_product(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        cursor = _ProductSnapshotCursor()
+        inserted = _upsert_product_state_snapshots(
+            cursor,
+            [
+                {
+                    "product_id": "P-100",
+                    "store_id": "200",
+                    "observed_at": now,
+                    "sort_date": now - timedelta(minutes=30),
+                    "price_krw": 450000,
+                    "title": "맥북 에어 M1",
+                    "url": "https://web.joongna.com/product/100",
+                    "source": "search_results",
+                    "raw_payload_json": {"content": "상태 좋음"},
+                }
+            ],
+        )
+
+        self.assertEqual(inserted, 1)
+        self.assertEqual(len(cursor.snapshots), 1)
+        self.assertEqual(cursor.snapshots[0]["snapshot_reason"], "first_seen")
+
+    def test_product_snapshot_inserts_price_changed(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        cursor = _ProductSnapshotCursor()
+        inserted = _upsert_product_state_snapshots(
+            cursor,
+            [
+                {
+                    "product_id": "P-101",
+                    "store_id": "201",
+                    "observed_at": now,
+                    "sort_date": now - timedelta(days=1),
+                    "price_krw": 450000,
+                    "title": "맥북 에어 M1",
+                    "url": "https://web.joongna.com/product/101",
+                    "source": "search_results",
+                    "raw_payload_json": {"content": "초기 본문"},
+                },
+                {
+                    "product_id": "P-101",
+                    "store_id": "201",
+                    "observed_at": now + timedelta(hours=2),
+                    "sort_date": now - timedelta(days=1),
+                    "price_krw": 390000,
+                    "title": "맥북 에어 M1",
+                    "url": "https://web.joongna.com/product/101",
+                    "source": "search_results",
+                    "raw_payload_json": {"content": "초기 본문"},
+                },
+            ],
+        )
+
+        self.assertEqual(inserted, 2)
+        self.assertEqual(len(cursor.snapshots), 2)
+        self.assertEqual(cursor.snapshots[1]["snapshot_reason"], "price_changed")
+
+    def test_product_snapshot_inserts_sort_date_changed_when_only_sort_date_changes(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        cursor = _ProductSnapshotCursor()
+        inserted = _upsert_product_state_snapshots(
+            cursor,
+            [
+                {
+                    "product_id": "P-102",
+                    "store_id": "202",
+                    "observed_at": now,
+                    "sort_date": now - timedelta(days=2),
+                    "price_krw": 500000,
+                    "title": "맥북 프로",
+                    "url": "https://web.joongna.com/product/102",
+                    "source": "search_results",
+                    "raw_payload_json": {"content": "본문 동일"},
+                },
+                {
+                    "product_id": "P-102",
+                    "store_id": "202",
+                    "observed_at": now + timedelta(days=1),
+                    "sort_date": now - timedelta(days=1),
+                    "price_krw": 500000,
+                    "title": "맥북 프로",
+                    "url": "https://web.joongna.com/product/102",
+                    "source": "search_results",
+                    "raw_payload_json": {"content": "본문 동일"},
+                },
+            ],
+        )
+
+        self.assertEqual(inserted, 2)
+        self.assertEqual(len(cursor.snapshots), 2)
+        self.assertEqual(cursor.snapshots[1]["snapshot_reason"], "sort_date_changed")
+
+    def test_product_snapshot_skips_insert_when_fingerprint_unchanged(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        cursor = _ProductSnapshotCursor()
+        inserted = _upsert_product_state_snapshots(
+            cursor,
+            [
+                {
+                    "product_id": "P-103",
+                    "store_id": "203",
+                    "observed_at": now,
+                    "sort_date": now - timedelta(hours=3),
+                    "price_krw": 700000,
+                    "title": "맥북 에어 13",
+                    "url": "https://web.joongna.com/product/103",
+                    "source": "search_results",
+                    "raw_payload_json": {"content": "동일 본문"},
+                },
+                {
+                    "product_id": "P-103",
+                    "store_id": "203",
+                    "observed_at": now + timedelta(hours=1),
+                    "sort_date": now - timedelta(hours=3),
+                    "price_krw": 700000,
+                    "title": "맥북 에어 13",
+                    "url": "https://web.joongna.com/product/103",
+                    "source": "search_results",
+                    "raw_payload_json": {"content": "동일 본문"},
+                },
+            ],
+        )
+
+        self.assertEqual(inserted, 1)
+        self.assertEqual(len(cursor.snapshots), 1)
+        self.assertEqual(cursor.snapshots[0]["snapshot_reason"], "first_seen")
+
+    def test_fetch_latest_product_snapshot_before_returns_price_before_suspend(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        cursor = _ProductSnapshotCursor()
+        _upsert_product_state_snapshots(
+            cursor,
+            [
+                {
+                    "product_id": "P-104",
+                    "store_id": "204",
+                    "observed_at": now - timedelta(days=5),
+                    "sort_date": now - timedelta(days=5),
+                    "price_krw": 450000,
+                    "title": "맥북",
+                    "url": "https://web.joongna.com/product/104",
+                    "source": "search_results",
+                    "raw_payload_json": {"content": "본문"},
+                },
+                {
+                    "product_id": "P-104",
+                    "store_id": "204",
+                    "observed_at": now - timedelta(days=2),
+                    "sort_date": now - timedelta(days=3),
+                    "price_krw": 390000,
+                    "title": "맥북",
+                    "url": "https://web.joongna.com/product/104",
+                    "source": "search_results",
+                    "raw_payload_json": {"content": "본문"},
+                },
+                {
+                    "product_id": "P-104",
+                    "store_id": "204",
+                    "observed_at": now - timedelta(hours=6),
+                    "sort_date": now - timedelta(days=1),
+                    "price_krw": 360000,
+                    "title": "맥북",
+                    "url": "https://web.joongna.com/product/104",
+                    "source": "search_results",
+                    "raw_payload_json": {"content": "본문"},
+                },
+            ],
+        )
+
+        suspended_at = now - timedelta(days=1)
+        last_snapshot = _fetch_latest_product_snapshot_before(
+            cursor,
+            product_id="P-104",
+            observed_at=suspended_at,
+        )
+
+        self.assertIsNotNone(last_snapshot)
+        self.assertEqual(last_snapshot.get("price_krw"), 390000)
 
     def test_refresh_training_labels_assigns_positive_negative_and_pending(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)

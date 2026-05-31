@@ -86,6 +86,36 @@ CREATE TABLE IF NOT EXISTS fraud_training_label_candidates (
   INDEX idx_listing_sort_date (listing_sort_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS fraud_product_snapshots (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  product_id VARCHAR(64) NOT NULL,
+  store_id VARCHAR(64) NULL,
+  observed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sort_date DATETIME NULL,
+  price_krw INT NULL,
+  title TEXT NULL,
+  body_hash VARCHAR(64) NULL,
+  title_hash VARCHAR(64) NULL,
+  content_hash VARCHAR(64) NULL,
+  source VARCHAR(64) NULL,
+  url TEXT NULL,
+  snapshot_reason ENUM(
+    'first_seen',
+    'price_changed',
+    'title_changed',
+    'body_changed',
+    'content_changed',
+    'sort_date_changed',
+    'periodic'
+  ) NOT NULL DEFAULT 'periodic',
+  raw_payload_json JSON NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_product_observed (product_id, observed_at),
+  INDEX idx_store_observed (store_id, observed_at),
+  INDEX idx_product_sort_date (product_id, sort_date),
+  INDEX idx_snapshot_reason (snapshot_reason)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS joongna_store_name_changes (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   store_seq BIGINT NOT NULL,

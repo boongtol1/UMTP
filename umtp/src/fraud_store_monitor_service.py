@@ -291,6 +291,8 @@ def _build_stats(config: Dict[str, Any]) -> Dict[str, Any]:
         "unknown_count": 0,
         "label_candidates_upserted": 0,
         "label_rows_updated": 0,
+        "product_snapshot_candidate_count": 0,
+        "product_snapshots_upserted": 0,
         "store_errors": 0,
         "fatal_error": None,
     }
@@ -384,6 +386,411 @@ def _build_store_targets(listing_candidates: Iterable[Dict[str, Any]]) -> List[D
             "first_seen_sort_date": candidate.get("listing_sort_date"),
         }
     return list(dedup.values())
+
+
+def _fetch_recent_product_snapshot_candidates(
+    cursor,
+    *,
+    lookback_days: int,
+    limit: int = DEFAULT_LISTING_CANDIDATE_LIMIT,
+) -> List[Dict[str, Any]]:
+    safe_limit = max(int(limit), 1)
+    try:
+        cursor.execute(
+            """
+            SELECT
+                CAST(sr.product_id AS CHAR) AS product_id,
+                CAST(sr.seller_store_seq AS CHAR) AS store_id,
+                sr.fetched_at AS observed_at,
+                sr.sort_date AS sort_date,
+                sr.price AS price_krw,
+                sr.title AS title,
+                sr.url AS url,
+                sr.raw_json AS raw_payload_json,
+                'search_results' AS source
+            FROM search_results sr
+            LEFT JOIN search_queries sq
+              ON sq.id = sr.search_query_id
+            WHERE sr.seller_store_seq IS NOT NULL
+              AND sr.product_id IS NOT NULL
+              AND CHAR_LENGTH(TRIM(CAST(sr.product_id AS CHAR))) > 0
+              AND sr.sort_date IS NOT NULL
+              AND sr.fetched_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL %s DAY)
+              AND (sq.source IS NULL OR sq.source = 'joongna')
+            ORDER BY sr.fetched_at ASC, sr.id ASC
+            LIMIT %s
+            """,
+            (lookback_days, safe_limit),
+        )
+    except Exception as exc:
+        lowered = str(exc).lower()
+        if "unknown column" not in lowered and "doesn't exist" not in lowered:
+            raise
+        cursor.execute(
+            """
+            SELECT
+                CAST(sr.product_id AS CHAR) AS product_id,
+                CAST(sr.seller_store_seq AS CHAR) AS store_id,
+                sr.fetched_at AS observed_at,
+                sr.sort_date AS sort_date,
+                sr.price AS price_krw,
+                sr.title AS title,
+                sr.url AS url,
+                sr.raw_json AS raw_payload_json,
+                'search_results' AS source
+            FROM search_results sr
+            WHERE sr.seller_store_seq IS NOT NULL
+              AND sr.product_id IS NOT NULL
+              AND CHAR_LENGTH(TRIM(CAST(sr.product_id AS CHAR))) > 0
+              AND sr.sort_date IS NOT NULL
+              AND sr.fetched_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL %s DAY)
+            ORDER BY sr.fetched_at ASC, sr.id ASC
+            LIMIT %s
+            """,
+            (lookback_days, safe_limit),
+        )
+    rows = cursor.fetchall() or []
+
+    snapshot_candidates: List[Dict[str, Any]] = []
+    for row in rows:
+        product_id = _safe_text(row.get("product_id"))
+        store_id = _normalize_store_id(row.get("store_id"))
+        sort_date = _safe_datetime(row.get("sort_date"))
+        observed_at = _safe_datetime(row.get("observed_at")) or _utc_now_naive()
+        if product_id is None or store_id is None or sort_date is None:
+            continue
+
+        snapshot_candidates.append(
+            {
+                "product_id": product_id,
+                "store_id": store_id,
+                "observed_at": observed_at,
+                "sort_date": sort_date,
+                "price_krw": _safe_int(row.get("price_krw")),
+                "title": _safe_text(row.get("title")),
+                "url": _safe_text(row.get("url")),
+                "source": _safe_text(row.get("source")) or "search_results",
+                "raw_payload_json": row.get("raw_payload_json"),
+            }
+        )
+    return snapshot_candidates
+
+
+def _serialize_raw_payload_json(raw_payload: Any) -> Optional[str]:
+    if raw_payload is None:
+        return None
+
+    if isinstance(raw_payload, str):
+        cleaned = raw_payload.strip()
+        if not cleaned:
+            return None
+        try:
+            parsed = json.loads(cleaned)
+            return json.dumps(parsed, ensure_ascii=False, sort_keys=True)
+        except Exception:
+            return cleaned
+
+    try:
+        return json.dumps(raw_payload, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        return _safe_text(raw_payload)
+
+
+def _parse_raw_payload_json(raw_payload: Any) -> Optional[Any]:
+    if raw_payload is None:
+        return None
+    if isinstance(raw_payload, (dict, list)):
+        return raw_payload
+    raw_text = _safe_text(raw_payload)
+    if raw_text is None:
+        return None
+    try:
+        return json.loads(raw_text)
+    except Exception:
+        return None
+
+
+def _extract_body_text_from_payload(raw_payload: Any) -> Optional[str]:
+    payload = _parse_raw_payload_json(raw_payload)
+    if not isinstance(payload, dict):
+        return None
+
+    for key in ("body", "content", "description", "desc", "productDescription", "productDesc", "text"):
+        parsed = _safe_text(payload.get(key))
+        if parsed is not None:
+            return parsed
+
+    nested_data = payload.get("data")
+    if isinstance(nested_data, dict):
+        for key in ("body", "content", "description", "desc", "productDescription", "productDesc", "text"):
+            parsed = _safe_text(nested_data.get(key))
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _build_product_state_fingerprint(
+    *,
+    product_id: str,
+    price_krw: Optional[int],
+    sort_date: Optional[datetime],
+    title_hash: Optional[str],
+    content_hash: Optional[str],
+) -> str:
+    sort_date_key = sort_date.isoformat(sep=" ", timespec="seconds") if sort_date is not None else ""
+    return _sha256_hex(
+        "|".join(
+            [
+                product_id,
+                str(price_krw) if price_krw is not None else "",
+                sort_date_key,
+                title_hash or "",
+                content_hash or "",
+            ]
+        )
+    )
+
+
+def _normalize_product_snapshot_row(candidate: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    product_id = _safe_text(candidate.get("product_id"))
+    store_id = _normalize_store_id(candidate.get("store_id"))
+    observed_at = _safe_datetime(candidate.get("observed_at")) or _utc_now_naive()
+    sort_date = _safe_datetime(candidate.get("sort_date"))
+    if product_id is None or store_id is None:
+        return None
+
+    title = _safe_text(candidate.get("title"))
+    raw_payload_json_text = _serialize_raw_payload_json(candidate.get("raw_payload_json"))
+    body_text = _extract_body_text_from_payload(candidate.get("raw_payload_json"))
+    title_hash = _sha256_hex(title) if title is not None else None
+    body_hash = _sha256_hex(body_text) if body_text is not None else None
+    content_source = body_text if body_text is not None else raw_payload_json_text
+    content_hash = _sha256_hex(content_source) if content_source is not None else None
+    fingerprint = _build_product_state_fingerprint(
+        product_id=product_id,
+        price_krw=_safe_int(candidate.get("price_krw")),
+        sort_date=sort_date,
+        title_hash=title_hash,
+        content_hash=content_hash,
+    )
+
+    return {
+        "product_id": product_id,
+        "store_id": store_id,
+        "observed_at": observed_at,
+        "sort_date": sort_date,
+        "price_krw": _safe_int(candidate.get("price_krw")),
+        "title": title,
+        "body_hash": body_hash,
+        "title_hash": title_hash,
+        "content_hash": content_hash,
+        "source": _safe_text(candidate.get("source")) or "search_results",
+        "url": _safe_text(candidate.get("url")),
+        "raw_payload_json": raw_payload_json_text,
+        "fingerprint": fingerprint,
+    }
+
+
+def _fetch_latest_product_snapshot(cursor, *, product_id: str) -> Optional[Dict[str, Any]]:
+    cursor.execute(
+        """
+        SELECT
+            id,
+            product_id,
+            store_id,
+            observed_at,
+            sort_date,
+            price_krw,
+            title_hash,
+            body_hash,
+            content_hash
+        FROM fraud_product_snapshots
+        WHERE product_id = %s
+        ORDER BY observed_at DESC, id DESC
+        LIMIT 1
+        """,
+        (product_id,),
+    )
+    row = cursor.fetchone() or {}
+    if not row or not isinstance(row, dict):
+        return None
+    return row
+
+
+def _resolve_snapshot_reason(
+    *,
+    previous_snapshot: Optional[Dict[str, Any]],
+    current_snapshot: Dict[str, Any],
+) -> str:
+    if previous_snapshot is None:
+        return "first_seen"
+
+    previous_price = _safe_int(previous_snapshot.get("price_krw"))
+    current_price = _safe_int(current_snapshot.get("price_krw"))
+    if previous_price != current_price:
+        return "price_changed"
+
+    previous_content_hash = _safe_text(previous_snapshot.get("content_hash"))
+    current_content_hash = _safe_text(current_snapshot.get("content_hash"))
+    if previous_content_hash != current_content_hash:
+        return "content_changed"
+
+    previous_body_hash = _safe_text(previous_snapshot.get("body_hash"))
+    current_body_hash = _safe_text(current_snapshot.get("body_hash"))
+    if previous_body_hash != current_body_hash:
+        return "body_changed"
+
+    previous_title_hash = _safe_text(previous_snapshot.get("title_hash"))
+    current_title_hash = _safe_text(current_snapshot.get("title_hash"))
+    if previous_title_hash != current_title_hash:
+        return "title_changed"
+
+    previous_sort_date = _safe_datetime(previous_snapshot.get("sort_date"))
+    current_sort_date = _safe_datetime(current_snapshot.get("sort_date"))
+    if previous_sort_date != current_sort_date:
+        return "sort_date_changed"
+    return "periodic"
+
+
+def _insert_product_snapshot(cursor, *, snapshot_row: Dict[str, Any], snapshot_reason: str) -> None:
+    cursor.execute(
+        """
+        INSERT INTO fraud_product_snapshots (
+            product_id,
+            store_id,
+            observed_at,
+            sort_date,
+            price_krw,
+            title,
+            body_hash,
+            title_hash,
+            content_hash,
+            source,
+            url,
+            snapshot_reason,
+            raw_payload_json
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            snapshot_row.get("product_id"),
+            snapshot_row.get("store_id"),
+            snapshot_row.get("observed_at"),
+            snapshot_row.get("sort_date"),
+            _safe_int(snapshot_row.get("price_krw")),
+            _safe_text(snapshot_row.get("title")),
+            _safe_text(snapshot_row.get("body_hash")),
+            _safe_text(snapshot_row.get("title_hash")),
+            _safe_text(snapshot_row.get("content_hash")),
+            _safe_text(snapshot_row.get("source")),
+            _safe_text(snapshot_row.get("url")),
+            snapshot_reason,
+            snapshot_row.get("raw_payload_json"),
+        ),
+    )
+
+
+def _upsert_product_state_snapshots(cursor, snapshot_candidates: List[Dict[str, Any]]) -> int:
+    if not snapshot_candidates:
+        return 0
+
+    inserted_count = 0
+    latest_snapshot_cache: Dict[str, Optional[Dict[str, Any]]] = {}
+    for candidate in snapshot_candidates:
+        normalized = _normalize_product_snapshot_row(candidate)
+        if normalized is None:
+            continue
+        product_id = normalized["product_id"]
+
+        previous_snapshot = latest_snapshot_cache.get(product_id)
+        if product_id not in latest_snapshot_cache:
+            try:
+                previous_snapshot = _fetch_latest_product_snapshot(cursor, product_id=product_id)
+            except Exception as exc:
+                if _is_schema_missing_error(exc):
+                    return inserted_count
+                raise
+            latest_snapshot_cache[product_id] = previous_snapshot
+
+        if previous_snapshot is not None:
+            previous_fingerprint = _build_product_state_fingerprint(
+                product_id=product_id,
+                price_krw=_safe_int(previous_snapshot.get("price_krw")),
+                sort_date=_safe_datetime(previous_snapshot.get("sort_date")),
+                title_hash=_safe_text(previous_snapshot.get("title_hash")),
+                content_hash=_safe_text(previous_snapshot.get("content_hash")),
+            )
+            if previous_fingerprint == normalized.get("fingerprint"):
+                continue
+
+        snapshot_reason = _resolve_snapshot_reason(
+            previous_snapshot=previous_snapshot,
+            current_snapshot=normalized,
+        )
+        try:
+            _insert_product_snapshot(cursor, snapshot_row=normalized, snapshot_reason=snapshot_reason)
+        except Exception as exc:
+            if _is_schema_missing_error(exc):
+                return inserted_count
+            raise
+        inserted_count += 1
+        latest_snapshot_cache[product_id] = normalized
+    return inserted_count
+
+
+def _fetch_latest_product_snapshot_before(
+    cursor,
+    *,
+    product_id: str,
+    observed_at: datetime,
+) -> Optional[Dict[str, Any]]:
+    """
+    학습용 예시 SQL:
+    - 상점 정지 이전 상품 스냅샷 이력:
+      SELECT fps.*
+      FROM fraud_product_snapshots fps
+      JOIN fraud_training_label_candidates fl
+        ON fl.product_id = fps.product_id
+      WHERE fl.label = 1
+        AND fps.observed_at <= fl.first_inactive_at
+      ORDER BY fps.product_id, fps.observed_at DESC;
+
+    - 특정 시점 직전 1건:
+      SELECT *
+      FROM fraud_product_snapshots
+      WHERE product_id = ?
+        AND observed_at <= ?
+      ORDER BY observed_at DESC
+      LIMIT 1;
+    """
+    cursor.execute(
+        """
+        SELECT
+            id,
+            product_id,
+            store_id,
+            observed_at,
+            sort_date,
+            price_krw,
+            title,
+            body_hash,
+            title_hash,
+            content_hash,
+            source,
+            url,
+            snapshot_reason
+        FROM fraud_product_snapshots
+        WHERE product_id = %s
+          AND observed_at <= %s
+        ORDER BY observed_at DESC, id DESC
+        LIMIT 1
+        """,
+        (product_id, observed_at),
+    )
+    row = cursor.fetchone() or {}
+    if not row or not isinstance(row, dict):
+        return None
+    return row
 
 
 def _chunked(values: List[str], chunk_size: int) -> Iterable[List[str]]:
@@ -1558,6 +1965,18 @@ def run_fraud_store_monitor_once(
             limit=listing_candidate_limit,
         )
         stats["candidate_listing_count"] = len(listing_candidates)
+
+        product_snapshot_candidates = _fetch_recent_product_snapshot_candidates(
+            cursor,
+            lookback_days=stats["lookback_days"],
+            limit=listing_candidate_limit,
+        )
+        stats["product_snapshot_candidate_count"] = len(product_snapshot_candidates)
+        if product_snapshot_candidates:
+            stats["product_snapshots_upserted"] = _upsert_product_state_snapshots(
+                cursor,
+                product_snapshot_candidates,
+            )
 
         if listing_candidates:
             stats["label_candidates_upserted"] = _upsert_training_label_candidates(cursor, listing_candidates)
