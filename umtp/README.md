@@ -886,6 +886,7 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_listing_analysis_results_
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_identity_user_product.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_joongna_sort_date_tracking.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_search_query_results_cache.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_fraud_store_monitor.sql
 # heartbeat 롤백(066b3e5 제거) 시에만 실행
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_remove_worker_heartbeats.sql
 ```
@@ -914,6 +915,8 @@ python src/run_analysis_worker_umtp.py --once
 python src/run_analysis_worker_umtp.py --interval 5
 python src/run_notification_worker_umtp.py --once
 python src/run_notification_worker_umtp.py --interval 3
+python src/run_fraud_store_monitor_umtp.py --once
+python src/run_fraud_store_monitor_umtp.py --interval 600
 ```
 
 특정 검색어만 실행:
@@ -963,6 +966,8 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - `/alerts?user_id=...` API는 `alert_events`를 최신순(`created_at DESC`)으로 반환하며 Android 알림 피드에서 사용할 수 있습니다.
 - `watch_rule_id` 컬럼은 deprecated 메타데이터로 유지하며 drop하지 않습니다.
 - `user_watch_rules` fanout 기반 job 생성은 현재 구조에서 사용하지 않습니다.
+- 사기탐지 데이터 수집은 `run_fraud_store_monitor_umtp.py`에서 독립 수행하며 기존 polling/analysis/notification 로직과 분리됩니다.
+- 상점 상태 라벨은 `store_id` 상태(active/inactive/suspended/deleted) 기준으로만 계산하며, 게시글 삭제 자체는 양성 라벨 근거로 사용하지 않습니다.
 
 #### 4) Docker 분리 실행 예시
 
@@ -976,6 +981,8 @@ docker run -d --name umtp-polling --restart unless-stopped --env-file .env umtp 
 docker run -d --name umtp-analysis --restart unless-stopped --env-file .env umtp python src/run_analysis_worker_umtp.py --interval 5
 
 docker run -d --name umtp-notification --restart unless-stopped --env-file .env umtp python src/run_notification_worker_umtp.py --interval 3
+
+docker run -d --name umtp-fraud-store-monitor --restart unless-stopped --env-file .env umtp python src/run_fraud_store_monitor_umtp.py --interval 600
 ```
 
 로그 확인:
@@ -985,6 +992,7 @@ docker logs -f umtp-api
 docker logs -f umtp-polling
 docker logs -f umtp-analysis
 docker logs -f umtp-notification
+docker logs -f umtp-fraud-store-monitor
 ```
 
 컨테이너 역할:
@@ -992,6 +1000,7 @@ docker logs -f umtp-notification
 - `umtp-polling`(market-watcher): 중고나라 polling + `analysis_jobs` enqueue 전용
 - `umtp-analysis`(analysis-worker): `analysis_jobs` pending 처리 전용
 - `umtp-notification`(notification-worker): `alert_events` pending Telegram/app 상태 처리 전용
+- `umtp-fraud-store-monitor`: `store_id` 상태/활동량 스냅샷 + 학습 라벨 후보 갱신 전용
 
 #### 5) 검증 체크리스트
 

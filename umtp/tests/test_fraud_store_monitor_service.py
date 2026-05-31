@@ -1,0 +1,214 @@
+import os
+import sys
+import unittest
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from src.fraud_store_monitor_service import (  # noqa: E402
+    _refresh_training_labels_for_candidates,
+    run_fraud_store_monitor_once,
+)
+
+
+class _FakeCursor:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeConnection:
+    def __init__(self):
+        self.closed = False
+        self.committed = False
+        self.rolled_back = False
+        self.cursor_obj = _FakeCursor()
+
+    def cursor(self, dictionary=False):
+        _ = dictionary
+        return self.cursor_obj
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
+    def is_connected(self):
+        return not self.closed
+
+    def close(self):
+        self.closed = True
+
+
+class _LabelCalcCursor:
+    def __init__(self, snapshots_by_store):
+        self.snapshots_by_store = snapshots_by_store
+        self._last_rows = []
+        self.updated_rows = []
+
+    def execute(self, query, params):
+        normalized = " ".join(query.lower().split())
+        if "from fraud_store_status_snapshots" in normalized:
+            store_id = params[0]
+            self._last_rows = self.snapshots_by_store.get(store_id, [])
+            return
+        raise AssertionError(f"unexpected query: {query}")
+
+    def fetchall(self):
+        return self._last_rows
+
+    def executemany(self, query, rows):
+        normalized = " ".join(query.lower().split())
+        if "update fraud_training_label_candidates" not in normalized:
+            raise AssertionError(f"unexpected executemany query: {query}")
+        self.updated_rows.extend(rows)
+
+
+class FraudStoreMonitorServiceTest(unittest.TestCase):
+    def test_run_once_skips_recently_checked_store_and_checks_due_store(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        listing_candidates = [
+            {
+                "store_id": "100",
+                "product_id": "P-100",
+                "listing_sort_date": now - timedelta(hours=2),
+                "discovered_at": now - timedelta(hours=2),
+            },
+            {
+                "store_id": "200",
+                "product_id": "P-200",
+                "listing_sort_date": now - timedelta(hours=1),
+                "discovered_at": now - timedelta(hours=1),
+            },
+        ]
+        probe_result = {
+            "checked_at": now,
+            "status": "active",
+            "is_active": 1,
+            "raw_status_text": "ok",
+            "raw_response_json": {"meta": {"code": 200}},
+            "error_message": None,
+        }
+
+        with patch("src.fraud_store_monitor_service.get_connection", return_value=_FakeConnection()):
+            with patch(
+                "src.fraud_store_monitor_service._fetch_recent_listing_candidates",
+                return_value=listing_candidates,
+            ):
+                with patch(
+                    "src.fraud_store_monitor_service._fetch_last_checked_map",
+                    return_value={"100": now - timedelta(minutes=5)},
+                ):
+                    with patch("src.fraud_store_monitor_service._probe_store_status", return_value=probe_result):
+                        with patch("src.fraud_store_monitor_service._insert_status_snapshot") as mock_insert_status:
+                            with patch(
+                                "src.fraud_store_monitor_service._compute_activity_snapshot_from_db",
+                                return_value={
+                                    "posts_last_1h": 1,
+                                    "posts_last_6h": 2,
+                                    "posts_last_24h": 3,
+                                    "posts_last_7d": 4,
+                                    "visible_product_count": 5,
+                                },
+                            ):
+                                with patch("src.fraud_store_monitor_service._insert_activity_snapshot") as mock_insert_activity:
+                                    with patch(
+                                        "src.fraud_store_monitor_service._upsert_training_label_candidates",
+                                        return_value=2,
+                                    ):
+                                        with patch(
+                                            "src.fraud_store_monitor_service._refresh_training_labels_for_candidates",
+                                            return_value=2,
+                                        ):
+                                            stats = run_fraud_store_monitor_once(
+                                                force_enabled=True,
+                                                min_check_interval_minutes=30,
+                                                lookback_days=14,
+                                            )
+
+        self.assertEqual(stats.get("candidate_listing_count"), 2)
+        self.assertEqual(stats.get("target_store_count"), 2)
+        self.assertEqual(stats.get("checked_count"), 1)
+        self.assertEqual(stats.get("skipped_count"), 1)
+        self.assertEqual(stats.get("active_count"), 1)
+        self.assertEqual(stats.get("inactive_count"), 0)
+        self.assertEqual(stats.get("error_count"), 0)
+        self.assertEqual(stats.get("label_candidates_upserted"), 2)
+        self.assertEqual(stats.get("label_rows_updated"), 2)
+        self.assertEqual(mock_insert_status.call_count, 1)
+        self.assertEqual(mock_insert_activity.call_count, 1)
+
+    def test_refresh_training_labels_assigns_positive_negative_and_pending(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        listing_a = now - timedelta(days=2)
+        listing_b = now - timedelta(days=20)
+        listing_c = now - timedelta(days=3)
+
+        cursor = _LabelCalcCursor(
+            snapshots_by_store={
+                "A": [
+                    {"checked_at": listing_a + timedelta(hours=12), "status": "active"},
+                    {"checked_at": listing_a + timedelta(days=1), "status": "inactive"},
+                ],
+                "B": [
+                    {"checked_at": listing_b + timedelta(days=15), "status": "active"},
+                ],
+                "C": [
+                    {"checked_at": listing_c + timedelta(days=5), "status": "active"},
+                ],
+            }
+        )
+        listing_candidates = [
+            {
+                "store_id": "A",
+                "product_id": "PA",
+                "listing_sort_date": listing_a,
+                "discovered_at": listing_a,
+            },
+            {
+                "store_id": "B",
+                "product_id": "PB",
+                "listing_sort_date": listing_b,
+                "discovered_at": listing_b,
+            },
+            {
+                "store_id": "C",
+                "product_id": "PC",
+                "listing_sort_date": listing_c,
+                "discovered_at": listing_c,
+            },
+        ]
+
+        updated_count = _refresh_training_labels_for_candidates(
+            cursor,
+            listing_candidates=listing_candidates,
+        )
+        self.assertEqual(updated_count, 3)
+
+        updates = {row[4]: row for row in cursor.updated_rows}
+        pa = updates["PA"]
+        pb = updates["PB"]
+        pc = updates["PC"]
+
+        self.assertIsNotNone(pa[0])  # first_inactive_at
+        self.assertEqual(pa[2], 1)  # label
+        self.assertEqual(pa[3], "store_inactive_within_7d")
+
+        self.assertIsNone(pb[0])  # first_inactive_at
+        self.assertEqual(pb[2], 0)
+        self.assertEqual(pb[3], "store_active_after_14d")
+
+        self.assertIsNone(pc[0])
+        self.assertIsNone(pc[2])
+        self.assertEqual(pc[3], "pending_observation")
+
+
+if __name__ == "__main__":
+    unittest.main()
