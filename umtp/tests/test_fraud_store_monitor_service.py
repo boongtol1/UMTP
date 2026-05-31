@@ -4,12 +4,15 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+import requests
+
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.fraud_store_monitor_service import (  # noqa: E402
+    _probe_store_status,
     _refresh_training_labels_for_candidates,
     run_fraud_store_monitor_once,
 )
@@ -69,6 +72,12 @@ class _LabelCalcCursor:
         if "update fraud_training_label_candidates" not in normalized:
             raise AssertionError(f"unexpected executemany query: {query}")
         self.updated_rows.extend(rows)
+
+
+class _FakeHttpResponse:
+    def __init__(self, status_code=200, text=""):
+        self.status_code = status_code
+        self.text = text
 
 
 class FraudStoreMonitorServiceTest(unittest.TestCase):
@@ -197,17 +206,77 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
         pb = updates["PB"]
         pc = updates["PC"]
 
-        self.assertIsNotNone(pa[0])  # first_inactive_at
-        self.assertEqual(pa[2], 1)  # label
+        self.assertIsNotNone(pa[0])
+        self.assertEqual(pa[2], 1)
         self.assertEqual(pa[3], "store_inactive_within_7d")
 
-        self.assertIsNone(pb[0])  # first_inactive_at
+        self.assertIsNone(pb[0])
         self.assertEqual(pb[2], 0)
         self.assertEqual(pb[3], "store_active_after_14d")
 
         self.assertIsNone(pc[0])
         self.assertIsNone(pc[2])
         self.assertEqual(pc[3], "pending_observation")
+
+    def test_probe_store_status_suspended_by_full_phrase(self):
+        response = _FakeHttpResponse(
+            status_code=200,
+            text="이용제한된 회원의 가게입니다",
+        )
+        with patch("src.fraud_store_monitor_service.requests.get", return_value=response):
+            result = _probe_store_status("2920235")
+
+        self.assertEqual(result.get("status"), "suspended")
+        self.assertEqual(result.get("is_active"), 0)
+
+    def test_probe_store_status_suspended_by_short_phrase(self):
+        response = _FakeHttpResponse(
+            status_code=200,
+            text="이 상점은 이용제한 상태입니다",
+        )
+        with patch("src.fraud_store_monitor_service.requests.get", return_value=response):
+            result = _probe_store_status("2920235")
+
+        self.assertEqual(result.get("status"), "suspended")
+        self.assertEqual(result.get("is_active"), 0)
+
+    def test_probe_store_status_deleted_by_phrase(self):
+        response = _FakeHttpResponse(
+            status_code=200,
+            text="탈퇴한 회원 입니다",
+        )
+        with patch("src.fraud_store_monitor_service.requests.get", return_value=response):
+            result = _probe_store_status("2920235")
+
+        self.assertEqual(result.get("status"), "deleted")
+        self.assertEqual(result.get("is_active"), 0)
+
+    def test_probe_store_status_deleted_by_http_404(self):
+        response = _FakeHttpResponse(status_code=404, text="")
+        with patch("src.fraud_store_monitor_service.requests.get", return_value=response):
+            result = _probe_store_status("2920235")
+
+        self.assertEqual(result.get("status"), "deleted")
+        self.assertEqual(result.get("is_active"), 0)
+
+    def test_probe_store_status_active_when_store_info_exists(self):
+        response = _FakeHttpResponse(
+            status_code=200,
+            text='{"storeSeq":2920235,"storeName":"테스트상점","nickName":"테스트상점"}',
+        )
+        with patch("src.fraud_store_monitor_service.requests.get", return_value=response):
+            result = _probe_store_status("2920235")
+
+        self.assertEqual(result.get("status"), "active")
+        self.assertEqual(result.get("is_active"), 1)
+
+    def test_probe_store_status_error_on_request_exception(self):
+        with patch("src.fraud_store_monitor_service.requests.get", side_effect=requests.RequestException("timeout")):
+            result = _probe_store_status("2920235")
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertEqual(result.get("is_active"), 0)
+        self.assertIsNotNone(result.get("error_message"))
 
 
 if __name__ == "__main__":

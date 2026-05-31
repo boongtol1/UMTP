@@ -1,25 +1,16 @@
 import json
 import os
+import re
 from bisect import bisect_left
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import requests
 
 try:
     from src.db import get_connection
-    from src.joongna_search_client import (
-        STORE_PROFILE_API_URL,
-        STORE_PROFILE_HEADERS,
-        STORE_PROFILE_REQUEST_TIMEOUT_SECONDS,
-    )
 except ModuleNotFoundError:
     from db import get_connection
-    from joongna_search_client import (
-        STORE_PROFILE_API_URL,
-        STORE_PROFILE_HEADERS,
-        STORE_PROFILE_REQUEST_TIMEOUT_SECONDS,
-    )
 
 
 FRAUD_STORE_MONITOR_ENABLED_ENV = "FRAUD_STORE_MONITOR_ENABLED"
@@ -34,6 +25,15 @@ DEFAULT_LOOKBACK_DAYS = 14
 DEFAULT_LISTING_CANDIDATE_LIMIT = 10000
 INACTIVE_LABEL_MAX_MINUTES = 7 * 24 * 60
 
+STORE_RSC_URL_TEMPLATE = "https://web.joongna.com/store/{store_id}?_rsc=1"
+STORE_PAGE_REFERER_TEMPLATE = "https://web.joongna.com/store/{store_id}"
+STORE_RSC_REQUEST_TIMEOUT_SECONDS = 10
+STORE_RSC_HEADERS = {
+    "accept": "*/*",
+    "rsc": "1",
+    "user-agent": "Mozilla/5.0",
+}
+
 STATUS_ACTIVE = "active"
 STATUS_INACTIVE = "inactive"
 STATUS_SUSPENDED = "suspended"
@@ -41,6 +41,41 @@ STATUS_DELETED = "deleted"
 STATUS_UNKNOWN = "unknown"
 STATUS_ERROR = "error"
 INACTIVE_STORE_STATUSES = {STATUS_INACTIVE, STATUS_SUSPENDED, STATUS_DELETED}
+
+SUSPENDED_MARKERS = (
+    "이용제한된 회원의 가게입니다",
+    "이용제한된 회원",
+    "이용제한",
+    "이용 제한",
+    "제한된 회원",
+    "정지",
+    "제재",
+    "차단",
+    "suspended",
+    "restricted",
+    "banned",
+    "blocked",
+)
+
+DELETED_MARKERS = (
+    "존재하지 않는 상점",
+    "찾을 수 없는 상점",
+    "삭제된 상점",
+    "탈퇴한 회원",
+    "존재하지 않는 회원",
+    "not found",
+    "deleted",
+    "removed",
+)
+
+INACTIVE_MARKERS = (
+    "비활성",
+    "비공개",
+    "휴면",
+    "inactive",
+    "private",
+    "dormant",
+)
 
 
 def _utc_now_naive() -> datetime:
@@ -308,118 +343,113 @@ def _is_due_for_check(
     return (checked_at - last_checked_at) >= min_gap
 
 
-def _contains_any_keyword(text: str, keywords: Iterable[str]) -> bool:
-    return any(keyword in text for keyword in keywords)
+def _find_marker(lowered_text: str, markers: Iterable[str]) -> Optional[str]:
+    for marker in markers:
+        lowered_marker = marker.lower()
+        if lowered_marker in lowered_text:
+            return marker
+    return None
 
 
-def _coerce_json_summary(response_json: Any, status_code: int) -> Dict[str, Any]:
-    summary: Dict[str, Any] = {"http_status": status_code}
-    if not isinstance(response_json, dict):
-        summary["json_type"] = type(response_json).__name__
-        return summary
-
-    meta = response_json.get("meta")
-    if isinstance(meta, dict):
-        meta_code = _safe_int(meta.get("code"))
-        summary["meta"] = {
-            "code": meta_code,
-            "message": _safe_text(meta.get("message")),
-        }
-
-    data = response_json.get("data")
-    if isinstance(data, dict):
-        summary["data"] = {
-            "storeSeq": _safe_int(data.get("storeSeq")),
-            "nickName": _safe_text(data.get("nickName")),
-            "storeName": _safe_text(data.get("storeName")),
-            "status": _safe_text(data.get("status") or data.get("storeStatus")),
-            "isActive": data.get("isActive"),
-        }
-    elif data is None:
-        summary["data"] = None
-    else:
-        summary["data_type"] = type(data).__name__
-    return summary
+def _looks_like_active_store_info(body_text: str) -> bool:
+    lowered = body_text.lower()
+    if re.search(r'"storeseq"\s*:\s*\d+', lowered) and (
+        '"storename"' in lowered
+        or '"nickname"' in lowered
+        or '"profileimageurl"' in lowered
+        or '"reviewcount"' in lowered
+    ):
+        return True
+    return False
 
 
-def _classify_store_status(
-    *,
-    status_code: int,
-    data: Optional[Dict[str, Any]],
-    status_text: str,
-) -> str:
-    lowered = status_text.lower()
-    deleted_keywords = ("존재하지 않는", "없는 상점", "삭제", "탈퇴", "not found", "does not exist")
-    suspended_keywords = ("정지", "제재", "차단", "suspend", "suspended", "blocked")
-    inactive_keywords = ("비활성", "inactive", "휴면", "이용중지", "운영중이 아님")
-    active_keywords = ("정상", "active", "운영중")
+def _classify_store_status_from_rsc(*, status_code: int, body_text: str) -> Tuple[str, str]:
+    lowered = body_text.lower()
 
     if status_code in (404, 410):
-        return STATUS_DELETED
+        return STATUS_DELETED, f"http_{status_code}"
 
-    if _contains_any_keyword(lowered, deleted_keywords):
-        return STATUS_DELETED
-    if _contains_any_keyword(lowered, suspended_keywords):
-        return STATUS_SUSPENDED
-    if _contains_any_keyword(lowered, inactive_keywords):
-        return STATUS_INACTIVE
+    # 우선순위: deleted > suspended > inactive > active > unknown > error
+    deleted_marker = _find_marker(lowered, DELETED_MARKERS)
+    if deleted_marker:
+        return STATUS_DELETED, deleted_marker
 
-    if isinstance(data, dict):
-        if _normalize_store_id(data.get("storeSeq")):
-            is_active = data.get("isActive")
-            if isinstance(is_active, bool):
-                return STATUS_ACTIVE if is_active else STATUS_INACTIVE
+    suspended_marker = _find_marker(lowered, SUSPENDED_MARKERS)
+    if suspended_marker:
+        return STATUS_SUSPENDED, suspended_marker
 
-            raw_state = _safe_text(data.get("status") or data.get("storeStatus"))
-            if raw_state:
-                raw_state_lower = raw_state.lower()
-                if _contains_any_keyword(raw_state_lower, deleted_keywords):
-                    return STATUS_DELETED
-                if _contains_any_keyword(raw_state_lower, suspended_keywords):
-                    return STATUS_SUSPENDED
-                if _contains_any_keyword(raw_state_lower, inactive_keywords):
-                    return STATUS_INACTIVE
-                if _contains_any_keyword(raw_state_lower, active_keywords):
-                    return STATUS_ACTIVE
-            return STATUS_ACTIVE
+    inactive_marker = _find_marker(lowered, INACTIVE_MARKERS)
+    if inactive_marker:
+        return STATUS_INACTIVE, inactive_marker
 
-    if status_code >= 500:
-        return STATUS_ERROR
-    if _contains_any_keyword(lowered, active_keywords):
-        return STATUS_ACTIVE
-    return STATUS_UNKNOWN
+    if _looks_like_active_store_info(body_text):
+        return STATUS_ACTIVE, "store_info_detected"
+
+    return STATUS_UNKNOWN, f"http_{status_code}_unknown"
+
+
+def _summarize_rsc_response(
+    *,
+    url: str,
+    status_code: int,
+    body_text: str,
+    marker: str,
+    status: str,
+) -> Dict[str, Any]:
+    excerpt = body_text[:240] if body_text else ""
+    return {
+        "rsc_url": url,
+        "http_status": status_code,
+        "status": status,
+        "detected_marker": marker,
+        "response_size_bytes": len(body_text.encode("utf-8")) if body_text else 0,
+        "contains_store_name_field": '"storeName"' in body_text,
+        "contains_nick_name_field": '"nickName"' in body_text,
+        "body_excerpt": excerpt,
+    }
 
 
 def _probe_store_status(store_id: str) -> Dict[str, Any]:
     checked_at = _utc_now_naive()
+    normalized_store_id = _normalize_store_id(store_id)
+    if normalized_store_id is None:
+        return {
+            "checked_at": checked_at,
+            "status": STATUS_ERROR,
+            "is_active": 0,
+            "raw_status_text": "invalid_store_id",
+            "raw_response_json": {"reason": "invalid_store_id"},
+            "error_message": "invalid_store_id",
+        }
+
+    rsc_url = STORE_RSC_URL_TEMPLATE.format(store_id=normalized_store_id)
+    headers = dict(STORE_RSC_HEADERS)
+    headers["referer"] = STORE_PAGE_REFERER_TEMPLATE.format(store_id=normalized_store_id)
 
     try:
         response = requests.get(
-            STORE_PROFILE_API_URL,
-            headers=STORE_PROFILE_HEADERS,
-            params={"storeSeq": store_id},
-            timeout=STORE_PROFILE_REQUEST_TIMEOUT_SECONDS,
+            rsc_url,
+            headers=headers,
+            timeout=STORE_RSC_REQUEST_TIMEOUT_SECONDS,
         )
         status_code = int(response.status_code)
-        try:
-            response_json = response.json()
-        except ValueError:
-            response_json = None
-
-        summary = _coerce_json_summary(response_json, status_code)
-        data = response_json.get("data") if isinstance(response_json, dict) else None
-
-        meta = response_json.get("meta") if isinstance(response_json, dict) else None
-        meta_message = _safe_text(meta.get("message")) if isinstance(meta, dict) else None
-        data_status = _safe_text(data.get("status") or data.get("storeStatus")) if isinstance(data, dict) else None
-        status_text = meta_message or data_status or f"http_{status_code}"
-
-        status = _classify_store_status(status_code=status_code, data=data, status_text=status_text)
+        body_text = response.text if isinstance(response.text, str) else ""
+        status, marker = _classify_store_status_from_rsc(
+            status_code=status_code,
+            body_text=body_text,
+        )
+        summary = _summarize_rsc_response(
+            url=rsc_url,
+            status_code=status_code,
+            body_text=body_text,
+            marker=marker,
+            status=status,
+        )
         return {
             "checked_at": checked_at,
             "status": status,
             "is_active": 1 if status == STATUS_ACTIVE else 0,
-            "raw_status_text": status_text,
+            "raw_status_text": marker,
             "raw_response_json": summary,
             "error_message": None,
         }
@@ -430,7 +460,10 @@ def _probe_store_status(store_id: str) -> Dict[str, Any]:
             "status": STATUS_ERROR,
             "is_active": 0,
             "raw_status_text": message,
-            "raw_response_json": {"exception_type": type(exc).__name__},
+            "raw_response_json": {
+                "rsc_url": rsc_url,
+                "exception_type": type(exc).__name__,
+            },
             "error_message": message,
         }
 
