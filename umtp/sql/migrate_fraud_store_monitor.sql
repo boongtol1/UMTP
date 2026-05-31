@@ -68,6 +68,31 @@ CREATE TABLE IF NOT EXISTS fraud_store_activity_snapshots (
   INDEX idx_store_seq_observed (store_seq, observed_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS fraud_store_profile_field_snapshots (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  store_id VARCHAR(64) NOT NULL,
+  store_seq BIGINT NULL,
+  checked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  status VARCHAR(50) NOT NULL DEFAULT 'unknown',
+  source VARCHAR(50) NULL,
+  trust_score INT NULL,
+  review_count INT NULL,
+  store_level VARCHAR(100) NULL,
+  store_level_number INT NULL,
+  safe_trade_count INT NULL,
+  reliability_score INT NULL,
+  activity_score INT NULL,
+  notified_score INT NULL,
+  visit_today_count INT NULL,
+  visit_total_count INT NULL,
+  is_official_account TINYINT NULL,
+  raw_profile_json JSON NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_store_checked (store_id, checked_at),
+  INDEX idx_status_checked (status, checked_at),
+  INDEX idx_store_seq_checked (store_seq, checked_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS fraud_training_label_candidates (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   product_id VARCHAR(64) NOT NULL,

@@ -293,6 +293,7 @@ def _build_stats(config: Dict[str, Any]) -> Dict[str, Any]:
         "label_rows_updated": 0,
         "product_snapshot_candidate_count": 0,
         "product_snapshots_upserted": 0,
+        "profile_field_snapshots_inserted": 0,
         "store_errors": 0,
         "fatal_error": None,
     }
@@ -945,6 +946,108 @@ def _looks_like_active_store_info(body_text: str) -> bool:
     return False
 
 
+def _extract_rsc_value(body_text: str, key: str) -> Any:
+    pattern = rf'"{re.escape(key)}"\s*:\s*(null|true|false|-?\d+(?:\.\d+)?|"(?:\\.|[^"\\])*")'
+    match = re.search(pattern, body_text)
+    if match is None:
+        return None
+    token = match.group(1)
+    if token == "null":
+        return None
+    if token == "true":
+        return True
+    if token == "false":
+        return False
+    if token.startswith('"') and token.endswith('"'):
+        try:
+            return json.loads(token)
+        except Exception:
+            return token[1:-1]
+    if "." in token:
+        try:
+            return float(token)
+        except Exception:
+            return None
+    try:
+        return int(token)
+    except Exception:
+        return None
+
+
+def _extract_profile_from_rsc_body(store_id: str, body_text: str) -> Optional[Dict[str, Any]]:
+    if not body_text:
+        return None
+
+    store_name = _normalize_store_name(_extract_rsc_value(body_text, "storeName")) or _normalize_store_name(
+        _extract_rsc_value(body_text, "nickName")
+    )
+    profile_image_url = _safe_text(_extract_rsc_value(body_text, "profileImageUrl")) or _safe_text(
+        _extract_rsc_value(body_text, "storeImgUrl")
+    )
+    extracted_profile = {
+        "store_id": store_id,
+        "store_name": store_name,
+        "store_name_fingerprint": _build_store_name_fingerprint(store_id, store_name) if store_name else None,
+        "profile_image_url": profile_image_url,
+        "has_default_profile_image": 1 if "default/profile_" in (profile_image_url or "").lower() else 0,
+        "store_level": _safe_text(_extract_rsc_value(body_text, "storeLevel")),
+        "store_level_number": _safe_int(_extract_rsc_value(body_text, "storeLevelNumber")),
+        "review_count": _safe_int(_extract_rsc_value(body_text, "reviewCount")),
+        "reliability_score": _safe_int(_extract_rsc_value(body_text, "reliabilityScore")),
+        "activity_score": _safe_int(_extract_rsc_value(body_text, "activityScore")),
+        "notified_score": _safe_int(_extract_rsc_value(body_text, "notifiedScore")),
+        "safe_trade_count": _safe_int(_extract_rsc_value(body_text, "safeTradeCount")),
+        "trust_score": _safe_int(_extract_rsc_value(body_text, "trustScore")),
+        "chat_response_ratio": _safe_text(_extract_rsc_value(body_text, "chatResponseRatio")),
+        "chat_response_time": _safe_int(_extract_rsc_value(body_text, "chatResponseTime")),
+        "chat_response_time_text": _safe_text(_extract_rsc_value(body_text, "chatResponseTimeText")),
+        "visit_today_count": _safe_int(_extract_rsc_value(body_text, "visitTodayCount")),
+        "visit_total_count": _safe_int(_extract_rsc_value(body_text, "visitTotalCount")),
+        "store_grade": _safe_float(_extract_rsc_value(body_text, "storeGrade")),
+        "user_type": _safe_int(_extract_rsc_value(body_text, "userType")),
+        "partner_center_seller_yn": _safe_bool_int(_extract_rsc_value(body_text, "partnerCenterSellerYn")),
+        "is_official_account": _safe_bool_int(_extract_rsc_value(body_text, "isOfficialAccount")),
+        "store_desc": _safe_text(_extract_rsc_value(body_text, "storeDesc"))
+        or _safe_text(_extract_rsc_value(body_text, "storeAbout")),
+        "raw_json": {
+            "source": "store_rsc",
+            "storeLevel": _extract_rsc_value(body_text, "storeLevel"),
+            "storeLevelNumber": _extract_rsc_value(body_text, "storeLevelNumber"),
+            "reviewCount": _extract_rsc_value(body_text, "reviewCount"),
+            "reliabilityScore": _extract_rsc_value(body_text, "reliabilityScore"),
+            "activityScore": _extract_rsc_value(body_text, "activityScore"),
+            "notifiedScore": _extract_rsc_value(body_text, "notifiedScore"),
+            "safeTradeCount": _extract_rsc_value(body_text, "safeTradeCount"),
+            "trustScore": _extract_rsc_value(body_text, "trustScore"),
+            "visitTodayCount": _extract_rsc_value(body_text, "visitTodayCount"),
+            "visitTotalCount": _extract_rsc_value(body_text, "visitTotalCount"),
+            "isOfficialAccount": _extract_rsc_value(body_text, "isOfficialAccount"),
+        },
+    }
+
+    # 최소한 하나 이상의 핵심 필드가 있어야 profile 로 인정한다.
+    has_core_field = any(
+        extracted_profile.get(key) is not None
+        for key in (
+            "store_name",
+            "trust_score",
+            "review_count",
+            "store_level",
+            "store_level_number",
+            "safe_trade_count",
+            "reliability_score",
+            "activity_score",
+            "notified_score",
+            "visit_today_count",
+            "visit_total_count",
+            "is_official_account",
+        )
+    )
+    if not has_core_field:
+        return None
+    return extracted_profile
+
+
 def _classify_store_status_from_rsc(*, status_code: int, body_text: str) -> Tuple[str, str]:
     lowered = body_text.lower()
 
@@ -1121,9 +1224,12 @@ def _probe_store_status(store_id: str) -> Dict[str, Any]:
             marker=marker,
             status=status,
         )
+        rsc_profile = _extract_profile_from_rsc_body(normalized_store_id, body_text) if status == STATUS_ACTIVE else None
+        merged_profile = my_store_profile if isinstance(my_store_profile, dict) else rsc_profile
         merged_summary = {
             "my_store": my_store_summary,
             "rsc": summary,
+            "rsc_profile_detected": bool(isinstance(rsc_profile, dict)),
         }
         final_status = status
         final_marker = marker
@@ -1142,7 +1248,7 @@ def _probe_store_status(store_id: str) -> Dict[str, Any]:
             "meta_code": my_store_meta_code,
             "meta_message": my_store_meta_message,
             "raw_snippet": _safe_text(summary.get("body_excerpt")),
-            "profile": my_store_profile,
+            "profile": merged_profile,
         }
     except Exception as exc:
         message = str(exc)
@@ -1786,6 +1892,72 @@ def _insert_activity_snapshot(
     )
 
 
+def _insert_store_profile_field_snapshot(
+    cursor,
+    *,
+    store_id: str,
+    checked_at: datetime,
+    status: str,
+    source: Optional[str],
+    profile: Dict[str, Any],
+) -> bool:
+    raw_profile_json_text = None
+    try:
+        raw_profile_json_text = json.dumps(profile.get("raw_json"), ensure_ascii=False)
+    except Exception:
+        raw_profile_json_text = None
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO fraud_store_profile_field_snapshots (
+                store_id,
+                store_seq,
+                checked_at,
+                status,
+                source,
+                trust_score,
+                review_count,
+                store_level,
+                store_level_number,
+                safe_trade_count,
+                reliability_score,
+                activity_score,
+                notified_score,
+                visit_today_count,
+                visit_total_count,
+                is_official_account,
+                raw_profile_json
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                store_id,
+                _safe_int(store_id),
+                checked_at,
+                status,
+                source,
+                _safe_int(profile.get("trust_score")),
+                _safe_int(profile.get("review_count")),
+                _safe_text(profile.get("store_level")),
+                _safe_int(profile.get("store_level_number")),
+                _safe_int(profile.get("safe_trade_count")),
+                _safe_int(profile.get("reliability_score")),
+                _safe_int(profile.get("activity_score")),
+                _safe_int(profile.get("notified_score")),
+                _safe_int(profile.get("visit_today_count")),
+                _safe_int(profile.get("visit_total_count")),
+                _safe_bool_int(profile.get("is_official_account")),
+                raw_profile_json_text,
+            ),
+        )
+        return True
+    except Exception as exc:
+        if _is_schema_missing_error(exc):
+            return False
+        raise
+
+
 def _upsert_training_label_candidates(cursor, listing_candidates: List[Dict[str, Any]]) -> int:
     if not listing_candidates:
         return 0
@@ -2043,6 +2215,16 @@ def run_fraud_store_monitor_once(
                     )
 
                 if normalized_status == STATUS_ACTIVE and isinstance(profile, dict):
+                    inserted_profile_fields = _insert_store_profile_field_snapshot(
+                        cursor,
+                        store_id=store_id,
+                        checked_at=probe_checked_at,
+                        status=normalized_status,
+                        source=_safe_text(probe.get("source")),
+                        profile=profile,
+                    )
+                    if inserted_profile_fields:
+                        stats["profile_field_snapshots_inserted"] += 1
                     activity = _compute_activity_snapshot_from_db(
                         cursor,
                         store_id=store_id,

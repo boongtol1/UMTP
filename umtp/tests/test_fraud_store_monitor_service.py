@@ -251,11 +251,15 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
                                                     "src.fraud_store_monitor_service._refresh_training_labels_for_candidates",
                                                     return_value=2,
                                                 ):
-                                                    stats = run_fraud_store_monitor_once(
-                                                        force_enabled=True,
-                                                        min_check_interval_minutes=30,
-                                                        lookback_days=14,
-                                                    )
+                                                    with patch(
+                                                        "src.fraud_store_monitor_service._insert_store_profile_field_snapshot",
+                                                        return_value=True,
+                                                    ) as mock_insert_profile_fields:
+                                                        stats = run_fraud_store_monitor_once(
+                                                            force_enabled=True,
+                                                            min_check_interval_minutes=30,
+                                                            lookback_days=14,
+                                                        )
 
         self.assertEqual(stats.get("candidate_listing_count"), 2)
         self.assertEqual(stats.get("target_store_count"), 2)
@@ -268,9 +272,11 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
         self.assertEqual(stats.get("label_rows_updated"), 2)
         self.assertEqual(stats.get("product_snapshot_candidate_count"), 0)
         self.assertEqual(stats.get("product_snapshots_upserted"), 0)
+        self.assertEqual(stats.get("profile_field_snapshots_inserted"), 1)
         self.assertEqual(mock_insert_status.call_count, 1)
         self.assertEqual(mock_upsert_profile.call_count, 1)
         self.assertEqual(mock_insert_activity.call_count, 1)
+        self.assertEqual(mock_insert_profile_fields.call_count, 1)
 
     def test_product_snapshot_inserts_first_seen_for_new_product(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
@@ -608,6 +614,38 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
         self.assertEqual(result.get("is_active"), 1)
         self.assertEqual(result.get("source"), "my_store_api")
         self.assertEqual((result.get("profile") or {}).get("store_name"), "테스트상점")
+
+    def test_probe_store_status_active_extracts_profile_fields_from_rsc_when_my_store_unknown(self):
+        my_store = _FakeHttpResponse(
+            status_code=200,
+            json_payload={"meta": {"code": 111, "message": "UNKNOWN"}, "data": ""},
+        )
+        rsc = _FakeHttpResponse(
+            status_code=200,
+            text='{"storeSeq":2920235,"storeName":"테스트상점","storeLevel":"브론즈 Lv.1","storeLevelNumber":1,'
+            '"reviewCount":7,"reliabilityScore":321,"activityScore":222,"notifiedScore":111,'
+            '"safeTradeCount":3,"trustScore":654,"visitTodayCount":12,"visitTotalCount":345,'
+            '"isOfficialAccount":false}',
+        )
+        with patch("src.fraud_store_monitor_service.requests.get", side_effect=[my_store, rsc]):
+            result = _probe_store_status("2920235")
+
+        self.assertEqual(result.get("status"), "active")
+        self.assertEqual(result.get("is_active"), 1)
+        self.assertEqual(result.get("source"), "store_rsc")
+        profile = result.get("profile") or {}
+        self.assertEqual(profile.get("store_name"), "테스트상점")
+        self.assertEqual(profile.get("store_level"), "브론즈 Lv.1")
+        self.assertEqual(profile.get("store_level_number"), 1)
+        self.assertEqual(profile.get("review_count"), 7)
+        self.assertEqual(profile.get("reliability_score"), 321)
+        self.assertEqual(profile.get("activity_score"), 222)
+        self.assertEqual(profile.get("notified_score"), 111)
+        self.assertEqual(profile.get("safe_trade_count"), 3)
+        self.assertEqual(profile.get("trust_score"), 654)
+        self.assertEqual(profile.get("visit_today_count"), 12)
+        self.assertEqual(profile.get("visit_total_count"), 345)
+        self.assertEqual(profile.get("is_official_account"), 0)
 
     def test_probe_store_status_error_on_request_exception(self):
         with patch("src.fraud_store_monitor_service.requests.get", side_effect=requests.RequestException("timeout")):
