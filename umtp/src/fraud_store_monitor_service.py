@@ -409,6 +409,32 @@ def _summarize_rsc_response(
     }
 
 
+def _decode_response_body_text(response: Any) -> str:
+    raw_content = getattr(response, "content", None)
+    if isinstance(raw_content, (bytes, bytearray)):
+        encodings = [
+            "utf-8",
+            _safe_text(getattr(response, "apparent_encoding", None)),
+            _safe_text(getattr(response, "encoding", None)),
+        ]
+        for encoding in encodings:
+            if not encoding:
+                continue
+            try:
+                return raw_content.decode(encoding)
+            except Exception:
+                continue
+        try:
+            return raw_content.decode("utf-8", errors="replace")
+        except Exception:
+            pass
+
+    text_value = getattr(response, "text", None)
+    if isinstance(text_value, str):
+        return text_value
+    return ""
+
+
 def _probe_store_status(store_id: str) -> Dict[str, Any]:
     checked_at = _utc_now_naive()
     normalized_store_id = _normalize_store_id(store_id)
@@ -433,7 +459,7 @@ def _probe_store_status(store_id: str) -> Dict[str, Any]:
             timeout=STORE_RSC_REQUEST_TIMEOUT_SECONDS,
         )
         status_code = int(response.status_code)
-        body_text = response.text if isinstance(response.text, str) else ""
+        body_text = _decode_response_body_text(response)
         status, marker = _classify_store_status_from_rsc(
             status_code=status_code,
             body_text=body_text,

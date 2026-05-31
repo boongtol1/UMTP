@@ -75,9 +75,12 @@ class _LabelCalcCursor:
 
 
 class _FakeHttpResponse:
-    def __init__(self, status_code=200, text=""):
+    def __init__(self, status_code=200, text="", content=None, encoding=None, apparent_encoding=None):
         self.status_code = status_code
         self.text = text
+        self.content = content if content is not None else text.encode("utf-8")
+        self.encoding = encoding
+        self.apparent_encoding = apparent_encoding
 
 
 class FraudStoreMonitorServiceTest(unittest.TestCase):
@@ -222,6 +225,23 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
         response = _FakeHttpResponse(
             status_code=200,
             text="이용제한된 회원의 가게입니다",
+        )
+        with patch("src.fraud_store_monitor_service.requests.get", return_value=response):
+            result = _probe_store_status("2920235")
+
+        self.assertEqual(result.get("status"), "suspended")
+        self.assertEqual(result.get("is_active"), 0)
+
+    def test_probe_store_status_suspended_from_utf8_bytes_when_text_is_garbled(self):
+        phrase = "이용제한된 회원의 가게입니다"
+        utf8_bytes = phrase.encode("utf-8")
+        garbled_text = utf8_bytes.decode("iso-8859-1", errors="ignore")
+        response = _FakeHttpResponse(
+            status_code=200,
+            text=garbled_text,
+            content=utf8_bytes,
+            encoding="ISO-8859-1",
+            apparent_encoding="utf-8",
         )
         with patch("src.fraud_store_monitor_service.requests.get", return_value=response):
             result = _probe_store_status("2920235")
