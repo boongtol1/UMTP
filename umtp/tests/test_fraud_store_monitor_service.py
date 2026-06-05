@@ -407,6 +407,35 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
         self.assertEqual(len(cursor.snapshots), 1)
         self.assertEqual(cursor.snapshots[0]["snapshot_reason"], "first_seen")
 
+    def test_product_snapshot_skips_reprocessed_older_unchanged_snapshot(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        cursor = _ProductSnapshotCursor()
+        first_candidate = {
+            "product_id": "P-104",
+            "store_id": "204",
+            "observed_at": now,
+            "sort_date": now - timedelta(hours=3),
+            "price_krw": 700000,
+            "title": "맥북 에어 13",
+            "url": "https://web.joongna.com/product/104",
+            "source": "search_results",
+            "raw_payload_json": {"content": "초기 본문"},
+        }
+        changed_candidate = {
+            **first_candidate,
+            "observed_at": now + timedelta(hours=2),
+            "price_krw": 650000,
+        }
+
+        inserted = _upsert_product_state_snapshots(cursor, [first_candidate, changed_candidate])
+        self.assertEqual(inserted, 2)
+        self.assertEqual(len(cursor.snapshots), 2)
+
+        reprocessed = _upsert_product_state_snapshots(cursor, [first_candidate])
+
+        self.assertEqual(reprocessed, 0)
+        self.assertEqual(len(cursor.snapshots), 2)
+
     def test_fetch_latest_product_snapshot_before_returns_price_before_suspend(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
         cursor = _ProductSnapshotCursor()
