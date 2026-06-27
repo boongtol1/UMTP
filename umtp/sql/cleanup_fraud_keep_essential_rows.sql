@@ -1,5 +1,9 @@
 USE UMTP_RB;
-
+SET SESSION net_read_timeout = 600;
+SET SESSION net_write_timeout = 600;
+SET SESSION wait_timeout = 28800;
+SET SESSION interactive_timeout = 28800;
+SET SESSION max_execution_time = 0;
 SET @cleanup_started_at = NOW();
 SET SQL_SAFE_UPDATES = 0;
 
