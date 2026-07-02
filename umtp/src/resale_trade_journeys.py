@@ -544,7 +544,7 @@ def _safe_order_query(base_sql: str, order_candidates: list[str]) -> str:
 
 
 def _fetch_latest_alert_event(cursor, *, user_id: str, source: str, product_id: str) -> dict[str, Any]:
-    base = """
+    strict_base = """
         SELECT *
         FROM alert_events
         WHERE source = %s
@@ -552,14 +552,33 @@ def _fetch_latest_alert_event(cursor, *, user_id: str, source: str, product_id: 
           AND (%s IS NULL OR user_id = %s)
     """
     query = _safe_order_query(
-        base,
+        strict_base,
         [
             "COALESCE(sort_date, analyzed_at, created_at) DESC, id DESC",
             "created_at DESC, id DESC",
             "id DESC",
         ],
     )
-    return _safe_fetchone(cursor, query, (source, product_id, user_id, user_id)) or {}
+    row = _safe_fetchone(cursor, query, (source, product_id, user_id, user_id))
+    if row:
+        return row
+
+    fallback_base = """
+        SELECT *
+        FROM alert_events
+        WHERE product_id = %s
+          AND (%s IS NULL OR user_id = %s)
+    """
+    fallback_query = _safe_order_query(
+        fallback_base,
+        [
+            "CASE WHEN source = %s THEN 0 WHEN source IS NULL OR TRIM(source) = '' THEN 1 ELSE 2 END, COALESCE(sort_date, analyzed_at, created_at) DESC, id DESC",
+            "COALESCE(sort_date, analyzed_at, created_at) DESC, id DESC",
+            "created_at DESC, id DESC",
+            "id DESC",
+        ],
+    )
+    return _safe_fetchone(cursor, fallback_query, (product_id, user_id, user_id, source)) or {}
 
 
 def _fetch_alert_event_by_id(cursor, *, user_id: str, alert_event_id: int) -> dict[str, Any]:
@@ -593,7 +612,7 @@ def _fetch_read_archive_event_by_id(cursor, *, user_id: str, read_archive_event_
 
 
 def _fetch_latest_analysis_job(cursor, *, user_id: str, source: str, product_id: str) -> dict[str, Any]:
-    base = """
+    strict_base = """
         SELECT *
         FROM analysis_jobs
         WHERE source = %s
@@ -601,14 +620,33 @@ def _fetch_latest_analysis_job(cursor, *, user_id: str, source: str, product_id:
           AND (%s IS NULL OR user_id = %s)
     """
     query = _safe_order_query(
-        base,
+        strict_base,
         [
             "COALESCE(sort_date, processed_at, started_at, created_at) DESC, id DESC",
             "created_at DESC, id DESC",
             "id DESC",
         ],
     )
-    return _safe_fetchone(cursor, query, (source, product_id, user_id, user_id)) or {}
+    row = _safe_fetchone(cursor, query, (source, product_id, user_id, user_id))
+    if row:
+        return row
+
+    fallback_base = """
+        SELECT *
+        FROM analysis_jobs
+        WHERE product_id = %s
+          AND (%s IS NULL OR user_id = %s)
+    """
+    fallback_query = _safe_order_query(
+        fallback_base,
+        [
+            "CASE WHEN source = %s THEN 0 WHEN source IS NULL OR TRIM(source) = '' THEN 1 ELSE 2 END, COALESCE(sort_date, processed_at, started_at, created_at) DESC, id DESC",
+            "COALESCE(sort_date, processed_at, started_at, created_at) DESC, id DESC",
+            "created_at DESC, id DESC",
+            "id DESC",
+        ],
+    )
+    return _safe_fetchone(cursor, fallback_query, (product_id, user_id, user_id, source)) or {}
 
 
 def _fetch_latest_seen_product(cursor, *, product_id: str) -> dict[str, Any]:
@@ -655,12 +693,18 @@ def _fetch_latest_listing_analysis(cursor, *, source: str, product_id: str) -> d
         SELECT lar.*, aj.source AS analysis_source, aj.product_id AS analysis_product_id, aj.created_at AS analysis_job_created_at
         FROM listing_analysis_results lar
         INNER JOIN analysis_jobs aj ON aj.id = lar.analysis_job_id
-        WHERE aj.source = %s
-          AND aj.product_id = %s
-        ORDER BY COALESCE(lar.created_at, aj.created_at) DESC, lar.id DESC
+        WHERE aj.product_id = %s
+        ORDER BY
+          CASE
+            WHEN aj.source = %s THEN 0
+            WHEN aj.source IS NULL OR TRIM(aj.source) = '' THEN 1
+            ELSE 2
+          END,
+          COALESCE(lar.created_at, aj.created_at) DESC,
+          lar.id DESC
         LIMIT 1
         """,
-        (source, product_id),
+        (product_id, source),
     )
     if joined:
         return joined
@@ -676,6 +720,88 @@ def _fetch_latest_listing_analysis(cursor, *, source: str, product_id: str) -> d
         (),
     )
     return direct or {}
+
+
+def _fetch_latest_url_analysis_log(
+    cursor,
+    *,
+    user_id: str,
+    url: Optional[str],
+    product_id: Optional[str],
+) -> dict[str, Any]:
+    normalized_user_id = _normalize_optional_text(user_id)
+    normalized_url = _normalize_optional_text(url)
+    normalized_product_id = _normalize_optional_text(product_id)
+    select_sql = """
+        SELECT
+            source,
+            url,
+            title,
+            listing_price_krw,
+            product_type,
+            chip,
+            screen_inch,
+            ram_gb,
+            ssd_gb,
+            fair_price_krw,
+            diff_ratio,
+            status,
+            reason,
+            created_at
+        FROM url_analysis_logs
+    """
+
+    if normalized_user_id is None:
+        return {}
+
+    if normalized_url is not None:
+        row = _safe_fetchone(
+            cursor,
+            f"""
+            {select_sql}
+            WHERE user_id = %s
+              AND url = %s
+              AND (
+                    status = 'success'
+                 OR product_type IS NOT NULL
+                 OR chip IS NOT NULL
+                 OR title IS NOT NULL
+              )
+            ORDER BY CASE WHEN status = 'success' THEN 0 ELSE 1 END, id DESC
+            LIMIT 1
+            """,
+            (normalized_user_id, normalized_url),
+        )
+        if row:
+            return row
+
+    if normalized_product_id is None or not re.fullmatch(r"\d+", normalized_product_id):
+        return {}
+
+    product_url_patterns = [
+        f"%/product/{normalized_product_id}",
+        f"%/product/{normalized_product_id}?%",
+        f"%/product/{normalized_product_id}#%",
+        f"%/product/{normalized_product_id}/%",
+    ]
+    like_clauses = " OR ".join(["url LIKE %s"] * len(product_url_patterns))
+    return _safe_fetchone(
+        cursor,
+        f"""
+        {select_sql}
+        WHERE user_id = %s
+          AND ({like_clauses})
+          AND (
+                status = 'success'
+             OR product_type IS NOT NULL
+             OR chip IS NOT NULL
+             OR title IS NOT NULL
+          )
+        ORDER BY CASE WHEN status = 'success' THEN 0 ELSE 1 END, id DESC
+        LIMIT 1
+        """,
+        (normalized_user_id, *product_url_patterns),
+    ) or {}
 
 
 def _first_non_blank(*values: Any) -> Any:
@@ -782,6 +908,41 @@ def _build_analysis_job_mapping(row: dict[str, Any]) -> dict[str, Any]:
         "discount_rate_percent": _normalize_optional_float(row.get("drop_rate_percent")),
         "risk_score": _normalize_optional_int(row.get("risk_score")),
         "reason_tags": _normalize_json_text(row.get("risk_keywords")),
+        "body_text": _normalize_optional_text(row.get("body_text")),
+    }
+
+
+def _build_url_analysis_log_mapping(
+    row: dict[str, Any],
+    *,
+    fallback_url: Optional[str],
+    fallback_source: Optional[str],
+    fallback_product_id: Optional[str],
+) -> dict[str, Any]:
+    if not row:
+        return {}
+
+    listing_price = _normalize_optional_int(row.get("listing_price_krw"))
+    fair_price = _normalize_optional_int(row.get("fair_price_krw"))
+    expected_profit = None
+    if fair_price is not None and listing_price is not None:
+        expected_profit = fair_price - listing_price
+
+    return {
+        "source": _normalize_optional_text(row.get("source")) or _normalize_source(fallback_source),
+        "product_id": _normalize_optional_text(fallback_product_id),
+        "url": _normalize_optional_text(row.get("url")) or _normalize_optional_text(fallback_url),
+        "title": _normalize_optional_text(row.get("title")),
+        "discovered_at": _normalize_optional_datetime(row.get("created_at")),
+        "listing_price_krw": listing_price,
+        "product_type": _normalize_optional_text(row.get("product_type")),
+        "chip": _normalize_optional_text(row.get("chip")),
+        "screen_inch": _normalize_optional_int(row.get("screen_inch")),
+        "ram_gb": _normalize_optional_int(row.get("ram_gb")),
+        "ssd_gb": _normalize_optional_int(row.get("ssd_gb")),
+        "fair_price_krw": fair_price,
+        "discount_rate_percent": _normalize_optional_float(row.get("diff_ratio")),
+        "expected_profit_krw": expected_profit,
         "body_text": _normalize_optional_text(row.get("body_text")),
     }
 
@@ -1079,8 +1240,20 @@ def _hydrate_row_by_product(
     user_values: Optional[dict[str, Any]],
     writable_columns: set[str],
 ) -> dict[str, Any]:
+    lookup_url = _normalize_optional_text(_first_non_blank((user_values or {}).get("url"), row.get("url")))
     alert_event = _build_alert_mapping(_fetch_latest_alert_event(cursor, user_id=user_id, source=source, product_id=product_id))
     analysis_job = _build_analysis_job_mapping(_fetch_latest_analysis_job(cursor, user_id=user_id, source=source, product_id=product_id))
+    url_analysis_log = _build_url_analysis_log_mapping(
+        _fetch_latest_url_analysis_log(
+            cursor,
+            user_id=user_id,
+            url=lookup_url,
+            product_id=product_id,
+        ),
+        fallback_url=lookup_url,
+        fallback_source=source,
+        fallback_product_id=product_id,
+    )
     seen_product = _build_seen_product_mapping(_fetch_latest_seen_product(cursor, product_id=product_id))
     search_result = _build_search_result_mapping(_fetch_latest_search_result(cursor, product_id=product_id), source=source)
     listing_analysis = _build_listing_analysis_mapping(_fetch_latest_listing_analysis(cursor, source=source, product_id=product_id))
@@ -1091,6 +1264,7 @@ def _hydrate_row_by_product(
         source_candidates=[
             alert_event,
             analysis_job,
+            url_analysis_log,
             seen_product,
             search_result,
             listing_analysis,
@@ -1115,8 +1289,20 @@ def _build_prefill_row_by_product(
     product_id: str,
     seed_values: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
+    lookup_url = _normalize_optional_text((seed_values or {}).get("url"))
     alert_event = _build_alert_mapping(_fetch_latest_alert_event(cursor, user_id=user_id, source=source, product_id=product_id))
     analysis_job = _build_analysis_job_mapping(_fetch_latest_analysis_job(cursor, user_id=user_id, source=source, product_id=product_id))
+    url_analysis_log = _build_url_analysis_log_mapping(
+        _fetch_latest_url_analysis_log(
+            cursor,
+            user_id=user_id,
+            url=lookup_url,
+            product_id=product_id,
+        ),
+        fallback_url=lookup_url,
+        fallback_source=source,
+        fallback_product_id=product_id,
+    )
     seen_product = _build_seen_product_mapping(_fetch_latest_seen_product(cursor, product_id=product_id))
     search_result = _build_search_result_mapping(_fetch_latest_search_result(cursor, product_id=product_id), source=source)
     listing_analysis = _build_listing_analysis_mapping(_fetch_latest_listing_analysis(cursor, source=source, product_id=product_id))
@@ -1149,6 +1335,7 @@ def _build_prefill_row_by_product(
         source_candidates=[
             alert_event,
             analysis_job,
+            url_analysis_log,
             seen_product,
             search_result,
             listing_analysis,

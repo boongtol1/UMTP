@@ -294,6 +294,178 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         self.assertEqual(mapped.get("listing_price_krw"), 690000)
         self.assertIsNotNone(mapped.get("image_urls"))
 
+    def test_url_analysis_log_mapping_hydrates_trade_prefill_fields(self):
+        mapped = journeys._build_url_analysis_log_mapping(
+            {
+                "url": "https://web.joongna.com/product/228",
+                "title": "M2 16GB",
+                "created_at": "2026-05-24 10:05:00",
+                "listing_price_krw": 700000,
+                "fair_price_krw": 860000,
+                "diff_ratio": 18.6,
+                "product_type": "macbook_air",
+                "chip": "M2",
+                "screen_inch": 13,
+                "ram_gb": 16,
+                "ssd_gb": 512,
+                "body_text": "본문 원문",
+            },
+            fallback_url="https://web.joongna.com/product/228",
+            fallback_source="joongna",
+            fallback_product_id="228",
+        )
+
+        self.assertEqual(mapped.get("source"), "joongna")
+        self.assertEqual(mapped.get("product_id"), "228")
+        self.assertEqual(mapped.get("listing_price_krw"), 700000)
+        self.assertEqual(mapped.get("fair_price_krw"), 860000)
+        self.assertEqual(mapped.get("expected_profit_krw"), 160000)
+        self.assertEqual(mapped.get("chip"), "M2")
+
+    @patch("src.resale_trade_journeys._safe_fetchone")
+    def test_fetch_latest_alert_event_falls_back_to_product_id_without_source_match(self, mock_fetchone):
+        mock_fetchone.side_effect = [
+            None,
+            {"id": 9, "source": None, "product_id": "228", "title": "fallback-alert"},
+        ]
+
+        row = journeys._fetch_latest_alert_event(
+            MagicMock(),
+            user_id="boongtol",
+            source="joongna",
+            product_id="228",
+        )
+
+        self.assertEqual(row.get("id"), 9)
+        self.assertEqual(mock_fetchone.call_count, 2)
+        fallback_query = mock_fetchone.call_args.args[1]
+        fallback_params = mock_fetchone.call_args.args[2]
+        self.assertIn("WHERE product_id = %s", fallback_query)
+        self.assertEqual(fallback_params, ("228", "boongtol", "boongtol", "joongna"))
+
+    @patch("src.resale_trade_journeys._safe_fetchone")
+    def test_fetch_latest_analysis_job_falls_back_to_product_id_without_source_match(self, mock_fetchone):
+        mock_fetchone.side_effect = [
+            None,
+            {"id": 10, "source": None, "product_id": "228", "title": "fallback-job"},
+        ]
+
+        row = journeys._fetch_latest_analysis_job(
+            MagicMock(),
+            user_id="boongtol",
+            source="joongna",
+            product_id="228",
+        )
+
+        self.assertEqual(row.get("id"), 10)
+        self.assertEqual(mock_fetchone.call_count, 2)
+        fallback_query = mock_fetchone.call_args.args[1]
+        fallback_params = mock_fetchone.call_args.args[2]
+        self.assertIn("WHERE product_id = %s", fallback_query)
+        self.assertEqual(fallback_params, ("228", "boongtol", "boongtol", "joongna"))
+
+    @patch("src.resale_trade_journeys._safe_fetchone")
+    def test_fetch_latest_listing_analysis_prefers_product_id_with_source_order(self, mock_fetchone):
+        mock_fetchone.return_value = {"analysis_job_id": 33, "chip": "M2"}
+
+        row = journeys._fetch_latest_listing_analysis(
+            MagicMock(),
+            source="joongna",
+            product_id="228",
+        )
+
+        self.assertEqual(row.get("chip"), "M2")
+        query = mock_fetchone.call_args.args[1]
+        params = mock_fetchone.call_args.args[2]
+        self.assertIn("WHERE aj.product_id = %s", query)
+        self.assertIn("CASE", query)
+        self.assertEqual(params, ("228", "joongna"))
+
+    @patch("src.resale_trade_journeys._fetch_latest_listing_analysis", return_value={})
+    @patch("src.resale_trade_journeys._fetch_latest_search_result", return_value={})
+    @patch("src.resale_trade_journeys._fetch_latest_seen_product", return_value={})
+    @patch("src.resale_trade_journeys._fetch_latest_url_analysis_log", return_value={})
+    @patch("src.resale_trade_journeys._fetch_latest_analysis_job", return_value={})
+    @patch(
+        "src.resale_trade_journeys._fetch_latest_alert_event",
+        return_value={
+            "source": None,
+            "product_id": "228",
+            "url": "https://web.joongna.com/product/228",
+            "title": "M2 16GB",
+            "price_krw": 700000,
+            "fair_price_krw": 860000,
+            "product_type": "macbook_air",
+            "chip": "M2",
+            "screen_inch": 13,
+            "ram_gb": 16,
+            "ssd_gb": 512,
+        },
+    )
+    def test_build_prefill_row_uses_latest_alert_event_for_product_id_input(
+        self,
+        _mock_alert,
+        _mock_analysis,
+        _mock_url_log,
+        _mock_seen,
+        _mock_search,
+        _mock_listing,
+    ):
+        row = journeys._build_prefill_row_by_product(
+            MagicMock(),
+            user_id="boongtol",
+            source="joongna",
+            product_id="228",
+            seed_values={"url": "https://web.joongna.com/product/228"},
+        )
+
+        self.assertEqual(row.get("source"), "joongna")
+        self.assertEqual(row.get("product_id"), "228")
+        self.assertEqual(row.get("title"), "M2 16GB")
+        self.assertEqual(row.get("listing_price_krw"), 700000)
+        self.assertEqual(row.get("fair_price_krw"), 860000)
+        self.assertEqual(row.get("chip"), "M2")
+
+    @patch("src.resale_trade_journeys._fetch_latest_listing_analysis", return_value={})
+    @patch("src.resale_trade_journeys._fetch_latest_search_result", return_value={})
+    @patch("src.resale_trade_journeys._fetch_latest_seen_product", return_value={})
+    @patch(
+        "src.resale_trade_journeys._fetch_latest_url_analysis_log",
+        return_value={
+            "url": "https://web.joongna.com/product/228",
+            "title": "M2 16GB",
+            "listing_price_krw": 700000,
+            "fair_price_krw": 860000,
+            "product_type": "macbook_air",
+            "chip": "M2",
+            "ram_gb": 16,
+            "ssd_gb": 512,
+        },
+    )
+    @patch("src.resale_trade_journeys._fetch_latest_analysis_job", return_value={})
+    @patch("src.resale_trade_journeys._fetch_latest_alert_event", return_value={})
+    def test_build_prefill_row_uses_url_analysis_log_for_product_id_input(
+        self,
+        _mock_alert,
+        _mock_analysis,
+        _mock_url_log,
+        _mock_seen,
+        _mock_search,
+        _mock_listing,
+    ):
+        row = journeys._build_prefill_row_by_product(
+            MagicMock(),
+            user_id="boongtol",
+            source="joongna",
+            product_id="228",
+            seed_values={"url": "https://web.joongna.com/product/228"},
+        )
+
+        self.assertEqual(row.get("title"), "M2 16GB")
+        self.assertEqual(row.get("listing_price_krw"), 700000)
+        self.assertEqual(row.get("fair_price_krw"), 860000)
+        self.assertEqual(row.get("chip"), "M2")
+
     def test_stage_after_purchase_becomes_inspected(self):
         stage = journeys._derive_stage_after_purchase(
             {"current_stage": journeys.STAGE_DISCOVERED},

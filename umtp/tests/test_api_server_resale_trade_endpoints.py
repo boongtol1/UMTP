@@ -95,6 +95,25 @@ class ApiServerResaleTradeEndpointsTest(unittest.TestCase):
         )
 
     @patch(
+        "src.api_server.start_resale_trade_journey_from_url",
+        return_value={"ok": True, "trade_journey_id": 101, "existing": False},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_start_trade_journey_from_url_endpoint_accepts_plain_product_id(self, _mock_register, mock_start):
+        request = api_server.TradeJourneyStartFromUrlRequest(
+            user_id="boongtol",
+            url="229465482",
+        )
+
+        response = api_server.start_trade_journey_from_url(request)
+
+        self.assertTrue(response.get("ok"))
+        mock_start.assert_called_once_with(
+            user_id="boongtol",
+            url="229465482",
+        )
+
+    @patch(
         "src.api_server.start_resale_trade_journey_from_alert",
         return_value={"ok": True, "trade_journey_id": 102, "existing": True},
     )
