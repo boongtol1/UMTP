@@ -324,10 +324,12 @@ class ResaleTradeJourneysTest(unittest.TestCase):
 
     @patch("src.resale_trade_journeys._safe_fetchone")
     def test_fetch_latest_alert_event_falls_back_to_product_id_without_source_match(self, mock_fetchone):
-        mock_fetchone.side_effect = [
-            None,
-            {"id": 9, "source": None, "product_id": "228", "title": "fallback-alert"},
-        ]
+        def fake_fetchone(_cursor, query, _params):
+            if "FROM alert_events" in query and "WHERE product_id = %s" in query and "source = %s" not in query:
+                return {"id": 9, "source": None, "product_id": "228", "title": "fallback-alert"}
+            return None
+
+        mock_fetchone.side_effect = fake_fetchone
 
         row = journeys._fetch_latest_alert_event(
             MagicMock(),
@@ -337,18 +339,42 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         )
 
         self.assertEqual(row.get("id"), 9)
-        self.assertEqual(mock_fetchone.call_count, 2)
         fallback_query = mock_fetchone.call_args.args[1]
         fallback_params = mock_fetchone.call_args.args[2]
         self.assertIn("WHERE product_id = %s", fallback_query)
-        self.assertEqual(fallback_params, ("228", "boongtol", "boongtol", "joongna"))
+        self.assertEqual(fallback_params, ("228", "boongtol", "boongtol"))
+
+    @patch("src.resale_trade_journeys._safe_fetchone")
+    def test_fetch_latest_alert_event_falls_back_to_product_url_when_product_id_is_missing(self, mock_fetchone):
+        def fake_fetchone(_cursor, query, _params):
+            if "FROM alert_events" in query and "url LIKE %s" in query:
+                return {"id": 12, "source": "joongna", "product_id": None, "title": "url-alert"}
+            return None
+
+        mock_fetchone.side_effect = fake_fetchone
+
+        row = journeys._fetch_latest_alert_event(
+            MagicMock(),
+            user_id="boongtol",
+            source="joongna",
+            product_id="228",
+            url="https://web.joongna.com/product/228",
+        )
+
+        self.assertEqual(row.get("id"), 12)
+        fallback_query = mock_fetchone.call_args.args[1]
+        fallback_params = mock_fetchone.call_args.args[2]
+        self.assertIn("url LIKE %s", fallback_query)
+        self.assertIn("https://web.joongna.com/product/228", fallback_params)
 
     @patch("src.resale_trade_journeys._safe_fetchone")
     def test_fetch_latest_analysis_job_falls_back_to_product_id_without_source_match(self, mock_fetchone):
-        mock_fetchone.side_effect = [
-            None,
-            {"id": 10, "source": None, "product_id": "228", "title": "fallback-job"},
-        ]
+        def fake_fetchone(_cursor, query, _params):
+            if "FROM analysis_jobs" in query and "WHERE product_id = %s" in query and "source = %s" not in query:
+                return {"id": 10, "source": None, "product_id": "228", "title": "fallback-job"}
+            return None
+
+        mock_fetchone.side_effect = fake_fetchone
 
         row = journeys._fetch_latest_analysis_job(
             MagicMock(),
@@ -358,14 +384,36 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         )
 
         self.assertEqual(row.get("id"), 10)
-        self.assertEqual(mock_fetchone.call_count, 2)
         fallback_query = mock_fetchone.call_args.args[1]
         fallback_params = mock_fetchone.call_args.args[2]
         self.assertIn("WHERE product_id = %s", fallback_query)
-        self.assertEqual(fallback_params, ("228", "boongtol", "boongtol", "joongna"))
+        self.assertEqual(fallback_params, ("228", "boongtol", "boongtol"))
 
     @patch("src.resale_trade_journeys._safe_fetchone")
-    def test_fetch_latest_listing_analysis_prefers_product_id_with_source_order(self, mock_fetchone):
+    def test_fetch_latest_analysis_job_falls_back_to_product_url_when_product_id_is_missing(self, mock_fetchone):
+        def fake_fetchone(_cursor, query, _params):
+            if "FROM analysis_jobs" in query and "url LIKE %s" in query:
+                return {"id": 13, "source": "joongna", "product_id": None, "title": "url-job"}
+            return None
+
+        mock_fetchone.side_effect = fake_fetchone
+
+        row = journeys._fetch_latest_analysis_job(
+            MagicMock(),
+            user_id="boongtol",
+            source="joongna",
+            product_id="228",
+            url="https://web.joongna.com/product/228",
+        )
+
+        self.assertEqual(row.get("id"), 13)
+        fallback_query = mock_fetchone.call_args.args[1]
+        fallback_params = mock_fetchone.call_args.args[2]
+        self.assertIn("url LIKE %s", fallback_query)
+        self.assertIn("https://web.joongna.com/product/228", fallback_params)
+
+    @patch("src.resale_trade_journeys._safe_fetchone")
+    def test_fetch_latest_listing_analysis_prefers_source_product_id_match(self, mock_fetchone):
         mock_fetchone.return_value = {"analysis_job_id": 33, "chip": "M2"}
 
         row = journeys._fetch_latest_listing_analysis(
@@ -377,9 +425,31 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         self.assertEqual(row.get("chip"), "M2")
         query = mock_fetchone.call_args.args[1]
         params = mock_fetchone.call_args.args[2]
-        self.assertIn("WHERE aj.product_id = %s", query)
-        self.assertIn("CASE", query)
-        self.assertEqual(params, ("228", "joongna"))
+        self.assertIn("WHERE aj.source = %s", query)
+        self.assertIn("AND aj.product_id = %s", query)
+        self.assertEqual(params, ("joongna", "228"))
+
+    @patch("src.resale_trade_journeys._safe_fetchone")
+    def test_fetch_latest_listing_analysis_falls_back_to_product_url(self, mock_fetchone):
+        def fake_fetchone(_cursor, query, _params):
+            if "INNER JOIN analysis_jobs aj" in query and "aj.url LIKE %s" in query:
+                return {"analysis_job_id": 34, "chip": "M2"}
+            return None
+
+        mock_fetchone.side_effect = fake_fetchone
+
+        row = journeys._fetch_latest_listing_analysis(
+            MagicMock(),
+            source="joongna",
+            product_id="228",
+            url="https://web.joongna.com/product/228",
+        )
+
+        self.assertEqual(row.get("chip"), "M2")
+        query = mock_fetchone.call_args.args[1]
+        params = mock_fetchone.call_args.args[2]
+        self.assertIn("aj.url LIKE %s", query)
+        self.assertIn("https://web.joongna.com/product/228", params)
 
     @patch("src.resale_trade_journeys._fetch_latest_listing_analysis", return_value={})
     @patch("src.resale_trade_journeys._fetch_latest_search_result", return_value={})
