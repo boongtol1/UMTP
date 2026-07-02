@@ -340,10 +340,17 @@ def _extract_product_id_from_url(url: Optional[str]) -> Optional[str]:
     if normalized_url is None:
         return None
 
+    if re.fullmatch(r"\d+", normalized_url):
+        return normalized_url
+
     match = re.search(r"/product/(\d+)", normalized_url)
     if not match:
         return None
     return _normalize_optional_text(match.group(1))
+
+
+def _build_joongna_product_url(product_id: str) -> str:
+    return f"https://web.joongna.com/product/{product_id}"
 
 
 def _infer_source_from_url(url: Optional[str]) -> str:
@@ -1390,17 +1397,19 @@ def start_or_prefill_resale_trade_journey_from_product(
 
 def start_resale_trade_journey_from_url(*, user_id: str, url: str) -> dict[str, Any]:
     normalized_user_id = _normalize_optional_text(user_id)
-    normalized_url = _normalize_optional_text(url)
+    normalized_input = _normalize_optional_text(url)
     if normalized_user_id is None:
         raise ValueError("invalid_user_id")
-    if normalized_url is None:
+    if normalized_input is None:
         raise ValueError("invalid_url")
 
-    product_id = _extract_product_id_from_url(normalized_url)
+    product_id = _extract_product_id_from_url(normalized_input)
     if product_id is None:
         return {"ok": False, "reason": "invalid_product_id"}
 
-    source = _infer_source_from_url(normalized_url)
+    is_plain_product_id = normalized_input == product_id
+    normalized_url = _build_joongna_product_url(product_id) if is_plain_product_id else normalized_input
+    source = DEFAULT_SOURCE if is_plain_product_id else _infer_source_from_url(normalized_url)
     result = start_or_prefill_resale_trade_journey_from_product(
         user_id=normalized_user_id,
         source=source,

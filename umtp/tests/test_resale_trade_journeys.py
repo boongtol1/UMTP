@@ -17,6 +17,10 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         product_id = journeys._extract_product_id_from_url("https://web.joongna.com/product/12345")
         self.assertEqual(product_id, "12345")
 
+    def test_extract_product_id_accepts_plain_product_id(self):
+        product_id = journeys._extract_product_id_from_url(" 229465482 ")
+        self.assertEqual(product_id, "229465482")
+
     def test_merge_priority_prefers_user_over_existing_and_sources(self):
         existing_row = {
             "id": 1,
@@ -357,6 +361,27 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         self.assertEqual(
             kwargs.get("seed_values", {}).get("url"),
             "https://web.joongna.com/product/228826879",
+        )
+
+    @patch(
+        "src.resale_trade_journeys.start_or_prefill_resale_trade_journey_from_product",
+        return_value={"ok": True, "id": 15, "trade_journey_id": 15, "existing": False},
+    )
+    def test_start_resale_trade_journey_from_plain_product_id(self, mock_start_or_prefill):
+        response = journeys.start_resale_trade_journey_from_url(
+            user_id="boongtol",
+            url="229465482",
+        )
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("trade_journey_id"), 15)
+        kwargs = mock_start_or_prefill.call_args.kwargs
+        self.assertEqual(kwargs.get("user_id"), "boongtol")
+        self.assertEqual(kwargs.get("source"), "joongna")
+        self.assertEqual(kwargs.get("product_id"), "229465482")
+        self.assertEqual(
+            kwargs.get("seed_values", {}).get("url"),
+            "https://web.joongna.com/product/229465482",
         )
 
     @patch("src.resale_trade_journeys._build_prefill_row_by_product", return_value={"current_stage": journeys.STAGE_DISCOVERED})

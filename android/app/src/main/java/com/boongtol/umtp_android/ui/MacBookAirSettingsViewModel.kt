@@ -967,7 +967,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
 
         val normalizedUrl = url.trim()
         if (normalizedUrl.isEmpty()) {
-            _toastMessage.value = "URL을 입력해 주세요."
+            _toastMessage.value = "URL 또는 product_id를 입력해 주세요."
             onComplete?.invoke(false)
             return
         }
