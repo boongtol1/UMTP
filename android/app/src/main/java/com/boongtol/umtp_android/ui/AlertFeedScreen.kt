@@ -432,7 +432,7 @@ fun AlertCard(
                 color = Color.Gray,
             )
             Text(
-                text = "알림 기준 가격: ${formatKrwDisplay(alert.alert_target_price_krw)}",
+                text = "알림 기준 가격: ${formatKrwDisplay(alert.alert_target_price_krw?.toInt())}",
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
@@ -705,7 +705,7 @@ private fun resolveAlertTitle(alert: AlertItem): String {
 }
 
 private fun resolveListingPriceForDisplay(alert: AlertItem): Int? {
-    return alert.listing_price_krw ?: alert.alert_target_price_krw
+    return (alert.listing_price_krw ?: alert.alert_target_price_krw)?.toInt()
 }
 
 private fun resolveAlertGapPercent(alert: AlertItem): Double? {
@@ -955,8 +955,8 @@ private fun buildAlertDetailRows(
         "RAM" to resolveRamText(alert),
         "SSD" to resolveSsdText(alert),
         "등록 가격" to formatKrwDisplay(resolveListingPriceForDisplay(alert)),
-        "내가 생각한 시장가" to formatKrwDisplay(alert.user_market_price_krw ?: alert.fair_price_krw),
-        "알림 기준 가격" to formatKrwDisplay(alert.alert_target_price_krw),
+        "내가 생각한 시장가" to formatKrwDisplay((alert.user_market_price_krw ?: alert.fair_price_krw)?.toInt()),
+        "알림 기준 가격" to formatKrwDisplay(alert.alert_target_price_krw?.toInt()),
         "시장가와의 차이" to formatPercentDisplay(resolveAlertGapPercent(alert)),
         "설정 차이율" to formatPercentDisplay(alert.alert_drop_rate_percent),
         "알림 조건" to resolveAlertConditionLabel(alert),

@@ -16,7 +16,7 @@ data class WatchRuleUpsertRequest(
 )
 
 data class WatchRuleUpsertResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val message: String? = null,
     val reason: String? = null,
     val search_keyword: String? = null,
@@ -25,7 +25,7 @@ data class WatchRuleUpsertResponse(
 )
 
 data class RecommendedKeywordsResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val items: List<String> = emptyList(),
     val reason: String? = null
 )
@@ -36,7 +36,7 @@ data class RequestPollNowRequest(
 )
 
 data class RequestPollNowResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val message: String? = null,
     val reason: String? = null,
     val immediate_poll_requested: Boolean? = null
@@ -63,7 +63,7 @@ data class WatchRuleItem(
 )
 
 data class WatchRuleListResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val user_id: String? = null,
     val items: List<WatchRuleItem> = emptyList(),
     val message: String? = null,

@@ -8,7 +8,7 @@ data class UserRegisterRequest(
 )
 
 data class UserRegisterResponse(
-    @SerializedName("ok") val ok: Boolean,
+    @SerializedName("ok") val ok: Boolean? = null,
     @SerializedName("user_id") val user_id: String? = null,
     @SerializedName("message") val message: String? = null,
     @SerializedName("reason") val reason: String? = null
@@ -23,7 +23,7 @@ data class MacBookAirUnit(
 )
 
 data class MacBookAirUnitsResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val units: List<MacBookAirUnit> = emptyList(),
     val message: String? = null,
     val reason: String? = null
@@ -71,7 +71,7 @@ data class UserFairPriceItem(
 )
 
 data class UserFairPricesResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val user_id: String? = null,
     val items: List<UserFairPriceItem> = emptyList(),
     val reason: String? = null,
@@ -98,7 +98,7 @@ data class UserFairPriceUpsertRequest(
 )
 
 data class UserFairPriceUpsertResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val message: String? = null,
     val reason: String? = null,
     val immediate_poll_requested: Boolean? = null,
@@ -106,7 +106,7 @@ data class UserFairPriceUpsertResponse(
 )
 
 data class UserRulesRefreshResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val user_id: String? = null,
     val refreshed_rule_count: Int? = null,
     val message: String? = null,
@@ -114,7 +114,7 @@ data class UserRulesRefreshResponse(
 )
 
 data class UserRuleRefreshResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val user_id: String? = null,
     val rule_id: Long? = null,
     val message: String? = null,
@@ -139,7 +139,7 @@ data class UserFairPricesResetToSystemRequest(
 )
 
 data class BulkOperationResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val message: String? = null,
     val reason: String? = null,
     val affected_count: Int? = null,

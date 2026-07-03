@@ -47,21 +47,21 @@ data class ResaleTradeJourneyDeleteSelectedRequest(
 )
 
 data class ResaleTradeJourneyDeleteResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val deleted_count: Int? = null,
     val reason: String? = null,
     val message: String? = null,
 )
 
 data class ResaleTradeJourneyListResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val items: List<ResaleTradeJourneyRow> = emptyList(),
     val reason: String? = null,
     val message: String? = null,
 )
 
 data class ResaleTradeJourneyResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val id: Long? = null,
     val source: String? = null,
     val product_id: String? = null,
@@ -73,7 +73,7 @@ data class ResaleTradeJourneyResponse(
 
 data class TradeJourneyStartResponse(
     @SerializedName("ok")
-    val ok: Boolean,
+    val ok: Boolean? = null,
     @SerializedName("existing")
     val existing: Boolean? = null,
     @SerializedName("trade_journey_id")
@@ -108,7 +108,7 @@ data class ResaleTradeJourneyRow(
     @SerializedName("title")
     val title: String? = null,
     @SerializedName("listing_price_krw")
-    val listing_price_krw: Int? = null,
+    val listing_price_krw: Double? = null,
     @SerializedName("seller_location")
     val seller_location: String? = null,
     @SerializedName("image_urls")
@@ -116,7 +116,7 @@ data class ResaleTradeJourneyRow(
     @SerializedName("body_text")
     val body_text: String? = null,
     @SerializedName("fair_price_krw")
-    val fair_price_krw: Int? = null,
+    val fair_price_krw: Double? = null,
     @SerializedName("discount_rate_percent")
     val discount_rate_percent: Double? = null,
     @SerializedName("product_type")
@@ -124,11 +124,11 @@ data class ResaleTradeJourneyRow(
     @SerializedName("chip")
     val chip: String? = null,
     @SerializedName("screen_inch")
-    val screen_inch: Int? = null,
+    val screen_inch: Double? = null,
     @SerializedName("ram_gb")
-    val ram_gb: Int? = null,
+    val ram_gb: Double? = null,
     @SerializedName("ssd_gb")
-    val ssd_gb: Int? = null,
+    val ssd_gb: Double? = null,
     @SerializedName("seller_nickname")
     val seller_nickname: String? = null,
     @SerializedName("contacted_at")
@@ -140,17 +140,17 @@ data class ResaleTradeJourneyRow(
     @SerializedName("purchased_at")
     val purchased_at: String? = null,
     @SerializedName("purchase_price_krw")
-    val purchase_price_krw: Int? = null,
+    val purchase_price_krw: Double? = null,
     @SerializedName("purchase_method")
     val purchase_method: String? = null,
     @SerializedName("purchase_location")
     val purchase_location: String? = null,
     @SerializedName("transport_cost_krw")
-    val transport_cost_krw: Int? = null,
+    val transport_cost_krw: Double? = null,
     @SerializedName("shipping_cost_krw")
-    val shipping_cost_krw: Int? = null,
+    val shipping_cost_krw: Double? = null,
     @SerializedName("total_cost_krw")
-    val total_cost_krw: Int? = null,
+    val total_cost_krw: Double? = null,
     @SerializedName("payment_method")
     val payment_method: String? = null,
     @SerializedName("serial_number")
@@ -158,17 +158,17 @@ data class ResaleTradeJourneyRow(
     @SerializedName("model_number")
     val model_number: String? = null,
     @SerializedName("activation_lock_off")
-    val activation_lock_off: Any? = null,
+    val activation_lock_off: Boolean? = null,
     @SerializedName("mdm_lock_none")
-    val mdm_lock_none: Any? = null,
+    val mdm_lock_none: Boolean? = null,
     @SerializedName("battery_health_percent")
-    val battery_health_percent: Int? = null,
+    val battery_health_percent: Double? = null,
     @SerializedName("battery_cycle_count")
-    val battery_cycle_count: Int? = null,
+    val battery_cycle_count: Double? = null,
     @SerializedName("inspection_notes")
     val inspection_notes: String? = null,
     @SerializedName("resale_listing_price_krw")
-    val resale_listing_price_krw: Int? = null,
+    val resale_listing_price_krw: Double? = null,
     @SerializedName("resale_platform")
     val resale_platform: String? = null,
     @SerializedName("resale_url")
@@ -176,7 +176,7 @@ data class ResaleTradeJourneyRow(
     @SerializedName("sold_at")
     val sold_at: String? = null,
     @SerializedName("sale_price_krw")
-    val sale_price_krw: Int? = null,
+    val sale_price_krw: Double? = null,
     @SerializedName("buyer_nickname")
     val buyer_nickname: String? = null,
     @SerializedName("sale_method")
@@ -192,7 +192,7 @@ data class ResaleTradeJourneyRow(
 )
 
 data class ResaleTradeUpsertResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val id: Long? = null,
     val source: String? = null,
     val product_id: String? = null,

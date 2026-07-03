@@ -499,7 +499,7 @@ private fun resolveReadArchiveTitle(alert: AlertItem): String {
 }
 
 private fun resolveReadArchiveListingPrice(alert: AlertItem): Int? {
-    return alert.listing_price_krw ?: alert.alert_target_price_krw
+    return (alert.listing_price_krw ?: alert.alert_target_price_krw)?.toInt()
 }
 
 private fun resolveReadArchiveGapPercent(alert: AlertItem): Double? {
@@ -514,9 +514,9 @@ private fun buildReadArchiveSpecSummary(alert: AlertItem): String {
     val tokens = mutableListOf<String>()
     alert.product_type?.takeIf { it.isNotBlank() }?.let { tokens += it }
     alert.chip?.takeIf { it.isNotBlank() }?.let { tokens += it }
-    alert.screen_inch?.let { inch -> if (inch > 0) tokens += "${inch}인치" }
-    alert.ram_gb?.let { ram -> if (ram > 0) tokens += "${ram}GB" }
-    alert.ssd_gb?.let { ssd -> if (ssd > 0) tokens += "${ssd}GB SSD" }
+    alert.screen_inch?.let { inch -> if (inch > 0.0) tokens += "${inch}인치" }
+    alert.ram_gb?.let { ram -> if (ram > 0.0) tokens += "${ram}GB" }
+    alert.ssd_gb?.let { ssd -> if (ssd > 0.0) tokens += "${ssd}GB SSD" }
 
     if (tokens.isEmpty()) {
         return "분류 정보 없음"
@@ -536,12 +536,12 @@ private fun buildReadArchiveDetailRows(alert: AlertItem, resolvedUrl: String?): 
         "대표 이미지" to (alert.listing_image_url?.takeIf { it.isNotBlank() } ?: "이미지 없음"),
         "제품 분류" to (alert.product_type?.takeIf { it.isNotBlank() } ?: "분류 정보 없음"),
         "칩" to (alert.chip?.takeIf { it.isNotBlank() } ?: "정보 없음"),
-        "화면 크기" to (if ((alert.screen_inch ?: 0) > 0) "${alert.screen_inch}인치" else "정보 없음"),
-        "RAM" to (if ((alert.ram_gb ?: 0) > 0) "${alert.ram_gb}GB" else "정보 없음"),
-        "SSD" to (if ((alert.ssd_gb ?: 0) > 0) "${alert.ssd_gb}GB" else "정보 없음"),
+        "화면 크기" to (if ((alert.screen_inch ?: 0.0) > 0.0) "${alert.screen_inch}인치" else "정보 없음"),
+        "RAM" to (if ((alert.ram_gb ?: 0.0) > 0.0) "${alert.ram_gb}GB" else "정보 없음"),
+        "SSD" to (if ((alert.ssd_gb ?: 0.0) > 0.0) "${alert.ssd_gb}GB" else "정보 없음"),
         "등록 가격" to formatKrwDisplay(resolveReadArchiveListingPrice(alert)),
-        "내가 생각한 시장가" to formatKrwDisplay(alert.user_market_price_krw ?: alert.fair_price_krw),
-        "알림 기준 가격" to formatKrwDisplay(alert.alert_target_price_krw),
+        "내가 생각한 시장가" to formatKrwDisplay((alert.user_market_price_krw ?: alert.fair_price_krw)?.toInt()),
+        "알림 기준 가격" to formatKrwDisplay(alert.alert_target_price_krw?.toInt()),
         "시장가와의 차이" to formatPercentDisplay(resolveReadArchiveGapPercent(alert)),
         "설정 차이율" to formatPercentDisplay(alert.alert_drop_rate_percent),
         "알림 조건" to resolveReadArchiveConditionLabel(alert),

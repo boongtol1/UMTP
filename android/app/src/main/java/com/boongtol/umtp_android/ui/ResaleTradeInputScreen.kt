@@ -40,11 +40,11 @@ private enum class ResaleInputMode {
     RESALE,
 }
 
-private fun formatWon(value: Int?): String {
+private fun formatWon(value: Double?): String {
     if (value == null) {
         return "-"
     }
-    return "%,d".format(value)
+    return "%,d".format(value.toInt())
 }
 
 private data class LabeledInputField(
@@ -112,6 +112,12 @@ private val EXACT_VERIFICATION_FIELDS = listOf(
 private val EXACT_VERIFICATION_FIELD_KEYS = EXACT_VERIFICATION_FIELDS.map { it.key }
 
 private val PURCHASE_INPUT_FIELDS = listOf(
+    "title",
+    "listing_price_krw",
+    "seller_nickname",
+    "body_text",
+    "fair_price_krw",
+    "seller_location",
     "contacted_at",
     "seller_response_at",
     "purchased_at",
@@ -138,9 +144,11 @@ private val RESALE_INPUT_FIELDS = listOf(
     "current_stage",
 )
 
-private val ALL_MANUAL_FIELDS = (PURCHASE_INPUT_FIELDS + RESALE_INPUT_FIELDS + EXACT_VERIFICATION_FIELD_KEYS).distinct()
+private val ALL_MANUAL_FIELDS = (PURCHASE_INPUT_FIELDS + RESALE_INPUT_FIELDS + EXACT_VERIFICATION_FIELD_KEYS + PRODUCT_BASE_SPEC_FIELDS.map { it.key }).distinct()
 
 private val INT_INPUT_FIELDS = setOf(
+    "listing_price_krw",
+    "fair_price_krw",
     "purchase_price_krw",
     "transport_cost_krw",
     "shipping_cost_krw",
@@ -303,11 +311,14 @@ private fun buildJourneyValueMap(row: ResaleTradeJourneyRow?): Map<String, Strin
     put("body_text", row.body_text)
     put("fair_price_krw", row.fair_price_krw)
     put("discount_rate_percent", row.discount_rate_percent)
+
+    // 제품 기본 스펙 (자동채움 필드들)
     put("product_type", row.product_type)
     put("chip", row.chip)
     put("screen_inch", row.screen_inch)
     put("ram_gb", row.ram_gb)
     put("ssd_gb", row.ssd_gb)
+
     put("seller_nickname", row.seller_nickname)
     put("contacted_at", row.contacted_at)
     put("seller_response_at", row.seller_response_at)
@@ -361,24 +372,18 @@ private fun TradePrefillImageThumbnail(imageUrl: String?) {
 
 @Composable
 private fun ProductBaseSpecCard(
-    rowValues: Map<String, String>,
+    values: MutableMap<String, String>,
+    isSubmitting: Boolean,
 ) {
-    Text(text = "제품 기본 스펙", style = MaterialTheme.typography.titleMedium)
+    android.util.Log.d("ResaleTradeInputScreen", "DEBUG_FLOW: 12. ProductBaseSpecCard rendering. title in values=${values["title"]}")
+    Text(text = "제품 기본 스펙 (자동채움)", style = MaterialTheme.typography.titleMedium)
 
-    val visibleFields = PRODUCT_BASE_SPEC_FIELDS
-        .filter { field -> !rowValues[field.key].isNullOrBlank() }
-
-    if (visibleFields.isEmpty()) {
-        Text(text = "자동 파싱된 제품 기본 스펙이 아직 없습니다.")
-        return
-    }
-
-    visibleFields.forEach { field ->
+    PRODUCT_BASE_SPEC_FIELDS.forEach { field ->
         OutlinedTextField(
-            value = rowValues[field.key] ?: "",
-            onValueChange = {},
+            value = values[field.key] ?: "",
+            onValueChange = { values[field.key] = it },
             modifier = Modifier.fillMaxWidth(),
-            enabled = false,
+            enabled = !isSubmitting,
             label = { Text(field.label) },
             singleLine = true,
         )
@@ -396,6 +401,7 @@ private fun ReadOnlyFieldCard(
     val visibleReadonlyFields = AUTO_DISABLED_FIELDS
         .filterNot { it in hiddenIdentityKeys }
         .filterNot { it in baseSpecKeys }
+        .filterNot { it in ALL_MANUAL_FIELDS }
         .filter { key -> !rowValues[key].isNullOrBlank() }
 
     if (visibleReadonlyFields.isEmpty()) {
@@ -421,14 +427,42 @@ private fun EditableFieldList(
     values: MutableMap<String, String>,
     isSubmitting: Boolean,
 ) {
+    val labels = mapOf(
+        "title" to "제목",
+        "listing_price_krw" to "등록 가격 (원)",
+        "seller_nickname" to "판매자 닉네임",
+        "body_text" to "본문 내용",
+        "fair_price_krw" to "적정 가격 (원)",
+        "contacted_at" to "연락 시각",
+        "seller_response_at" to "판매자 응답 시각",
+        "purchased_at" to "구매 시각",
+        "purchase_method" to "구매 방법",
+        "purchase_location" to "구매 장소",
+        "purchase_price_krw" to "구매 가격 (원)",
+        "transport_cost_krw" to "교통비 (원)",
+        "shipping_cost_krw" to "배송비 (원)",
+        "payment_method" to "결제 수단",
+        "sale_platform" to "구매 플랫폼",
+        "inspection_notes" to "제품 점검 메모",
+        "current_stage" to "현재 단계",
+        "resale_platform" to "재판매 플랫폼",
+        "resale_url" to "재판매 URL",
+        "resale_listing_price_krw" to "재판매 등록가 (원)",
+        "buyer_nickname" to "구매자 닉네임",
+        "sale_method" to "판매 방법",
+        "sale_location" to "판매 장소",
+        "sold_at" to "판매 시각",
+        "sale_price_krw" to "판매 가격 (원)",
+    )
+
     fields.forEach { key ->
         OutlinedTextField(
             value = values[key] ?: "",
             onValueChange = { values[key] = it },
             modifier = Modifier.fillMaxWidth(),
             enabled = !isSubmitting,
-            label = { Text(key) },
-            singleLine = !key.endsWith("_text"),
+            label = { Text(labels[key] ?: key) },
+            singleLine = !key.endsWith("_text") && key != "body_text" && key != "title",
         )
     }
 }
@@ -529,7 +563,7 @@ fun ResaleTradeInputScreen(
     val manualInputs = remember { mutableStateMapOf<String, String>() }
     val journeyValueMap = remember(selectedJourney) { buildJourneyValueMap(selectedJourney) }
 
-    LaunchedEffect(selectedJourney?.id) {
+    LaunchedEffect(selectedJourney?.id, selectedJourney?.updated_at) {
         manualInputs.clear()
         ALL_MANUAL_FIELDS.forEach { field ->
             journeyValueMap[field]?.let { manualInputs[field] = it }
@@ -594,7 +628,8 @@ fun ResaleTradeInputScreen(
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
         ProductBaseSpecCard(
-            rowValues = journeyValueMap,
+            values = manualInputs,
+            isSubmitting = isSubmitting,
         )
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -717,7 +752,7 @@ fun ResaleTradeInputScreen(
         }
 
         completedJourneys.forEach { item ->
-            val itemId = item.id ?: return@forEach
+            val itemId = item.id?.toLong() ?: return@forEach
             val selected = selectedCompletedIds.contains(itemId)
             FilterChip(
                 selected = selected,
@@ -730,7 +765,7 @@ fun ResaleTradeInputScreen(
                 },
                 label = {
                     Text(
-                        "#${item.id} [${stageLabel(item.current_stage)}] ${item.title ?: "(제목없음)"} / ${formatWon(item.sale_price_krw)}"
+                        "#${itemId} [${stageLabel(item.current_stage)}] ${item.title ?: "(제목없음)"} / ${formatWon(item.sale_price_krw)}"
                     )
                 },
             )
@@ -743,14 +778,14 @@ fun ResaleTradeInputScreen(
             Text(text = "구매 기록이 없습니다.")
         }
         purchasedJourneys.forEach { item ->
-            val rowId = item.id ?: return@forEach
-            val isSelectedJourney = selectedJourney?.id == rowId
+            val rowId = item.id?.toLong() ?: return@forEach
+            val isSelectedJourney = selectedJourney?.id?.toLong() == rowId
             FilterChip(
                 selected = isSelectedJourney,
                 onClick = { onSelectPurchasedJourney(item) },
                 label = {
                     Text(
-                        "#${item.id} [${stageLabel(item.current_stage)}] ${item.title ?: "(제목없음)"} / 구매 ${formatWon(item.purchase_price_krw)}"
+                        "#${rowId} [${stageLabel(item.current_stage)}] ${item.title ?: "(제목없음)"} / 구매 ${formatWon(item.purchase_price_krw)}"
                     )
                 },
             )

@@ -6,7 +6,7 @@ data class AnalyzeUrlRequest(
 )
 
 data class AnalyzeUrlResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val status: String? = null,
     val message: String? = null,
     val reason: String? = null,

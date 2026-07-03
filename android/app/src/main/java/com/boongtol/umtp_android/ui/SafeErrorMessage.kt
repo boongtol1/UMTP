@@ -1,5 +1,10 @@
 package com.boongtol.umtp_android.ui
 
+import com.google.gson.JsonParseException
+import com.google.gson.JsonSyntaxException
+import com.google.gson.stream.MalformedJsonException
+import retrofit2.HttpException
+import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -13,6 +18,8 @@ enum class ErrorContext {
 
 private const val NETWORK_ERROR_MESSAGE =
     "서버에 연결하지 못했어요. 네트워크 상태를 확인한 뒤 다시 시도해 주세요."
+private const val DATA_FORMAT_ERROR_MESSAGE =
+    "데이터 형식이 맞지 않아요. 앱 로그에서 실패 필드를 확인해 주세요."
 private const val SAVE_ERROR_MESSAGE =
     "설정을 저장하지 못했어요. 잠시 후 다시 시도해 주세요."
 private const val SEARCH_REQUEST_ERROR_MESSAGE =
@@ -71,16 +78,59 @@ fun resolveSafeErrorMessage(
     rawMessage: String? = null,
     rawReason: String? = null,
 ): String {
-    sanitizeErrorMessage(rawReason)
-    sanitizeErrorMessage(rawMessage)
-    return context.defaultMessage()
+    val safeReason = sanitizeErrorMessage(rawReason)
+    val safeMessage = sanitizeErrorMessage(rawMessage)
+
+    return safeReason ?: safeMessage ?: context.defaultMessage()
+}
+
+private fun Throwable.isJsonExceptionByName(): Boolean {
+    val className = javaClass.name
+    return className.contains("SerializationException") ||
+        className.contains("JsonDataException") ||
+        className.contains("MalformedJsonException")
+}
+
+private fun Throwable.isJsonRelatedIllegalState(): Boolean {
+    if (this !is IllegalStateException) {
+        return false
+    }
+    val messageLooksLikeGsonPath = message?.let {
+        it.contains("Expected ") && it.contains(" but was ") && it.contains("path $")
+    } == true
+    return messageLooksLikeGsonPath ||
+        stackTrace.any { frame ->
+            frame.className.startsWith("com.google.gson") ||
+                frame.className.startsWith("retrofit2.converter.gson")
+        }
+}
+
+private fun Throwable.isJsonParsingError(): Boolean {
+    if (this is JsonParseException ||
+        this is JsonSyntaxException ||
+        this is MalformedJsonException ||
+        isJsonExceptionByName() ||
+        isJsonRelatedIllegalState()
+    ) {
+        return true
+    }
+
+    val nestedCause = cause
+    return nestedCause != null && nestedCause !== this && nestedCause.isJsonParsingError()
+}
+
+private fun Throwable.isNetworkConnectionError(): Boolean {
+    return this is UnknownHostException ||
+        this is ConnectException ||
+        this is SocketTimeoutException ||
+        (this is IOException && !isJsonParsingError())
 }
 
 fun Throwable.toSafeUserMessage(context: ErrorContext): String {
-    return when (this) {
-        is UnknownHostException,
-        is ConnectException,
-        is SocketTimeoutException -> ErrorContext.NETWORK.defaultMessage()
+    return when {
+        isJsonParsingError() -> DATA_FORMAT_ERROR_MESSAGE
+        isNetworkConnectionError() -> ErrorContext.NETWORK.defaultMessage()
+        this is HttpException -> "서버 오류가 발생했어요. (HTTP ${code()})"
         else -> context.defaultMessage()
     }
 }

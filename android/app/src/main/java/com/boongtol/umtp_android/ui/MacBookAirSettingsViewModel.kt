@@ -30,6 +30,30 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
     }
 
+    private fun logApiException(operation: String, throwable: Throwable) {
+        Log.e(
+            TAG,
+            "$operation failed: class=${throwable.javaClass.name}, message=${throwable.message}",
+            throwable,
+        )
+
+        var depth = 1
+        var nestedCause = throwable.cause
+        while (nestedCause != null && depth <= 4) {
+            Log.e(
+                TAG,
+                "$operation cause[$depth]: class=${nestedCause.javaClass.name}, message=${nestedCause.message}",
+                nestedCause,
+            )
+            val nextCause = nestedCause.cause
+            if (nextCause == null || nextCause === nestedCause) {
+                break
+            }
+            nestedCause = nextCause
+            depth += 1
+        }
+    }
+
     private val _userId = MutableStateFlow(userPreferences.getUserId())
     val userId: StateFlow<String?> = _userId.asStateFlow()
 
@@ -222,7 +246,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             _ruleRefreshStatusMessages.value = _ruleRefreshStatusMessages.value + (ruleId to "새로고침 중...")
             try {
                 val response = UmtpApiClient.apiService.refreshSingleUserRuleSavedAt(uid, ruleId)
-                if (response.ok) {
+                if (response.ok == true) {
                     val nowMillis = System.currentTimeMillis()
                     applyRuleRefreshSuccessMarkers(setOf(ruleId), nowMillis)
                     refreshUserSettingsInternal(uid)
@@ -255,7 +279,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             }
             try {
                 val response = UmtpApiClient.apiService.getAlerts(uid, isRead = "0")
-                if (response.ok) {
+                if (response.ok == true) {
                     _alerts.value = response.items.sortedByDescending { it.created_at }
                     if (showFeedback) {
                         _alertsRefreshStatusMessage.value = "방금 새로고침됨"
@@ -292,7 +316,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             }
             try {
                 val response = UmtpApiClient.apiService.getGroupedReadAlerts(uid)
-                if (response.ok) {
+                if (response.ok == true) {
                     _readGroupedAlerts.value = response.groups
                     if (showFeedback) {
                         _readArchiveRefreshStatusMessage.value = "방금 새로고침됨"
@@ -331,7 +355,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         viewModelScope.launch {
             try {
                 val response = markAlertEventReadWithFallback(alertEventId, uid)
-                if (response.ok) {
+                if (response.ok == true) {
                     onComplete?.invoke(true)
                 } else {
                     if (showFeedback) {
@@ -360,7 +384,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             _isMarkingAllAlertsRead.value = true
             try {
                 val response = markAllAlertsReadWithFallback(uid)
-                if (response.ok) {
+                if (response.ok == true) {
                     _toastMessage.value = response.message ?: "모두 읽음 처리 완료"
                     fetchAlerts(uid, showFeedback = false)
                     fetchReadGroupedAlerts(uid, showFeedback = false)
@@ -372,6 +396,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     )
                 }
             } catch (e: Exception) {
+                Log.e(TAG, "loadResaleJourneyHistory error: ${e.message}", e)
                 _toastMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
             } finally {
                 _isMarkingAllAlertsRead.value = false
@@ -417,7 +442,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             _isClearingReadArchiveAll.value = true
             try {
                 val response = UmtpApiClient.apiService.clearAllReadArchive(uid)
-                if (response.ok) {
+                if (response.ok == true) {
                     val clearedCount = response.cleared_count ?: 0
                     _toastMessage.value = response.message ?: "읽음 보관함 전체 비우기 완료 (${clearedCount}건)"
                     fetchReadGroupedAlerts(uid, showFeedback = false)
@@ -429,6 +454,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     )
                 }
             } catch (e: Exception) {
+                Log.e(TAG, "loadResaleJourneyHistory error: ${e.message}", e)
                 _toastMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
             } finally {
                 _isClearingReadArchiveAll.value = false
@@ -455,7 +481,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     uid,
                     ClearSelectedReadArchiveRequest(alert_event_ids = normalizedIds),
                 )
-                if (response.ok) {
+                if (response.ok == true) {
                     val clearedCount = response.cleared_count ?: 0
                     val skippedCount = response.skipped_count ?: 0
                     _toastMessage.value = if (skippedCount > 0) {
@@ -472,6 +498,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     )
                 }
             } catch (e: Exception) {
+                Log.e(TAG, "loadResaleJourneyHistory error: ${e.message}", e)
                 _toastMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
             } finally {
                 _isClearingReadArchiveSelected.value = false
@@ -519,7 +546,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
 
                 Log.d("UMTP_NET", "Register Response: ok=${response.ok}, user_id=${response.user_id}, message=${response.message}")
 
-                if (response.ok) {
+                if (response.ok == true) {
                     val effectiveUserId = response.user_id?.trim()
                         ?.takeIf { it.isNotEmpty() }
                         ?: trimmedUserId
@@ -600,7 +627,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     priority = normalizeWatchPriority(priority),
                 )
                 val response = UmtpApiClient.apiService.upsertUserFairPrice(request)
-                if (response.ok) {
+                if (response.ok == true) {
                     _toastMessage.value = if (enabled) {
                         if (response.immediate_poll_requested == true) {
                             "저장 완료. 즉시 검색을 요청했어요."
@@ -913,7 +940,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         response: ResaleTradeUpsertResponse,
         fallbackSuccessMessage: String,
     ): Boolean {
-        if (!response.ok) {
+        if (response.ok != true) {
             _toastMessage.value = resolveSafeErrorMessage(
                 context = ErrorContext.SAVE,
                 rawMessage = response.message,
@@ -934,7 +961,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         response: TradeJourneyStartResponse,
         fallbackSuccessMessage: String,
     ): Boolean {
-        if (!response.ok) {
+        if (response.ok != true) {
             Log.w(TAG, "trade journey start failed response=$response rowNull=${response.row == null}")
             _toastMessage.value = resolveSafeErrorMessage(
                 context = ErrorContext.SAVE,
@@ -944,27 +971,31 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             return false
         }
 
-        val row = response.row?.let { responseRow ->
-            responseRow.copy(
-                id = responseRow.id ?: response.id ?: response.trade_journey_id,
-                source = responseRow.source ?: response.source,
-                product_id = responseRow.product_id ?: response.product_id,
-                current_stage = responseRow.current_stage ?: response.current_stage,
-            )
-        }
-        if (row == null) {
+        val responseRow = response.row
+        if (responseRow == null) {
             Log.e(TAG, "trade journey start returned null row response=$response rowNull=true")
             _toastMessage.value = "거래 기록을 열지 못했습니다. 다시 시도해 주세요."
             return false
         }
 
-        _selectedResaleJourney.value = row
+        // Defensive merge: only overwrite if row fields are null but response top-level fields are non-null
+        val finalRow = responseRow.copy(
+            id = responseRow.id ?: response.id ?: response.trade_journey_id ?: responseRow.id,
+            source = responseRow.source ?: response.source ?: responseRow.source,
+            product_id = responseRow.product_id ?: response.product_id ?: responseRow.product_id,
+            current_stage = responseRow.current_stage ?: response.current_stage ?: responseRow.current_stage,
+        )
+
+        _selectedResaleJourney.value = finalRow
+
         _toastMessage.value = if (response.existing == true) {
             "기존 거래 기록 열기"
         } else {
             fallbackSuccessMessage
         }
-        loadResaleJourneyHistory()
+
+        // We'll call loadResaleJourneyHistory separately in the calling functions
+        // to ensure it doesn't interfere with the immediate state update.
         return true
     }
 
@@ -991,13 +1022,15 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                         url = normalizedReference,
                     )
                 )
-                Log.d(TAG, "start-from-url response=$response rowNull=${response.row == null}")
-                onComplete?.invoke(
-                    applyStartedTradeJourneyResponse(
-                        response = response,
-                        fallbackSuccessMessage = "거래 기록 시작",
-                    )
+                Log.d(TAG, "DEBUG_FLOW: 1. Response full: $response")
+                val success = applyStartedTradeJourneyResponse(
+                    response = response,
+                    fallbackSuccessMessage = "거래 기록 시작",
                 )
+                if (success) {
+                    loadResaleJourneyHistory()
+                }
+                onComplete?.invoke(success)
             } catch (e: Exception) {
                 _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
                 onComplete?.invoke(false)
@@ -1028,12 +1061,14 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                         alert_event_id = alertEventId,
                     )
                 )
-                onComplete?.invoke(
-                    applyStartedTradeJourneyResponse(
-                        response = response,
-                        fallbackSuccessMessage = "거래 기록 시작",
-                    )
+                val success = applyStartedTradeJourneyResponse(
+                    response = response,
+                    fallbackSuccessMessage = "거래 기록 시작",
                 )
+                if (success) {
+                    loadResaleJourneyHistory()
+                }
+                onComplete?.invoke(success)
             } catch (e: Exception) {
                 _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
                 onComplete?.invoke(false)
@@ -1075,12 +1110,14 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                         read_archive_event_id = normalizedReadArchiveId,
                     )
                 )
-                onComplete?.invoke(
-                    applyStartedTradeJourneyResponse(
-                        response = response,
-                        fallbackSuccessMessage = "거래 기록 시작",
-                    )
+                val success = applyStartedTradeJourneyResponse(
+                    response = response,
+                    fallbackSuccessMessage = "거래 기록 시작",
                 )
+                if (success) {
+                    loadResaleJourneyHistory()
+                }
+                onComplete?.invoke(success)
             } catch (e: Exception) {
                 _toastMessage.value = e.toSafeUserMessage(ErrorContext.SAVE)
                 onComplete?.invoke(false)
@@ -1117,7 +1154,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                         product_id = normalizedProductId,
                     ),
                 )
-                if (response.ok) {
+                if (response.ok == true) {
                     _selectedResaleJourney.value = response.row
                     _toastMessage.value = "거래 기록을 자동으로 불러왔습니다."
                 } else {
@@ -1192,7 +1229,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     journeyId = journeyId,
                     request = ResaleTradeJourneyPatchRequest(updates = sparseUpdates),
                 )
-                if (response.ok) {
+                if (response.ok == true) {
                     _selectedResaleJourney.value = response.row
                     _toastMessage.value = "구매 후 입력이 저장되었습니다."
                     loadResaleJourneyHistory()
@@ -1260,7 +1297,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     journeyId = journeyId,
                     request = ResaleTradeJourneyPatchRequest(updates = sparseUpdates),
                 )
-                if (response.ok) {
+                if (response.ok == true) {
                     _selectedResaleJourney.value = response.row
                     _toastMessage.value = "되팔이 후 입력이 저장되었습니다."
                     loadResaleJourneyHistory()
@@ -1300,7 +1337,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     journeyId = journeyId,
                     request = ResaleTradeJourneyPatchRequest(updates = sparseUpdates),
                 )
-                if (response.ok) {
+                if (response.ok == true) {
                     _selectedResaleJourney.value = response.row
                     _toastMessage.value = "판매 완료 입력이 저장되었습니다."
                     loadResaleJourneyHistory()
@@ -1332,12 +1369,14 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         viewModelScope.launch {
             _isLoadingCompletedResaleJourneys.value = true
             _isLoadingPurchasedResaleJourneys.value = true
+            var activeHistoryEndpoint = "completed"
             try {
+                activeHistoryEndpoint = "completed"
                 val completedResponse = UmtpApiClient.apiService.getCompletedResaleTradeJourneys(
                     userId = uid,
                     limit = limit,
                 )
-                if (completedResponse.ok) {
+                if (completedResponse.ok == true) {
                     _completedResaleJourneys.value = completedResponse.items
                 } else {
                     _toastMessage.value = resolveSafeErrorMessage(
@@ -1347,11 +1386,12 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     )
                 }
 
+                activeHistoryEndpoint = "purchased"
                 val purchasedResponse = UmtpApiClient.apiService.getPurchasedResaleTradeJourneys(
                     userId = uid,
                     limit = limit,
                 )
-                if (purchasedResponse.ok) {
+                if (purchasedResponse.ok == true) {
                     _purchasedResaleJourneys.value = purchasedResponse.items
                 } else {
                     _toastMessage.value = resolveSafeErrorMessage(
@@ -1361,6 +1401,10 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     )
                 }
             } catch (e: Exception) {
+                logApiException(
+                    operation = "loadResaleJourneyHistory endpoint=$activeHistoryEndpoint limit=$limit",
+                    throwable = e,
+                )
                 _toastMessage.value = e.toSafeUserMessage(ErrorContext.NETWORK)
             } finally {
                 _isLoadingCompletedResaleJourneys.value = false
@@ -1381,7 +1425,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                     userId = uid,
                     request = ResaleTradeJourneyDeleteSelectedRequest(journey_ids = journeyIds.toList()),
                 )
-                if (response.ok) {
+                if (response.ok == true) {
                     val deletedCount = response.deleted_count ?: 0
                     _toastMessage.value = "완료 거래 ${deletedCount}건을 삭제했습니다."
                     loadResaleJourneyHistory()
@@ -1404,7 +1448,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         viewModelScope.launch {
             try {
                 val response = UmtpApiClient.apiService.deleteAllCompletedResaleTradeJourneys(uid)
-                if (response.ok) {
+                if (response.ok == true) {
                     val deletedCount = response.deleted_count ?: 0
                     _toastMessage.value = "완료 거래 ${deletedCount}건을 전체 삭제했습니다."
                     loadResaleJourneyHistory()
@@ -1452,7 +1496,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                         updates = normalizedUpdates,
                     )
                 )
-                if (response.ok) {
+                if (response.ok == true) {
                     val stage = response.current_stage?.takeIf { it.isNotBlank() } ?: "-"
                     _toastMessage.value = "구매 후 데이터 저장 완료 (stage: $stage)"
                 } else {
@@ -1501,7 +1545,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                         updates = normalizedUpdates,
                     )
                 )
-                if (response.ok) {
+                if (response.ok == true) {
                     val stage = response.current_stage?.takeIf { it.isNotBlank() } ?: "-"
                     _toastMessage.value = "되팔이 후 데이터 저장 완료 (stage: $stage)"
                 } else {
@@ -1526,7 +1570,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private suspend fun refreshUnitsInternal(): String? {
         return try {
             val unitsResponse = UmtpApiClient.apiService.getMacBookAirUnits()
-            if (!unitsResponse.ok) {
+            if (unitsResponse.ok != true) {
                 resolveSafeErrorMessage(
                     context = ErrorContext.NETWORK,
                     rawMessage = unitsResponse.message,
@@ -1544,7 +1588,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private suspend fun refreshUserSettingsInternal(uid: String): String? {
         return try {
             val response = UmtpApiClient.apiService.getUserFairPrices(uid)
-            if (!response.ok) {
+            if (response.ok != true) {
                 resolveSafeErrorMessage(
                     context = ErrorContext.NETWORK,
                     rawMessage = response.message,
@@ -1563,7 +1607,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
     private suspend fun refreshActiveRulesSavedAtInternal(uid: String): String? {
         return try {
             val response = UmtpApiClient.apiService.refreshUserRulesSavedAt(uid)
-            if (!response.ok) {
+            if (response.ok != true) {
                 resolveSafeErrorMessage(
                     context = ErrorContext.NETWORK,
                     rawMessage = response.message,
@@ -1652,7 +1696,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 priority = priorityOverride ?: normalizeWatchPriority(setting.priority),
             )
             val response = UmtpApiClient.apiService.upsertUserFairPrice(request)
-            if (!response.ok) {
+            if (response.ok != true) {
                 throw IllegalStateException("bulk_fallback_upsert_failed")
             }
         }

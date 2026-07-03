@@ -12,10 +12,10 @@ data class AlertItem(
     val product_url: String? = null,
     val url: String? = null,
     val sort_date: String? = null,
-    val listing_price_krw: Int? = null,
-    val fair_price_krw: Int? = null,
-    val user_market_price_krw: Int? = null,
-    val alert_target_price_krw: Int? = null,
+    val listing_price_krw: Double? = null,
+    val fair_price_krw: Double? = null,
+    val user_market_price_krw: Double? = null,
+    val alert_target_price_krw: Double? = null,
     val diff_ratio: Double? = null,
     val price_gap_percent: Double? = null,
     val alert_drop_rate_percent: Double? = null,
@@ -24,12 +24,12 @@ data class AlertItem(
     val alert_type_label: String? = null,
     val product_type: String? = null,
     val chip: String? = null,
-    val screen_inch: Int? = null,
-    val ram_gb: Int? = null,
-    val ssd_gb: Int? = null,
+    val screen_inch: Double? = null,
+    val ram_gb: Double? = null,
+    val ssd_gb: Double? = null,
     val risk_level: String? = null,
     val formatted_risk_label: String? = null,
-    val risk_score: Int? = null,
+    val risk_score: Double? = null,
     val risk_keywords: List<String>? = null,
     val trade_type_flags: TradeTypeFlags? = null,
     val body_excerpt: String? = null,
@@ -55,7 +55,7 @@ data class TradeTypeFlags(
 )
 
 data class AlertsResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val user_id: String? = null,
     val is_read_filter: String? = null,
     val items: List<AlertItem> = emptyList(),
@@ -64,7 +64,7 @@ data class AlertsResponse(
 )
 
 data class MarkAlertReadResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val user_id: String? = null,
     val alert_event_id: Long? = null,
     val is_read: Boolean? = null,
@@ -75,7 +75,7 @@ data class MarkAlertReadResponse(
 )
 
 data class MarkAllAlertsReadResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val user_id: String? = null,
     val updated_count: Int? = null,
     val message: String? = null,
@@ -83,7 +83,7 @@ data class MarkAllAlertsReadResponse(
 )
 
 data class GroupedReadAlertsResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val user_id: String? = null,
     val groups: Map<String, Map<String, List<AlertItem>>> = emptyMap(),
     val message: String? = null,
@@ -95,7 +95,7 @@ data class ClearSelectedReadArchiveRequest(
 )
 
 data class ClearReadArchiveResponse(
-    val ok: Boolean,
+    val ok: Boolean? = null,
     val user_id: String? = null,
     val requested_count: Int? = null,
     val cleared_count: Int? = null,

@@ -129,7 +129,7 @@ private fun formatResponse(response: com.boongtol.umtp_android.network.AnalyzeUr
     val sb = StringBuilder()
     sb.append("성공 여부: ${response.ok}\n")
     response.status?.let { sb.append("상태: $it\n") }
-    if (!response.ok) {
+    if (response.ok != true) {
         sb.append("안내: ${resolveSafeErrorMessage(ErrorContext.UNKNOWN, response.message, response.reason)}\n")
     } else {
         response.message?.let { sb.append("메시지: $it\n") }
