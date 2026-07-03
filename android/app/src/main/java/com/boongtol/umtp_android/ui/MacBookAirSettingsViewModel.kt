@@ -1189,6 +1189,14 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         }
 
         val sparseUpdates = filterSparseUpdates(updates)
+        Log.d(
+            TAG,
+            "purchase patch prepared " +
+                "journeyId=$journeyId " +
+                "productId=${journey?.product_id} " +
+                "seller_location=${sparseUpdates["seller_location"]} " +
+                "body=${ResaleTradeJourneyPatchRequest(updates = sparseUpdates)}",
+        )
         if (journeyId == null || journeyId <= 0L) {
             val identity = resolveSelectedJourneyIdentityForSave(journey)
             if (identity.productId == null && identity.url == null) {
@@ -1199,6 +1207,13 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             viewModelScope.launch {
                 _isSubmittingResaleTrade.value = true
                 try {
+                    Log.d(
+                        TAG,
+                        "purchase upsert request " +
+                            "productId=${identity.productId} " +
+                            "seller_location=${sparseUpdates["seller_location"]} " +
+                            "updates=$sparseUpdates",
+                    )
                     val response = UmtpApiClient.apiService.upsertResaleTradeAfterPurchase(
                         ResaleTradeAfterPurchaseUpsertRequest(
                             user_id = uid,
@@ -1224,6 +1239,13 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         viewModelScope.launch {
             _isSubmittingResaleTrade.value = true
             try {
+                Log.d(
+                    TAG,
+                    "purchase PATCH request " +
+                        "endpoint=/users/$uid/resale-trade-journeys/$journeyId/purchase " +
+                        "seller_location=${sparseUpdates["seller_location"]} " +
+                        "updates=$sparseUpdates",
+                )
                 val response = UmtpApiClient.apiService.patchResaleTradeJourneyPurchase(
                     userId = uid,
                     journeyId = journeyId,

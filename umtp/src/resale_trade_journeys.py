@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -9,6 +10,7 @@ from src.spec_parser import parse_listing_text
 
 
 DEFAULT_SOURCE = "joongna"
+logger = logging.getLogger("umtp.resale_trade_journeys")
 
 DROPPED_RESALE_JOURNEY_COLUMNS = {
     "gross_profit_krw",
@@ -1594,10 +1596,23 @@ def _merge_by_priority(
 
 def _apply_updates(cursor, *, row_id: int, updates: dict[str, Any]):
     if not updates:
+        logger.info("[resale_journey_update] row_id=%s skipped empty updates", row_id)
         return
+    logger.info(
+        "[resale_journey_update] row_id=%s update_keys=%s seller_location=%r",
+        row_id,
+        sorted(updates.keys()),
+        updates.get("seller_location"),
+    )
     assignments = ", ".join([f"{column} = %s" for column in updates.keys()])
     values = tuple(updates.values()) + (row_id,)
     cursor.execute(f"UPDATE resale_trade_journeys SET {assignments} WHERE id = %s", values)
+    logger.info(
+        "[resale_journey_update] row_id=%s affected_rows=%s seller_location=%r",
+        row_id,
+        getattr(cursor, "rowcount", None),
+        updates.get("seller_location"),
+    )
 
 
 def _load_row_detail(cursor, row_id: int) -> dict[str, Any]:

@@ -653,6 +653,13 @@ def patch_resale_trade_purchase(user_id: str, journey_id: int, request: dict[str
             source="api/users/{user_id}/resale-trade-journeys/{id}/purchase",
         )
         updates = _normalize_patch_updates(request)
+        logger.info(
+            "[resale_purchase_patch] user_id=%s journey_id=%s seller_location=%r update_keys=%s",
+            resolved_user_id,
+            journey_id,
+            updates.get("seller_location"),
+            sorted(updates.keys()),
+        )
         return patch_resale_trade_journey_purchase(
             user_id=resolved_user_id,
             journey_id=journey_id,
