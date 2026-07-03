@@ -177,6 +177,7 @@ PURCHASE_PATCH_FIELDS = {
     "purchase_contact_record",
     "purchase_conversation_text",
     "purchase_account_number",
+    "seller_location",
     "contacted_at",
     "seller_response_at",
     "purchased_at",

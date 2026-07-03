@@ -140,7 +140,7 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             },
         )
 
-    def test_prepare_sparse_updates_purchase_fields_drop_removed_field(self):
+    def test_prepare_sparse_updates_purchase_fields_allow_seller_location_and_drop_removed_fields(self):
         updates = journeys._prepare_sparse_updates(
             {
                 "seller_location": "  서울 강남구  ",
@@ -152,7 +152,7 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             {"seller_location", "purchase_contact_record", "money_sent_at", "url"},
         )
 
-        self.assertEqual(updates, {})
+        self.assertEqual(updates, {"seller_location": "서울 강남구"})
 
     def test_prepare_sparse_updates_purchase_fields_include_manual_verification_fields(self):
         updates = journeys._prepare_sparse_updates(
