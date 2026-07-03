@@ -567,6 +567,7 @@ fun ResaleTradeInputScreen(
     onLoadHistory: () -> Unit,
     onSelectCompletedJourney: (ResaleTradeJourneyRow) -> Unit,
     onSelectPurchasedJourney: (ResaleTradeJourneyRow) -> Unit,
+    onClearSelection: () -> Unit,
     onDeleteSelectedCompleted: (Set<Long>) -> Unit,
     onDeleteAllCompleted: () -> Unit,
 ) {
@@ -780,7 +781,10 @@ fun ResaleTradeInputScreen(
                     ) {
                         FilterChip(
                             selected = isSelectedJourney,
-                            onClick = { onSelectCompletedJourney(item) },
+                            onClick = {
+                                if (isSelectedJourney) onClearSelection()
+                                else onSelectCompletedJourney(item)
+                            },
                             label = {
                                 Text(
                                     "#${itemId} [${stageLabel(item.current_stage)}] ${compactTitle(item.title)} / ${formatWon(item.sale_price_krw)}"
@@ -818,7 +822,10 @@ fun ResaleTradeInputScreen(
                     val isSelectedJourney = selectedJourney?.id?.toLong() == rowId
                     FilterChip(
                         selected = isSelectedJourney,
-                        onClick = { onSelectPurchasedJourney(item) },
+                        onClick = {
+                            if (isSelectedJourney) onClearSelection()
+                            else onSelectPurchasedJourney(item)
+                        },
                         label = {
                             Text(
                                 "#${rowId} [${stageLabel(item.current_stage)}] ${compactTitle(item.title)} / 구매 ${formatWon(item.purchase_price_krw)}"

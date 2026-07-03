@@ -311,6 +311,9 @@ fun MainTabScreen(
                     onSelectPurchasedJourney = { row ->
                         viewModel.selectResaleJourney(row)
                     },
+                    onClearSelection = {
+                        viewModel.clearSelectedResaleJourney()
+                    },
                     onDeleteSelectedCompleted = { selectedIds ->
                         viewModel.deleteSelectedCompletedResaleJourneys(selectedIds)
                     },
