@@ -542,6 +542,14 @@ private fun stageLabel(raw: String?): String {
     }
 }
 
+private fun compactTitle(raw: String?): String {
+    return raw
+        ?.replace(Regex("\\s+"), " ")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: "(제목없음)"
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ResaleTradeInputScreen(
@@ -556,6 +564,7 @@ fun ResaleTradeInputScreen(
     onSubmitResale: (updates: Map<String, Any?>) -> Unit,
     onSubmitSold: (updates: Map<String, Any?>) -> Unit,
     onLoadHistory: () -> Unit,
+    onSelectCompletedJourney: (ResaleTradeJourneyRow) -> Unit,
     onSelectPurchasedJourney: (ResaleTradeJourneyRow) -> Unit,
     onDeleteSelectedCompleted: (Set<Long>) -> Unit,
     onDeleteAllCompleted: () -> Unit,
@@ -754,24 +763,34 @@ fun ResaleTradeInputScreen(
             Text(text = "완료된 거래가 없습니다.")
         }
 
-        completedJourneys.forEach { item ->
-            val itemId = item.id?.toLong() ?: return@forEach
-            val selected = selectedCompletedIds.contains(itemId)
-            FilterChip(
-                selected = selected,
-                onClick = {
-                    selectedCompletedIds = if (selected) {
-                        selectedCompletedIds - itemId
-                    } else {
-                        selectedCompletedIds + itemId
-                    }
-                },
-                label = {
-                    Text(
-                        "#${itemId} [${stageLabel(item.current_stage)}] ${item.title ?: "(제목없음)"} / ${formatWon(item.sale_price_krw)}"
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            completedJourneys.forEach { item ->
+                val itemId = item.id?.toLong() ?: return@forEach
+                val isSelectedJourney = selectedJourney?.id?.toLong() == itemId
+                val selectedForDelete = selectedCompletedIds.contains(itemId)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FilterChip(
+                        selected = isSelectedJourney,
+                        onClick = { onSelectCompletedJourney(item) },
+                        label = {
+                            Text(
+                                "#${itemId} [${stageLabel(item.current_stage)}] ${compactTitle(item.title)} / ${formatWon(item.sale_price_krw)}"
+                            )
+                        },
                     )
-                },
-            )
+                    FilterChip(
+                        selected = selectedForDelete,
+                        onClick = {
+                            selectedCompletedIds = if (selectedForDelete) {
+                                selectedCompletedIds - itemId
+                            } else {
+                                selectedCompletedIds + itemId
+                            }
+                        },
+                        label = { Text("삭제 선택") },
+                    )
+                }
+            }
         }
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))

@@ -155,6 +155,60 @@ class ResaleTradeJourneysTest(unittest.TestCase):
 
         self.assertEqual(updates, {"seller_location": "서울 강남구"})
 
+    def test_patch_purchase_passes_manual_seller_location_to_hydrate(self):
+        cursor = MagicMock()
+        connection = MagicMock()
+        connection.cursor.return_value = cursor
+        connection.is_connected.return_value = True
+        row_after_update = {
+            "id": 34,
+            "source": "joongna",
+            "product_id": "229268685",
+            "seller_location": "부산 광안리",
+        }
+
+        with (
+            patch("src.resale_trade_journeys.get_connection", return_value=connection),
+            patch(
+                "src.resale_trade_journeys._get_resale_columns",
+                return_value=(set(), {"seller_location", "source", "product_id"}),
+            ),
+            patch(
+                "src.resale_trade_journeys._fetch_journey_by_id",
+                return_value={
+                    "id": 34,
+                    "source": "joongna",
+                    "product_id": "229268685",
+                    "seller_location": None,
+                },
+            ),
+            patch(
+                "src.resale_trade_journeys._load_row_detail",
+                side_effect=[
+                    row_after_update,
+                    {**row_after_update, "current_stage": journeys.STAGE_INSPECTED},
+                ],
+            ),
+            patch(
+                "src.resale_trade_journeys._hydrate_row_by_product",
+                return_value=row_after_update,
+            ) as mock_hydrate,
+            patch("src.resale_trade_journeys._build_purchase_calculated_updates", return_value={}),
+            patch("src.resale_trade_journeys._derive_stage_after_purchase", return_value=None),
+        ):
+            result = journeys.patch_resale_trade_journey_purchase(
+                user_id="boongtol",
+                journey_id=34,
+                updates={"seller_location": "  부산 광안리  "},
+            )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(
+            mock_hydrate.call_args.kwargs.get("user_values"),
+            {"seller_location": "부산 광안리"},
+        )
+        connection.commit.assert_called_once()
+
     def test_prepare_sparse_updates_purchase_fields_include_manual_verification_fields(self):
         updates = journeys._prepare_sparse_updates(
             {

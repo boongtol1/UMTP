@@ -2383,7 +2383,7 @@ def patch_resale_trade_journey_purchase(*, user_id: str, journey_id: int, update
                 user_id=normalized_user_id,
                 source=source,
                 product_id=product_id,
-                user_values={},
+                user_values=sparse_updates,
                 writable_columns=writable_columns,
             )
 
@@ -2447,7 +2447,7 @@ def _patch_resale_or_sold(*, user_id: str, journey_id: int, updates: dict[str, A
                 user_id=normalized_user_id,
                 source=source,
                 product_id=product_id,
-                user_values={},
+                user_values=sparse_updates,
                 writable_columns=writable_columns,
             )
 

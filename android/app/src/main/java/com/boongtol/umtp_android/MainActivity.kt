@@ -305,6 +305,9 @@ fun MainTabScreen(
                     onLoadHistory = {
                         viewModel.loadResaleJourneyHistory()
                     },
+                    onSelectCompletedJourney = { row ->
+                        viewModel.selectResaleJourney(row)
+                    },
                     onSelectPurchasedJourney = { row ->
                         viewModel.selectResaleJourney(row)
                     },
