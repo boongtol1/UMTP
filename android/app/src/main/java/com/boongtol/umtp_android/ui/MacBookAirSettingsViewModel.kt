@@ -19,6 +19,7 @@ import java.util.Locale
 
 class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) : ViewModel() {
     companion object {
+        private const val TAG = "MacBookAirSettingsVM"
         private const val ALERT_POLL_INTERVAL_MS = 10_000L
     }
 
@@ -934,6 +935,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
         fallbackSuccessMessage: String,
     ): Boolean {
         if (!response.ok) {
+            Log.w(TAG, "trade journey start failed response=$response rowNull=${response.row == null}")
             _toastMessage.value = resolveSafeErrorMessage(
                 context = ErrorContext.SAVE,
                 rawMessage = response.message,
@@ -951,6 +953,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             )
         }
         if (row == null) {
+            Log.e(TAG, "trade journey start returned null row response=$response rowNull=true")
             _toastMessage.value = "거래 기록을 열지 못했습니다. 다시 시도해 주세요."
             return false
         }
@@ -988,6 +991,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                         url = normalizedReference,
                     )
                 )
+                Log.d(TAG, "start-from-url response=$response rowNull=${response.row == null}")
                 onComplete?.invoke(
                     applyStartedTradeJourneyResponse(
                         response = response,

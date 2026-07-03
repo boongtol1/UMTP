@@ -26,10 +26,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.boongtol.umtp_android.network.ResaleTradeJourneyRow
 import com.google.gson.Gson
 import com.google.gson.JsonElement
+import com.google.gson.JsonParser
 
 private enum class ResaleInputMode {
     PURCHASE,
@@ -224,6 +228,58 @@ private fun formatStoredValue(value: Any?): String? {
     return formatStoredElement(Gson().toJsonTree(value))
 }
 
+private fun collectImageUrlsFromJsonElement(element: JsonElement?): List<String> {
+    if (element == null || element.isJsonNull) {
+        return emptyList()
+    }
+
+    if (element.isJsonArray) {
+        return element.asJsonArray.flatMap { collectImageUrlsFromJsonElement(it) }
+    }
+
+    if (element.isJsonObject) {
+        val obj = element.asJsonObject
+        for (key in listOf("image_url", "imageUrl", "thumbnail_url", "thumbnailUrl", "thumbnail")) {
+            val urls = collectImageUrlsFromJsonElement(obj.get(key))
+            if (urls.isNotEmpty()) {
+                return urls
+            }
+        }
+        return emptyList()
+    }
+
+    if (!element.isJsonPrimitive) {
+        return emptyList()
+    }
+
+    val raw = element.asJsonPrimitive
+    val normalized = (if (raw.isString) raw.asString else raw.toString()).trim()
+    if (normalized.isEmpty()) {
+        return emptyList()
+    }
+
+    if (normalized.startsWith("[") || normalized.startsWith("{")) {
+        val parsed = runCatching { JsonParser.parseString(normalized) }.getOrNull()
+        val parsedUrls = collectImageUrlsFromJsonElement(parsed)
+        if (parsedUrls.isNotEmpty()) {
+            return parsedUrls
+        }
+    }
+
+    return if (normalized.startsWith("http://") || normalized.startsWith("https://")) {
+        listOf(normalized)
+    } else {
+        emptyList()
+    }
+}
+
+private fun firstImageUrl(value: Any?): String? {
+    if (value == null) {
+        return null
+    }
+    return collectImageUrlsFromJsonElement(Gson().toJsonTree(value)).firstOrNull()
+}
+
 private fun buildJourneyValueMap(row: ResaleTradeJourneyRow?): Map<String, String> {
     if (row == null) {
         return emptyMap()
@@ -284,6 +340,23 @@ private fun buildJourneyValueMap(row: ResaleTradeJourneyRow?): Map<String, Strin
     put("updated_at", row.updated_at)
 
     return result
+}
+
+@Composable
+private fun TradePrefillImageThumbnail(imageUrl: String?) {
+    if (imageUrl.isNullOrBlank()) {
+        return
+    }
+
+    AsyncImage(
+        model = imageUrl,
+        contentDescription = "자동채움 대표 이미지",
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(180.dp)
+            .clip(MaterialTheme.shapes.medium),
+        contentScale = ContentScale.Crop,
+    )
 }
 
 @Composable
@@ -512,6 +585,10 @@ fun ResaleTradeInputScreen(
             text = "내부 식별값: ${sourceText} / ${productIdText}",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        TradePrefillImageThumbnail(
+            imageUrl = firstImageUrl(selectedJourney?.image_urls),
         )
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
