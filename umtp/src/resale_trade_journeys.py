@@ -174,6 +174,11 @@ AUTO_HYDRATE_FIELDS = {
 }
 
 PURCHASE_PATCH_FIELDS = {
+    "title",
+    "listing_price_krw",
+    "seller_nickname",
+    "body_text",
+    "fair_price_krw",
     "purchase_contact_record",
     "purchase_conversation_text",
     "purchase_account_number",
