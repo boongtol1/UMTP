@@ -2,6 +2,7 @@ package com.boongtol.umtp_android.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -737,7 +738,10 @@ fun ResaleTradeInputScreen(
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
         Text(text = "완료된 거래", style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             Button(
                 onClick = onLoadHistory,
                 enabled = !isLoadingCompleted && !isLoadingPurchased,
@@ -761,56 +765,68 @@ fun ResaleTradeInputScreen(
 
         if (completedJourneys.isEmpty()) {
             Text(text = "완료된 거래가 없습니다.")
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            completedJourneys.forEach { item ->
-                val itemId = item.id?.toLong() ?: return@forEach
-                val isSelectedJourney = selectedJourney?.id?.toLong() == itemId
-                val selectedForDelete = selectedCompletedIds.contains(itemId)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    FilterChip(
-                        selected = isSelectedJourney,
-                        onClick = { onSelectCompletedJourney(item) },
-                        label = {
-                            Text(
-                                "#${itemId} [${stageLabel(item.current_stage)}] ${compactTitle(item.title)} / ${formatWon(item.sale_price_krw)}"
-                            )
-                        },
-                    )
-                    FilterChip(
-                        selected = selectedForDelete,
-                        onClick = {
-                            selectedCompletedIds = if (selectedForDelete) {
-                                selectedCompletedIds - itemId
-                            } else {
-                                selectedCompletedIds + itemId
-                            }
-                        },
-                        label = { Text("삭제 선택") },
-                    )
+        } else {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                completedJourneys.forEach { item ->
+                    val itemId = item.id?.toLong() ?: return@forEach
+                    val isSelectedJourney = selectedJourney?.id?.toLong() == itemId
+                    val selectedForDelete = selectedCompletedIds.contains(itemId)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        FilterChip(
+                            selected = isSelectedJourney,
+                            onClick = { onSelectCompletedJourney(item) },
+                            label = {
+                                Text(
+                                    "#${itemId} [${stageLabel(item.current_stage)}] ${compactTitle(item.title)} / ${formatWon(item.sale_price_krw)}"
+                                )
+                            },
+                        )
+                        FilterChip(
+                            selected = selectedForDelete,
+                            onClick = {
+                                selectedCompletedIds = if (selectedForDelete) {
+                                    selectedCompletedIds - itemId
+                                } else {
+                                    selectedCompletedIds + itemId
+                                }
+                            },
+                            label = { Text("삭제") },
+                        )
+                    }
                 }
             }
         }
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
         Text(text = "구매 거래 내역 (KEEP 포함)", style = MaterialTheme.typography.titleMedium)
         if (purchasedJourneys.isEmpty()) {
             Text(text = "구매 기록이 없습니다.")
-        }
-        purchasedJourneys.forEach { item ->
-            val rowId = item.id?.toLong() ?: return@forEach
-            val isSelectedJourney = selectedJourney?.id?.toLong() == rowId
-            FilterChip(
-                selected = isSelectedJourney,
-                onClick = { onSelectPurchasedJourney(item) },
-                label = {
-                    Text(
-                        "#${rowId} [${stageLabel(item.current_stage)}] ${item.title ?: "(제목없음)"} / 구매 ${formatWon(item.purchase_price_krw)}"
+        } else {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                purchasedJourneys.forEach { item ->
+                    val rowId = item.id?.toLong() ?: return@forEach
+                    val isSelectedJourney = selectedJourney?.id?.toLong() == rowId
+                    FilterChip(
+                        selected = isSelectedJourney,
+                        onClick = { onSelectPurchasedJourney(item) },
+                        label = {
+                            Text(
+                                "#${rowId} [${stageLabel(item.current_stage)}] ${compactTitle(item.title)} / 구매 ${formatWon(item.purchase_price_krw)}"
+                            )
+                        },
                     )
-                },
-            )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(40.dp))
