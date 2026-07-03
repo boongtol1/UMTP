@@ -342,7 +342,19 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         "src.resale_trade_journeys.start_or_prefill_resale_trade_journey_from_product",
         return_value={"ok": True, "id": 14, "trade_journey_id": 14, "existing": False},
     )
-    def test_start_resale_trade_journey_from_url(self, mock_start_or_prefill):
+    @patch("src.resale_trade_journeys._fetch_latest_alert_event_by_reference", return_value={})
+    @patch("src.resale_trade_journeys.get_connection")
+    def test_start_resale_trade_journey_from_url(
+        self,
+        mock_get_connection,
+        _mock_fetch_alert,
+        mock_start_or_prefill,
+    ):
+        connection = MagicMock()
+        connection.cursor.return_value = MagicMock()
+        connection.is_connected.return_value = True
+        mock_get_connection.return_value = connection
+
         response = journeys.start_resale_trade_journey_from_url(
             user_id="boongtol",
             url="https://web.joongna.com/product/228826879",
@@ -358,6 +370,82 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             kwargs.get("seed_values", {}).get("url"),
             "https://web.joongna.com/product/228826879",
         )
+
+    @patch(
+        "src.resale_trade_journeys.start_or_prefill_resale_trade_journey_from_product",
+        return_value={"ok": True, "id": 15, "trade_journey_id": 15, "existing": False},
+    )
+    @patch("src.resale_trade_journeys._fetch_latest_alert_event_by_reference", return_value={})
+    @patch("src.resale_trade_journeys.get_connection")
+    def test_start_resale_trade_journey_from_url_accepts_product_id(
+        self,
+        mock_get_connection,
+        _mock_fetch_alert,
+        mock_start_or_prefill,
+    ):
+        connection = MagicMock()
+        connection.cursor.return_value = MagicMock()
+        connection.is_connected.return_value = True
+        mock_get_connection.return_value = connection
+
+        response = journeys.start_resale_trade_journey_from_url(
+            user_id="boongtol",
+            url="228826879",
+        )
+
+        self.assertTrue(response.get("ok"))
+        self.assertEqual(response.get("trade_journey_id"), 15)
+        kwargs = mock_start_or_prefill.call_args.kwargs
+        self.assertEqual(kwargs.get("user_id"), "boongtol")
+        self.assertEqual(kwargs.get("source"), "joongna")
+        self.assertEqual(kwargs.get("product_id"), "228826879")
+        self.assertEqual(kwargs.get("seed_values", {}).get("product_id"), "228826879")
+
+    @patch(
+        "src.resale_trade_journeys.start_or_prefill_resale_trade_journey_from_product",
+        return_value={"ok": True, "id": 16, "trade_journey_id": 16, "existing": False},
+    )
+    @patch(
+        "src.resale_trade_journeys._fetch_latest_alert_event_by_reference",
+        return_value={
+            "source": "bunjang",
+            "product_id": "listing-998",
+            "url": "https://example.com/listings/listing-998",
+            "title": "M2 16GB",
+            "price_krw": 700000,
+            "chip": "M2",
+            "ram_gb": 16,
+            "ssd_gb": 512,
+        },
+    )
+    @patch("src.resale_trade_journeys.get_connection")
+    def test_start_resale_trade_journey_from_url_uses_alert_event_reference(
+        self,
+        mock_get_connection,
+        mock_fetch_alert,
+        mock_start_or_prefill,
+    ):
+        connection = MagicMock()
+        connection.cursor.return_value = MagicMock()
+        connection.is_connected.return_value = True
+        mock_get_connection.return_value = connection
+
+        response = journeys.start_resale_trade_journey_from_url(
+            user_id="boongtol",
+            url="998",
+        )
+
+        self.assertTrue(response.get("ok"))
+        mock_fetch_alert.assert_called_once()
+        kwargs = mock_start_or_prefill.call_args.kwargs
+        self.assertEqual(kwargs.get("source"), "bunjang")
+        self.assertEqual(kwargs.get("product_id"), "listing-998")
+        seed_values = kwargs.get("seed_values", {})
+        self.assertEqual(seed_values.get("url"), "https://example.com/listings/listing-998")
+        self.assertEqual(seed_values.get("title"), "M2 16GB")
+        self.assertEqual(seed_values.get("listing_price_krw"), 700000)
+        self.assertEqual(seed_values.get("chip"), "M2")
+        self.assertEqual(seed_values.get("ram_gb"), 16)
 
     @patch("src.resale_trade_journeys._build_prefill_row_by_product", return_value={"current_stage": journeys.STAGE_DISCOVERED})
     @patch("src.resale_trade_journeys._hydrate_row_by_product")

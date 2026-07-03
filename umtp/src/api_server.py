@@ -556,14 +556,14 @@ def start_trade_journey_from_url(request: TradeJourneyStartFromUrlRequest):
     except ValueError as exc:
         reason = str(exc)
         if reason == "invalid_url":
-            reason = "URL을 확인해 주세요."
+            reason = "URL 또는 product_id를 확인해 주세요."
         elif reason == "invalid_product_id":
-            reason = "URL에서 product_id를 찾지 못했습니다."
+            reason = "URL 또는 product_id에서 제품 식별값을 찾지 못했습니다."
         return {"ok": False, "reason": reason}
     except RuntimeError as exc:
         return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
     except Exception as exc:
-        return {"ok": False, "reason": f"URL 거래 기록 시작 실패: {exc}"}
+        return {"ok": False, "reason": f"URL/product_id 거래 기록 시작 실패: {exc}"}
 
 
 @app.post("/trade-journeys/start-from-alert")

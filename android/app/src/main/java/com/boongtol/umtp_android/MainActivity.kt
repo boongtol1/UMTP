@@ -290,8 +290,8 @@ fun MainTabScreen(
                     isSubmitting = isSubmittingResaleTrade,
                     isLoadingCompleted = isLoadingCompletedResaleJourneys,
                     isLoadingPurchased = isLoadingPurchasedResaleJourneys,
-                    onStartFromUrl = { url ->
-                        viewModel.startTradeJourneyFromUrl(url)
+                    onStartFromReference = { reference ->
+                        viewModel.startTradeJourneyFromUrl(reference)
                     },
                     onSubmitPurchase = { updates ->
                         viewModel.patchSelectedResaleJourneyPurchase(updates)

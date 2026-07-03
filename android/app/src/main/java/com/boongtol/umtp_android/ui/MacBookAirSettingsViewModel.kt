@@ -965,9 +965,9 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             return
         }
 
-        val normalizedUrl = url.trim()
-        if (normalizedUrl.isEmpty()) {
-            _toastMessage.value = "URL을 입력해 주세요."
+        val normalizedReference = url.trim()
+        if (normalizedReference.isEmpty()) {
+            _toastMessage.value = "URL 또는 product_id를 입력해 주세요."
             onComplete?.invoke(false)
             return
         }
@@ -978,7 +978,7 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
                 val response = UmtpApiClient.apiService.startTradeJourneyFromUrl(
                     TradeJourneyStartFromUrlRequest(
                         user_id = uid,
-                        url = normalizedUrl,
+                        url = normalizedReference,
                     )
                 )
                 onComplete?.invoke(

@@ -418,7 +418,7 @@ fun ResaleTradeInputScreen(
     isSubmitting: Boolean,
     isLoadingCompleted: Boolean,
     isLoadingPurchased: Boolean,
-    onStartFromUrl: (url: String) -> Unit,
+    onStartFromReference: (reference: String) -> Unit,
     onSubmitPurchase: (updates: Map<String, Any?>) -> Unit,
     onSubmitResale: (updates: Map<String, Any?>) -> Unit,
     onSubmitSold: (updates: Map<String, Any?>) -> Unit,
@@ -427,7 +427,7 @@ fun ResaleTradeInputScreen(
     onDeleteSelectedCompleted: (Set<Long>) -> Unit,
     onDeleteAllCompleted: () -> Unit,
 ) {
-    var startUrl by remember { mutableStateOf("") }
+    var startReference by remember { mutableStateOf("") }
     var inputMode by remember { mutableStateOf(ResaleInputMode.PURCHASE) }
 
     val manualInputs = remember { mutableStateMapOf<String, String>() }
@@ -454,24 +454,24 @@ fun ResaleTradeInputScreen(
             style = MaterialTheme.typography.titleLarge,
         )
         Text(
-            text = "URL 또는 알림 카드에서 거래 기록을 시작한 뒤, 필요한 값만 입력해 저장합니다.",
+            text = "URL, product_id 또는 알림 카드에서 거래 기록을 시작한 뒤, 필요한 값만 입력해 저장합니다.",
             style = MaterialTheme.typography.bodySmall,
         )
 
-        Text(text = "URL로 거래 기록 시작", style = MaterialTheme.typography.titleMedium)
+        Text(text = "URL 또는 product_id로 거래 기록 시작", style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(
-            value = startUrl,
-            onValueChange = { startUrl = it },
+            value = startReference,
+            onValueChange = { startReference = it },
             modifier = Modifier.fillMaxWidth(),
             enabled = !isSubmitting,
             singleLine = true,
-            label = { Text("중고나라 URL") },
-            placeholder = { Text("예: https://web.joongna.com/product/228826879") },
+            label = { Text("URL 또는 product_id") },
+            placeholder = { Text("예: https://web.joongna.com/product/228826879 또는 228826879") },
         )
 
         Button(
             onClick = {
-                onStartFromUrl(startUrl)
+                onStartFromReference(startReference)
             },
             enabled = !isSubmitting,
             modifier = Modifier.fillMaxWidth(),

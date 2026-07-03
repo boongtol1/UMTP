@@ -346,6 +346,43 @@ def _extract_product_id_from_url(url: Optional[str]) -> Optional[str]:
     return _normalize_optional_text(match.group(1))
 
 
+def _looks_like_url(value: Any) -> bool:
+    normalized = _normalize_optional_text(value)
+    if normalized is None:
+        return False
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", normalized):
+        return True
+    return "/product/" in normalized or ("/" in normalized and "." in normalized.split("/", 1)[0])
+
+
+def _normalize_reference_url(value: Any) -> Optional[str]:
+    normalized = _normalize_optional_text(value)
+    if normalized is None:
+        return None
+    if _looks_like_url(normalized):
+        return normalized
+    return None
+
+
+def _build_url_lookup_values(url: Optional[str]) -> list[str]:
+    normalized = _normalize_optional_text(url)
+    if normalized is None:
+        return []
+
+    values: list[str] = []
+    base_without_query = re.split(r"[?#]", normalized, maxsplit=1)[0]
+    for candidate in (
+        normalized,
+        normalized.rstrip("/"),
+        base_without_query,
+        base_without_query.rstrip("/"),
+    ):
+        cleaned = _normalize_optional_text(candidate)
+        if cleaned is not None and cleaned not in values:
+            values.append(cleaned)
+    return values
+
+
 def _infer_source_from_url(url: Optional[str]) -> str:
     normalized_url = (_normalize_optional_text(url) or "").lower()
     if "bunjang" in normalized_url:
@@ -536,23 +573,94 @@ def _safe_order_query(base_sql: str, order_candidates: list[str]) -> str:
     return f"{base_sql} LIMIT 1"
 
 
+def _safe_fetchone_with_order_fallback(
+    cursor,
+    base_sql: str,
+    params: tuple[Any, ...],
+    order_candidates: list[str],
+) -> Optional[dict[str, Any]]:
+    for order_clause in order_candidates:
+        row = _safe_fetchone(
+            cursor,
+            f"{base_sql} ORDER BY {order_clause} LIMIT 1",
+            params,
+        )
+        if row:
+            return row
+    return None
+
+
+def _fetch_latest_alert_event_by_reference(
+    cursor,
+    *,
+    user_id: Optional[str],
+    source: Optional[str] = None,
+    product_id: Optional[str] = None,
+    url: Optional[str] = None,
+) -> dict[str, Any]:
+    normalized_user_id = _normalize_optional_text(user_id)
+    normalized_source = _normalize_optional_text(source)
+    normalized_product_id = _normalize_optional_text(product_id)
+    url_values = _build_url_lookup_values(url)
+
+    query_specs: list[tuple[str, list[Any]]] = []
+    if normalized_product_id is not None and normalized_source is not None:
+        query_specs.append(
+            (
+                "source = %s AND product_id = %s",
+                [normalized_source, normalized_product_id],
+            )
+        )
+    if normalized_product_id is not None:
+        query_specs.append(("product_id = %s", [normalized_product_id]))
+
+    if url_values:
+        placeholders = ", ".join(["%s"] * len(url_values))
+        if normalized_source is not None:
+            query_specs.append(
+                (
+                    f"source = %s AND TRIM(url) IN ({placeholders})",
+                    [normalized_source, *url_values],
+                )
+            )
+        query_specs.append((f"TRIM(url) IN ({placeholders})", list(url_values)))
+
+    order_candidates = [
+        "COALESCE(sort_date, analyzed_at, created_at) DESC, id DESC",
+        "COALESCE(sort_date, created_at) DESC, id DESC",
+        "created_at DESC, id DESC",
+        "id DESC",
+    ]
+    for where_sql, params in query_specs:
+        user_sql = ""
+        if normalized_user_id is not None:
+            user_sql = "AND user_id = %s"
+            params = [*params, normalized_user_id]
+
+        row = _safe_fetchone_with_order_fallback(
+            cursor,
+            f"""
+            SELECT *
+            FROM alert_events
+            WHERE {where_sql}
+              {user_sql}
+            """,
+            tuple(params),
+            order_candidates,
+        )
+        if row:
+            return row
+
+    return {}
+
+
 def _fetch_latest_alert_event(cursor, *, user_id: str, source: str, product_id: str) -> dict[str, Any]:
-    base = """
-        SELECT *
-        FROM alert_events
-        WHERE source = %s
-          AND product_id = %s
-          AND (%s IS NULL OR user_id = %s)
-    """
-    query = _safe_order_query(
-        base,
-        [
-            "COALESCE(sort_date, analyzed_at, created_at) DESC, id DESC",
-            "created_at DESC, id DESC",
-            "id DESC",
-        ],
+    return _fetch_latest_alert_event_by_reference(
+        cursor,
+        user_id=user_id,
+        source=source,
+        product_id=product_id,
     )
-    return _safe_fetchone(cursor, query, (source, product_id, user_id, user_id)) or {}
 
 
 def _fetch_alert_event_by_id(cursor, *, user_id: str, alert_event_id: int) -> dict[str, Any]:
@@ -1062,6 +1170,89 @@ def _normalize_identity(*, user_id: str, source: Any, product_id: Any) -> tuple[
     return normalized_user_id, normalized_source, normalized_product_id
 
 
+def _build_basic_start_reference(
+    *,
+    user_id: str,
+    reference: str,
+    source_hint: Optional[str] = None,
+) -> tuple[str, Optional[str], dict[str, Any]]:
+    normalized_user_id = _normalize_optional_text(user_id)
+    normalized_reference = _normalize_optional_text(reference)
+    if normalized_user_id is None:
+        raise ValueError("invalid_user_id")
+    if normalized_reference is None:
+        raise ValueError("invalid_url")
+
+    reference_url = _normalize_reference_url(normalized_reference)
+    product_id = _extract_product_id_from_url(normalized_reference)
+    if product_id is None and reference_url is None:
+        product_id = normalized_reference
+
+    source = _normalize_optional_text(source_hint) or _infer_source_from_url(reference_url)
+    seed_values = {"source": source}
+    if product_id is not None:
+        seed_values["product_id"] = product_id
+    if reference_url is not None:
+        seed_values["url"] = reference_url
+    return source, product_id, seed_values
+
+
+def _resolve_start_reference_from_alerts(
+    cursor,
+    *,
+    user_id: str,
+    reference: str,
+    source_hint: Optional[str] = None,
+) -> tuple[str, str, dict[str, Any]]:
+    source, product_id, seed_values = _build_basic_start_reference(
+        user_id=user_id,
+        reference=reference,
+        source_hint=source_hint,
+    )
+    reference_url = _normalize_reference_url(reference)
+
+    alert_row = _fetch_latest_alert_event_by_reference(
+        cursor,
+        user_id=user_id,
+        source=source,
+        product_id=product_id,
+        url=reference_url,
+    )
+    alert_values = _build_alert_mapping(alert_row)
+    if not alert_values:
+        if product_id is None:
+            raise ValueError("invalid_product_id")
+        return source, product_id, seed_values
+
+    resolved_url = _normalize_optional_text(
+        _first_non_blank(
+            alert_values.get("url"),
+            seed_values.get("url"),
+            reference_url,
+        )
+    )
+    resolved_source = (
+        _normalize_optional_text(alert_values.get("source"))
+        or source
+        or _infer_source_from_url(resolved_url)
+    )
+    resolved_product_id = (
+        _normalize_optional_text(alert_values.get("product_id"))
+        or product_id
+        or _extract_product_id_from_url(resolved_url)
+    )
+    if resolved_product_id is None:
+        raise ValueError("invalid_product_id")
+
+    resolved_seed_values = {**seed_values, **alert_values}
+    resolved_seed_values["source"] = resolved_source
+    resolved_seed_values["product_id"] = resolved_product_id
+    if resolved_url is not None:
+        resolved_seed_values["url"] = resolved_url
+
+    return resolved_source, resolved_product_id, resolved_seed_values
+
+
 def _hydrate_row_by_product(
     cursor,
     *,
@@ -1390,26 +1581,47 @@ def start_or_prefill_resale_trade_journey_from_product(
 
 def start_resale_trade_journey_from_url(*, user_id: str, url: str) -> dict[str, Any]:
     normalized_user_id = _normalize_optional_text(user_id)
-    normalized_url = _normalize_optional_text(url)
+    normalized_reference = _normalize_optional_text(url)
     if normalized_user_id is None:
         raise ValueError("invalid_user_id")
-    if normalized_url is None:
+    if normalized_reference is None:
         raise ValueError("invalid_url")
 
-    product_id = _extract_product_id_from_url(normalized_url)
+    source, product_id, seed_values = _build_basic_start_reference(
+        user_id=normalized_user_id,
+        reference=normalized_reference,
+    )
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        source, product_id, seed_values = _resolve_start_reference_from_alerts(
+            cursor,
+            user_id=normalized_user_id,
+            reference=normalized_reference,
+        )
+    except ValueError as exc:
+        if str(exc) == "invalid_product_id":
+            return {"ok": False, "reason": "invalid_product_id"}
+        raise
+    except Exception as exc:
+        print(f"[resale_trade_journeys] alert reference lookup skipped: {exc}")
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
     if product_id is None:
         return {"ok": False, "reason": "invalid_product_id"}
 
-    source = _infer_source_from_url(normalized_url)
     result = start_or_prefill_resale_trade_journey_from_product(
         user_id=normalized_user_id,
         source=source,
         product_id=product_id,
-        seed_values={
-            "url": normalized_url,
-            "source": source,
-            "product_id": product_id,
-        },
+        seed_values=seed_values,
     )
     return result
 
