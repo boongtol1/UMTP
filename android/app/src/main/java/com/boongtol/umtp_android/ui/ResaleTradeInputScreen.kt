@@ -433,6 +433,7 @@ private fun EditableFieldList(
         "seller_nickname" to "판매자 닉네임",
         "body_text" to "본문 내용",
         "fair_price_krw" to "적정 가격 (원)",
+        "seller_location" to "판매자 위치",
         "contacted_at" to "연락 시각",
         "seller_response_at" to "판매자 응답 시각",
         "purchased_at" to "구매 시각",
