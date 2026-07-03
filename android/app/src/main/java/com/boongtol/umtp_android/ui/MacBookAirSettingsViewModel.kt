@@ -942,7 +942,14 @@ class MacBookAirSettingsViewModel(private val userPreferences: UserPreferences) 
             return false
         }
 
-        val row = response.row
+        val row = response.row?.let { responseRow ->
+            responseRow.copy(
+                id = responseRow.id ?: response.id ?: response.trade_journey_id,
+                source = responseRow.source ?: response.source,
+                product_id = responseRow.product_id ?: response.product_id,
+                current_stage = responseRow.current_stage ?: response.current_stage,
+            )
+        }
         if (row == null) {
             _toastMessage.value = "거래 기록을 열지 못했습니다. 다시 시도해 주세요."
             return false

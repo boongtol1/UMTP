@@ -60,6 +60,7 @@ private val AUTO_DISABLED_FIELDS = listOf(
     "title",
     "listing_price_krw",
     "seller_nickname",
+    "seller_location",
     "image_urls",
     "body_text",
     "product_type",
@@ -206,19 +207,82 @@ private fun formatStoredElement(element: JsonElement): String? {
     return if (normalized.isEmpty() || normalized == "[]" || normalized == "{}") null else normalized
 }
 
+private fun formatStoredValue(value: Any?): String? {
+    if (value == null) {
+        return null
+    }
+
+    if (value is String) {
+        val normalized = value.trim()
+        return if (normalized.isEmpty()) null else normalized
+    }
+
+    if (value is Number || value is Boolean) {
+        return value.toString()
+    }
+
+    return formatStoredElement(Gson().toJsonTree(value))
+}
+
 private fun buildJourneyValueMap(row: ResaleTradeJourneyRow?): Map<String, String> {
     if (row == null) {
         return emptyMap()
     }
 
-    val jsonObject = Gson().toJsonTree(row).asJsonObject
     val result = mutableMapOf<String, String>()
-    jsonObject.entrySet().forEach { (key, element) ->
-        val value = formatStoredElement(element)
-        if (value != null) {
-            result[key] = value
-        }
+
+    fun put(key: String, value: Any?) {
+        formatStoredValue(value)?.let { result[key] = it }
     }
+
+    put("id", row.id)
+    put("user_id", row.user_id)
+    put("source", row.source)
+    put("product_id", row.product_id)
+    put("url", row.url)
+    put("title", row.title)
+    put("listing_price_krw", row.listing_price_krw)
+    put("seller_location", row.seller_location)
+    put("image_urls", row.image_urls)
+    put("body_text", row.body_text)
+    put("fair_price_krw", row.fair_price_krw)
+    put("discount_rate_percent", row.discount_rate_percent)
+    put("product_type", row.product_type)
+    put("chip", row.chip)
+    put("screen_inch", row.screen_inch)
+    put("ram_gb", row.ram_gb)
+    put("ssd_gb", row.ssd_gb)
+    put("seller_nickname", row.seller_nickname)
+    put("contacted_at", row.contacted_at)
+    put("seller_response_at", row.seller_response_at)
+    put("current_stage", row.current_stage)
+    put("purchased_at", row.purchased_at)
+    put("purchase_price_krw", row.purchase_price_krw)
+    put("purchase_method", row.purchase_method)
+    put("purchase_location", row.purchase_location)
+    put("transport_cost_krw", row.transport_cost_krw)
+    put("shipping_cost_krw", row.shipping_cost_krw)
+    put("total_cost_krw", row.total_cost_krw)
+    put("payment_method", row.payment_method)
+    put("serial_number", row.serial_number)
+    put("model_number", row.model_number)
+    put("activation_lock_off", row.activation_lock_off)
+    put("mdm_lock_none", row.mdm_lock_none)
+    put("battery_health_percent", row.battery_health_percent)
+    put("battery_cycle_count", row.battery_cycle_count)
+    put("inspection_notes", row.inspection_notes)
+    put("resale_listing_price_krw", row.resale_listing_price_krw)
+    put("resale_platform", row.resale_platform)
+    put("resale_url", row.resale_url)
+    put("sold_at", row.sold_at)
+    put("sale_price_krw", row.sale_price_krw)
+    put("buyer_nickname", row.buyer_nickname)
+    put("sale_method", row.sale_method)
+    put("sale_location", row.sale_location)
+    put("sale_platform", row.sale_platform)
+    put("created_at", row.created_at)
+    put("updated_at", row.updated_at)
+
     return result
 }
 
