@@ -104,11 +104,10 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         updates = journeys._prepare_sparse_updates(
             {
                 "purchase_price_krw": "650000",
-                "final_result_notes": "memo",
                 "purchase_contact_record": "010-1111-2222",
                 "purchase_conversation_text": "상태 좋다고 답변받음",
-                "money_sent_at": "2026-05-25 12:30",
-                "money_received_at": "2026-05-26 09:10:00",
+                "contacted_at": "2026-05-25 12:00",
+                "seller_response_at": "2026-05-25 12:30",
                 "purchase_account_number": " 123-456-7890 ",
                 "inspection_notes": "  상태 양호  ",
                 "sale_platform": "  joongna  ",
@@ -118,11 +117,10 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             journeys.PURCHASE_PATCH_FIELDS,
             {
                 "purchase_price_krw",
-                "final_result_notes",
                 "purchase_contact_record",
                 "purchase_conversation_text",
-                "money_sent_at",
-                "money_received_at",
+                "contacted_at",
+                "seller_response_at",
                 "purchase_account_number",
                 "inspection_notes",
                 "sale_platform",
@@ -135,11 +133,8 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             updates,
             {
                 "purchase_price_krw": 650000,
-                "final_result_notes": "memo",
-                "purchase_contact_record": "010-1111-2222",
-                "purchase_conversation_text": "상태 좋다고 답변받음",
-                "money_sent_at": datetime(2026, 5, 25, 12, 30, 0),
-                "purchase_account_number": "123-456-7890",
+                "contacted_at": datetime(2026, 5, 25, 12, 0, 0),
+                "seller_response_at": datetime(2026, 5, 25, 12, 30, 0),
                 "inspection_notes": "상태 양호",
                 "sale_platform": "joongna",
             },
@@ -150,18 +145,14 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             {
                 "seller_location": "  서울 강남구  ",
                 "purchase_contact_record": " 010-1111-2222 ",
+                "money_sent_at": "2026-05-25 12:30",
                 "url": "https://example.com/product/1",
             },
             journeys.PURCHASE_PATCH_FIELDS,
-            {"seller_location", "purchase_contact_record", "url"},
+            {"seller_location", "purchase_contact_record", "money_sent_at", "url"},
         )
 
-        self.assertEqual(
-            updates,
-            {
-                "purchase_contact_record": "010-1111-2222",
-            },
-        )
+        self.assertEqual(updates, {})
 
     def test_prepare_sparse_updates_purchase_fields_include_manual_verification_fields(self):
         updates = journeys._prepare_sparse_updates(
@@ -195,11 +186,8 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             {
                 "serial_number": "C02XX0ABC123",
                 "model_number": "A3113",
-                "cpu_core_count": 8,
-                "gpu_core_count": 10,
                 "battery_cycle_count": 121,
                 "battery_health_percent": 96,
-                "applecare_status": "2027-01-31",
                 "activation_lock_off": True,
                 "mdm_lock_none": False,
             },
@@ -235,10 +223,6 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         self.assertEqual(
             updates,
             {
-                "resale_contact_record": "카톡 boongtol",
-                "resale_conversation_text": "입금 확인 후 발송 약속",
-                "money_received_at": datetime(2026, 5, 25, 11, 0, 0),
-                "resale_account_number": "2222-3333-4444",
                 "resale_listing_price_krw": 790000,
                 "sale_price_krw": 810000,
                 "current_stage": "SOLD",
@@ -267,9 +251,10 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         self.assertEqual(mapped.get("product_id"), "228")
         self.assertEqual(mapped.get("listing_price_krw"), 700000)
         self.assertEqual(mapped.get("fair_price_krw"), 860000)
-        self.assertEqual(mapped.get("seller_shop_id"), "11")
+        self.assertNotIn("seller_shop_id", mapped)
+        self.assertNotIn("risk_score", mapped)
+        self.assertNotIn("reason_tags", mapped)
         self.assertEqual(mapped.get("seller_nickname"), "seller-a")
-        self.assertIsNotNone(mapped.get("reason_tags"))
 
     def test_seen_product_mapping_hydrates_core_fields(self):
         mapped = journeys._build_seen_product_mapping(
@@ -289,6 +274,105 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         self.assertEqual(mapped.get("title"), "M1 16GB")
         self.assertEqual(mapped.get("listing_price_krw"), 690000)
         self.assertIsNotNone(mapped.get("image_urls"))
+
+    def test_build_trade_prefill_uses_priority_and_latest_listing_state(self):
+        result = journeys._build_trade_prefill_from_source_rows(
+            user_id="boongtol",
+            product_id="228",
+            alert_row={
+                "source": "joongna",
+                "product_id": "228",
+                "url": "https://web.joongna.com/product/228",
+                "title": "오래된 알림 제목",
+                "price_krw": 760000,
+                "sort_date": "2026-05-20 09:00:00",
+                "product_type": "MacBook Air",
+                "chip": "M1",
+                "screen_inch": 13,
+                "ram_gb": 8,
+                "ssd_gb": 256,
+                "risk_score": 80,
+                "risk_keywords": ["급처"],
+            },
+            listing_analysis_row={
+                "product_type": "MacBook Air",
+                "chip": "M2",
+                "screen_inch": 13,
+                "ram_gb": 16,
+                "ssd_gb": 512,
+                "fair_price_krw": 930000,
+                "updated_at": "2026-05-21 09:00:00",
+            },
+            url_analysis_row={},
+            seen_product_row={
+                "seq": 228,
+                "product_url": "https://web.joongna.com/product/228",
+                "last_title": "최신 캐시 제목",
+                "last_price_krw": 720000,
+                "last_sort_date": "2026-05-22 09:00:00",
+                "image_url": "https://img.example.com/new.jpg",
+                "seller_store_name": "최신판매자",
+                "seller_location": "서울",
+            },
+            search_result_row={},
+        )
+
+        row = result.get("row", {})
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("sources"), ["alert_events", "listing_analysis_results", "joongna_seen_products"])
+        self.assertEqual(row.get("title"), "최신 캐시 제목")
+        self.assertEqual(row.get("listing_price_krw"), 720000)
+        self.assertEqual(row.get("seller_nickname"), "최신판매자")
+        self.assertEqual(row.get("chip"), "M2")
+        self.assertEqual(row.get("ram_gb"), 16)
+        self.assertEqual(row.get("ssd_gb"), 512)
+        self.assertNotIn("risk_score", row)
+        self.assertNotIn("reason_tags", row)
+
+    def test_build_trade_prefill_parses_missing_specs_from_text(self):
+        result = journeys._build_trade_prefill_from_source_rows(
+            user_id="boongtol",
+            product_id="229",
+            alert_row={},
+            listing_analysis_row={},
+            url_analysis_row={},
+            seen_product_row={},
+            search_result_row={
+                "product_id": "229",
+                "title": "맥북에어 M2 13인치 16GB 512GB",
+                "price": 820000,
+                "raw_json": '{"image_url": "https://img.example.com/229.jpg", "location_names": ["서울", "강남구"]}',
+                "created_at": "2026-05-22 09:00:00",
+            },
+        )
+
+        row = result.get("row", {})
+        self.assertTrue(result.get("ok"))
+        self.assertIsNotNone(row.get("product_type"))
+        self.assertEqual(row.get("chip"), "M2")
+        self.assertEqual(row.get("screen_inch"), 13)
+        self.assertEqual(row.get("ram_gb"), 16)
+        self.assertEqual(row.get("ssd_gb"), 512)
+        self.assertIn("img.example.com/229.jpg", row.get("image_urls") or "")
+        self.assertEqual(row.get("seller_location"), "서울, 강남구")
+
+    def test_build_trade_prefill_returns_not_found_when_no_existing_records(self):
+        result = journeys._build_trade_prefill_from_source_rows(
+            user_id="boongtol",
+            product_id="230",
+            alert_row={},
+            listing_analysis_row={},
+            url_analysis_row={},
+            seen_product_row={},
+            search_result_row={},
+        )
+
+        self.assertFalse(result.get("ok"))
+        self.assertEqual(result.get("reason"), "not_found")
+        self.assertEqual(result.get("message"), "기존 DB 기록 없음")
+        self.assertEqual(result.get("row", {}).get("product_id"), "230")
+        self.assertNotIn("purchase_price_krw", result.get("row", {}))
+        self.assertNotIn("risk_score", result.get("row", {}))
 
     def test_stage_after_purchase_becomes_inspected(self):
         stage = journeys._derive_stage_after_purchase(
@@ -432,7 +516,7 @@ class ResaleTradeJourneysTest(unittest.TestCase):
 
         response = journeys.start_resale_trade_journey_from_url(
             user_id="boongtol",
-            url="998",
+            url="listing-998",
         )
 
         self.assertTrue(response.get("ok"))
@@ -479,7 +563,13 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         self.assertIsNone(response.get("trade_journey_id"))
         mock_hydrate.assert_not_called()
         connection.commit.assert_not_called()
-        cursor.execute.assert_not_called()
+        executed_sql = " ".join(
+            str(call.args[0]).lower()
+            for call in cursor.execute.call_args_list
+            if call.args
+        )
+        self.assertNotIn("insert into resale_trade_journeys", executed_sql)
+        self.assertNotIn("update resale_trade_journeys", executed_sql)
 
     @patch("src.resale_trade_journeys._build_prefill_row_by_product")
     @patch("src.resale_trade_journeys._hydrate_row_by_product", return_value={"id": 55, "current_stage": journeys.STAGE_INSPECTED})
@@ -531,7 +621,6 @@ class ResaleTradeJourneysTest(unittest.TestCase):
                 "alert_screen_inch": 13,
                 "alert_ram_gb": 16,
                 "alert_ssd_gb": 512,
-                "alert_risk_score": 12,
                 "alert_risk_keywords": "[\"급처\"]",
                 "alert_body_text": "본문 원문",
                 "alert_listing_image_url": "https://img.example.com/a.jpg",
@@ -547,7 +636,6 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         self.assertEqual(mapped.get("screen_inch"), 13)
         self.assertEqual(mapped.get("ram_gb"), 16)
         self.assertEqual(mapped.get("ssd_gb"), 512)
-        self.assertEqual(mapped.get("risk_score"), 12)
         self.assertIn("img.example.com", mapped.get("image_urls") or "")
 
     @patch("src.resale_trade_journeys._safe_fetchall", return_value=[{"id": 1}])

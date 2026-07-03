@@ -21,6 +21,7 @@ from src.notification_worker import (
 )
 from src.push_token_service import upsert_user_push_token
 from src.resale_trade_journeys import (
+    build_trade_prefill_from_input,
     create_or_hydrate_resale_trade_journey_from_product,
     delete_completed_resale_trade_journeys,
     list_completed_resale_trade_journeys,
@@ -564,6 +565,34 @@ def start_trade_journey_from_url(request: TradeJourneyStartFromUrlRequest):
         return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
     except Exception as exc:
         return {"ok": False, "reason": f"URL/product_id 거래 기록 시작 실패: {exc}"}
+
+
+@app.get("/resale/prefill")
+def get_resale_trade_prefill(user_id: str, input: str):
+    normalized_user_id = _normalize_user_id(user_id)
+    if not normalized_user_id:
+        return {"ok": False, "reason": "invalid_user_id"}
+
+    try:
+        resolved_user_id = _ensure_user_registered(
+            normalized_user_id,
+            source="api/resale/prefill",
+        )
+        return build_trade_prefill_from_input(
+            user_id=resolved_user_id,
+            input_value=input,
+        )
+    except ValueError as exc:
+        reason = str(exc)
+        if reason == "invalid_url":
+            reason = "URL 또는 product_id를 확인해 주세요."
+        elif reason == "invalid_product_id":
+            reason = "URL 또는 product_id에서 제품 식별값을 찾지 못했습니다."
+        return {"ok": False, "reason": reason}
+    except RuntimeError as exc:
+        return {"ok": False, "reason": f"사용자 등록 실패: {exc}"}
+    except Exception as exc:
+        return {"ok": False, "reason": f"거래 자동채움 조회 실패: {exc}"}
 
 
 @app.post("/trade-journeys/start-from-alert")

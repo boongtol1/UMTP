@@ -5,9 +5,47 @@ from decimal import Decimal
 from typing import Any, Optional
 
 from src.db import get_connection
+from src.spec_parser import parse_listing_text
 
 
 DEFAULT_SOURCE = "joongna"
+
+DROPPED_RESALE_JOURNEY_COLUMNS = {
+    "gross_profit_krw",
+    "net_profit_krw",
+    "roi_percent",
+    "url_digest",
+    "listing_created_at",
+    "discovered_at",
+    "seller_shop_id",
+    "purchase_contact_record",
+    "purchase_conversation_text",
+    "response_time_minutes",
+    "money_sent_at",
+    "money_received_at",
+    "purchase_account_number",
+    "cpu_core_count",
+    "gpu_core_count",
+    "applecare_status",
+    "minimum_accept_price_krw",
+    "resale_listing_created_at",
+    "resale_product_id",
+    "initial_resale_price_krw",
+    "resale_contact_record",
+    "resale_conversation_text",
+    "resale_account_number",
+    "final_shipping_cost_krw",
+    "platform_fee_krw",
+    "refund_or_claim",
+    "expected_profit_krw",
+    "risk_score",
+    "reason_tags",
+    "purchase_speed_minutes",
+    "sale_duration_hours",
+    "total_holding_time_hours",
+    "profit_per_day_krw",
+    "final_result_notes",
+}
 
 STAGE_DISCOVERED = "DISCOVERED"
 STAGE_INSPECTED = "INSPECTED"
@@ -201,6 +239,60 @@ LEGACY_PURCHASE_UPSERT_FIELDS = PURCHASE_PATCH_FIELDS | RESALE_PATCH_FIELDS
 LEGACY_RESALE_UPSERT_FIELDS = RESALE_PATCH_FIELDS | SOLD_PATCH_FIELDS
 RESALE_RECORD_PATCH_FIELDS = RESALE_PATCH_FIELDS | SOLD_PATCH_FIELDS
 
+TRADE_PREFILL_FIELDS = {
+    "user_id",
+    "source",
+    "product_id",
+    "current_stage",
+    "url",
+    "title",
+    "listing_price_krw",
+    "seller_nickname",
+    "seller_location",
+    "image_urls",
+    "body_text",
+    "product_type",
+    "chip",
+    "screen_inch",
+    "ram_gb",
+    "ssd_gb",
+    "fair_price_krw",
+    "discount_rate_percent",
+}
+TRADE_PREFILL_SPEC_FIELDS = {
+    "product_type",
+    "chip",
+    "screen_inch",
+    "ram_gb",
+    "ssd_gb",
+}
+TRADE_PREFILL_STATE_FIELDS = {
+    "url",
+    "title",
+    "listing_price_krw",
+    "seller_nickname",
+    "seller_location",
+    "image_urls",
+    "body_text",
+}
+
+for _field_set in (
+    DATETIME_FIELDS,
+    INT_FIELDS,
+    DECIMAL_FIELDS,
+    JSON_TEXT_FIELDS,
+    MANUAL_VERIFICATION_FIELDS,
+    AUTO_HYDRATE_FIELDS,
+    PURCHASE_PATCH_FIELDS,
+    RESALE_PATCH_FIELDS,
+    SOLD_PATCH_FIELDS,
+    LEGACY_PURCHASE_UPSERT_FIELDS,
+    LEGACY_RESALE_UPSERT_FIELDS,
+    RESALE_RECORD_PATCH_FIELDS,
+):
+    _field_set.difference_update(DROPPED_RESALE_JOURNEY_COLUMNS)
+del _field_set
+
 
 def _normalize_optional_text(value: Any) -> Optional[str]:
     if value is None:
@@ -290,6 +382,17 @@ def _normalize_optional_datetime(value: Any) -> Optional[datetime]:
         parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
 
     return parsed.replace(microsecond=0)
+
+
+def _latest_datetime(*values: Any) -> Optional[datetime]:
+    parsed_values = [
+        parsed
+        for parsed in (_normalize_optional_datetime(value) for value in values)
+        if parsed is not None
+    ]
+    if not parsed_values:
+        return None
+    return max(parsed_values)
 
 
 def _normalize_json_text(value: Any) -> Optional[str]:
@@ -436,6 +539,7 @@ def _get_resale_columns(cursor) -> tuple[set[str], set[str]]:
         extra = (_normalize_optional_text(row.get("Extra")) or "").lower()
         if "generated" not in extra:
             writable_columns.add(name)
+    writable_columns.difference_update(DROPPED_RESALE_JOURNEY_COLUMNS)
     return all_columns, writable_columns
 
 
@@ -511,6 +615,30 @@ def _fetch_journey_by_key(
         LIMIT 1{lock_sql}
         """,
         (user_id, source, product_id),
+    )
+
+
+def _fetch_journey_by_product_id(
+    cursor,
+    *,
+    user_id: str,
+    product_id: str,
+    for_update: bool = False,
+) -> Optional[dict[str, Any]]:
+    lock_sql = " FOR UPDATE" if for_update else ""
+    return _safe_fetchone_with_order_fallback(
+        cursor,
+        f"""
+        SELECT *
+        FROM resale_trade_journeys
+        WHERE user_id = %s
+          AND product_id = %s
+        """,
+        (user_id, product_id),
+        [
+            "updated_at DESC, id DESC",
+            "id DESC",
+        ],
     )
 
 
@@ -749,34 +877,102 @@ def _fetch_latest_search_result(cursor, *, product_id: str) -> dict[str, Any]:
     return _safe_fetchone(cursor, query, (product_id,)) or {}
 
 
-def _fetch_latest_listing_analysis(cursor, *, source: str, product_id: str) -> dict[str, Any]:
-    joined = _safe_fetchone(
+def _fetch_latest_listing_analysis(
+    cursor,
+    *,
+    source: Optional[str] = None,
+    product_id: str,
+    user_id: Optional[str] = None,
+) -> dict[str, Any]:
+    normalized_source = _normalize_optional_text(source)
+    normalized_user_id = _normalize_optional_text(user_id)
+    normalized_product_id = _normalize_optional_text(product_id)
+    if normalized_product_id is None:
+        return {}
+
+    where_parts = ["aj.product_id = %s"]
+    params: list[Any] = [normalized_product_id]
+    if normalized_source is not None:
+        where_parts.append("aj.source = %s")
+        params.append(normalized_source)
+    if normalized_user_id is not None:
+        where_parts.append("(%s IS NULL OR aj.user_id = %s)")
+        params.extend([normalized_user_id, normalized_user_id])
+
+    joined = _safe_fetchone_with_order_fallback(
         cursor,
-        """
-        SELECT lar.*, aj.source AS analysis_source, aj.product_id AS analysis_product_id, aj.created_at AS analysis_job_created_at
+        f"""
+        SELECT lar.*, aj.source AS analysis_source, aj.product_id AS analysis_product_id,
+               aj.created_at AS analysis_job_created_at
         FROM listing_analysis_results lar
         INNER JOIN analysis_jobs aj ON aj.id = lar.analysis_job_id
-        WHERE aj.source = %s
-          AND aj.product_id = %s
-        ORDER BY COALESCE(lar.created_at, aj.created_at) DESC, lar.id DESC
-        LIMIT 1
+        WHERE {" AND ".join(where_parts)}
         """,
-        (source, product_id),
+        tuple(params),
+        [
+            "COALESCE(lar.updated_at, lar.created_at, aj.updated_at, aj.created_at) DESC, lar.id DESC",
+            "COALESCE(lar.created_at, aj.created_at) DESC, lar.id DESC",
+            "lar.id DESC",
+        ],
     )
     if joined:
         return joined
 
-    direct = _safe_fetchone(
+    direct = _safe_fetchone_with_order_fallback(
         cursor,
         """
         SELECT *
         FROM listing_analysis_results
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1
+        WHERE product_id = %s
         """,
-        (),
+        (normalized_product_id,),
+        [
+            "COALESCE(updated_at, created_at) DESC, id DESC",
+            "created_at DESC, id DESC",
+            "id DESC",
+        ],
     )
     return direct or {}
+
+
+def _fetch_latest_url_analysis_log(
+    cursor,
+    *,
+    user_id: Optional[str],
+    product_id: str,
+) -> dict[str, Any]:
+    normalized_user_id = _normalize_optional_text(user_id)
+    normalized_product_id = _normalize_optional_text(product_id)
+    if normalized_product_id is None:
+        return {}
+
+    like_values = [
+        f"%/product/{normalized_product_id}%",
+        f"%product/{normalized_product_id}%",
+    ]
+    where_sql = " OR ".join(["url LIKE %s"] * len(like_values))
+    params: list[Any] = list(like_values)
+    user_sql = ""
+    if normalized_user_id is not None:
+        user_sql = "AND user_id = %s"
+        params.append(normalized_user_id)
+
+    row = _safe_fetchone_with_order_fallback(
+        cursor,
+        f"""
+        SELECT *
+        FROM url_analysis_logs
+        WHERE ({where_sql})
+          {user_sql}
+        """,
+        tuple(params),
+        [
+            "COALESCE(updated_at, created_at) DESC, id DESC",
+            "created_at DESC, id DESC",
+            "id DESC",
+        ],
+    )
+    return row or {}
 
 
 def _first_non_blank(*values: Any) -> Any:
@@ -784,6 +980,76 @@ def _first_non_blank(*values: Any) -> Any:
         if not _is_blank(value):
             return value
     return None
+
+
+def _filter_active_journey_values(values: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in values.items()
+        if key not in DROPPED_RESALE_JOURNEY_COLUMNS
+    }
+
+
+def _filter_trade_prefill_values(values: dict[str, Any]) -> dict[str, Any]:
+    filtered: dict[str, Any] = {}
+    for key, value in values.items():
+        if key not in TRADE_PREFILL_FIELDS:
+            continue
+        if _is_blank(value):
+            continue
+        normalized = _normalize_for_column(key, value)
+        if normalized is not None:
+            filtered[key] = normalized
+    return filtered
+
+
+def _source_timestamp(row: dict[str, Any], *field_names: str) -> Optional[datetime]:
+    return _latest_datetime(*(row.get(field_name) for field_name in field_names))
+
+
+def _decode_json_value(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return json.loads(text)
+        except Exception:
+            return None
+    return None
+
+
+def _extract_image_url_from_payload(value: Any) -> Optional[str]:
+    if isinstance(value, dict):
+        for key in (
+            "image_url",
+            "imageUrl",
+            "thumbnail_url",
+            "thumbnailUrl",
+            "thumbnail",
+            "productImageUrl",
+        ):
+            image_url = _extract_image_url_from_payload(value.get(key))
+            if image_url is not None:
+                return image_url
+        return None
+    if isinstance(value, list):
+        for item in value:
+            image_url = _extract_image_url_from_payload(item)
+            if image_url is not None:
+                return image_url
+        return None
+    return _normalize_optional_text(value)
+
+
+def _normalize_location_value(value: Any) -> Optional[str]:
+    if isinstance(value, list):
+        parts = [_normalize_optional_text(item) for item in value]
+        parts = [part for part in parts if part]
+        return ", ".join(parts) if parts else None
+    return _normalize_optional_text(value)
 
 
 def _build_alert_mapping(row: dict[str, Any]) -> dict[str, Any]:
@@ -805,7 +1071,7 @@ def _build_alert_mapping(row: dict[str, Any]) -> dict[str, Any]:
     if not _is_blank(image_value):
         image_urls = _normalize_json_text([_normalize_optional_text(image_value)])
 
-    return {
+    return _filter_active_journey_values({
         "source": _normalize_optional_text(row.get("source")),
         "product_id": _normalize_optional_text(row.get("product_id")),
         "url": _normalize_optional_text(row.get("url")),
@@ -830,7 +1096,7 @@ def _build_alert_mapping(row: dict[str, Any]) -> dict[str, Any]:
         "seller_location": _normalize_optional_text(row.get("seller_location")),
         "watch_rule_id": _normalize_optional_int(row.get("watch_rule_id")),
         "analysis_job_id": _normalize_optional_int(row.get("analysis_job_id")),
-    }
+    })
 
 
 def _build_read_archive_mapping(row: dict[str, Any]) -> dict[str, Any]:
@@ -840,7 +1106,7 @@ def _build_read_archive_mapping(row: dict[str, Any]) -> dict[str, Any]:
     image_url = _normalize_optional_text(row.get("alert_listing_image_url"))
     image_urls = _normalize_json_text([image_url]) if image_url else None
 
-    return {
+    return _filter_active_journey_values({
         "source": _normalize_optional_text(row.get("alert_source")),
         "product_id": _normalize_optional_text(row.get("alert_product_id")),
         "url": _normalize_optional_text(row.get("alert_url")),
@@ -859,14 +1125,14 @@ def _build_read_archive_mapping(row: dict[str, Any]) -> dict[str, Any]:
         "reason_tags": _normalize_json_text(row.get("alert_risk_keywords")),
         "body_text": _normalize_optional_text(_first_non_blank(row.get("alert_body_text"), row.get("alert_body_excerpt"))),
         "image_urls": image_urls,
-    }
+    })
 
 
 def _build_analysis_job_mapping(row: dict[str, Any]) -> dict[str, Any]:
     if not row:
         return {}
 
-    return {
+    return _filter_active_journey_values({
         "source": _normalize_optional_text(row.get("source")),
         "product_id": _normalize_optional_text(row.get("product_id")),
         "url": _normalize_optional_text(row.get("url")),
@@ -884,7 +1150,28 @@ def _build_analysis_job_mapping(row: dict[str, Any]) -> dict[str, Any]:
         "risk_score": _normalize_optional_int(row.get("risk_score")),
         "reason_tags": _normalize_json_text(row.get("risk_keywords")),
         "body_text": _normalize_optional_text(row.get("body_text")),
-    }
+    })
+
+
+def _build_url_analysis_log_mapping(row: dict[str, Any]) -> dict[str, Any]:
+    if not row:
+        return {}
+
+    return _filter_active_journey_values({
+        "source": _normalize_optional_text(row.get("source")),
+        "product_id": _extract_product_id_from_url(row.get("url")),
+        "url": _normalize_optional_text(row.get("url")),
+        "title": _normalize_optional_text(row.get("title")),
+        "listing_price_krw": _normalize_optional_int(row.get("listing_price_krw")),
+        "product_type": _normalize_optional_text(row.get("product_type")),
+        "chip": _normalize_optional_text(row.get("chip")),
+        "screen_inch": _normalize_optional_int(row.get("screen_inch")),
+        "ram_gb": _normalize_optional_int(row.get("ram_gb")),
+        "ssd_gb": _normalize_optional_int(row.get("ssd_gb")),
+        "fair_price_krw": _normalize_optional_int(row.get("fair_price_krw")),
+        "discount_rate_percent": _normalize_optional_float(row.get("diff_ratio")),
+        "body_text": _normalize_optional_text(row.get("body_text")),
+    })
 
 
 def _build_seen_product_mapping(row: dict[str, Any]) -> dict[str, Any]:
@@ -896,7 +1183,7 @@ def _build_seen_product_mapping(row: dict[str, Any]) -> dict[str, Any]:
     if image_url:
         image_urls = _normalize_json_text([image_url])
 
-    return {
+    return _filter_active_journey_values({
         "source": DEFAULT_SOURCE,
         "product_id": _normalize_optional_text(row.get("seq")),
         "url": _normalize_optional_text(row.get("product_url")),
@@ -909,14 +1196,29 @@ def _build_seen_product_mapping(row: dict[str, Any]) -> dict[str, Any]:
         "seller_location": _normalize_optional_text(row.get("seller_location")),
         "image_urls": image_urls,
         "body_text": _normalize_optional_text(row.get("body_text")),
-    }
+    })
 
 
 def _build_search_result_mapping(row: dict[str, Any], *, source: str) -> dict[str, Any]:
     if not row:
         return {}
 
-    return {
+    raw_json = _decode_json_value(row.get("raw_json"))
+    raw_image_url = _extract_image_url_from_payload(raw_json) if isinstance(raw_json, (dict, list)) else None
+    raw_location = None
+    if isinstance(raw_json, dict):
+        raw_location = _normalize_location_value(
+            _first_non_blank(
+                raw_json.get("seller_location"),
+                raw_json.get("location"),
+                raw_json.get("location_name"),
+                raw_json.get("locationName"),
+                raw_json.get("location_names"),
+                raw_json.get("locationNames"),
+            )
+        )
+
+    return _filter_active_journey_values({
         "source": source,
         "product_id": _normalize_optional_text(row.get("product_id")),
         "url": _normalize_optional_text(row.get("url")),
@@ -924,18 +1226,18 @@ def _build_search_result_mapping(row: dict[str, Any], *, source: str) -> dict[st
         "listing_price_krw": _normalize_optional_int(_first_non_blank(row.get("price_krw"), row.get("price"))),
         "seller_nickname": _normalize_optional_text(_first_non_blank(row.get("seller_nickname"), row.get("seller_store_name"))),
         "seller_shop_id": _normalize_optional_text(_first_non_blank(row.get("seller_shop_id"), row.get("seller_store_seq"))),
-        "seller_location": _normalize_optional_text(row.get("seller_location")),
-        "image_urls": _normalize_json_text(_first_non_blank(row.get("image_urls"), row.get("image_url"))),
+        "seller_location": _normalize_optional_text(row.get("seller_location")) or raw_location,
+        "image_urls": _normalize_json_text(_first_non_blank(row.get("image_urls"), row.get("image_url"), raw_image_url)),
         "body_text": _normalize_optional_text(row.get("body_text")),
         "discovered_at": _normalize_optional_datetime(_first_non_blank(row.get("created_at"), row.get("fetched_at"))),
-    }
+    })
 
 
 def _build_listing_analysis_mapping(row: dict[str, Any]) -> dict[str, Any]:
     if not row:
         return {}
 
-    return {
+    return _filter_active_journey_values({
         "product_type": _normalize_optional_text(row.get("product_type")),
         "chip": _normalize_optional_text(row.get("chip")),
         "screen_inch": _normalize_optional_int(row.get("screen_inch")),
@@ -947,6 +1249,277 @@ def _build_listing_analysis_mapping(row: dict[str, Any]) -> dict[str, Any]:
         "expected_profit_krw": _normalize_optional_int(_first_non_blank(row.get("expected_profit_krw"), row.get("diff_amount_krw"))),
         "discovered_at": _normalize_optional_datetime(_first_non_blank(row.get("analyzed_at"), row.get("created_at"))),
         "body_text": _normalize_optional_text(row.get("body_text")),
+    })
+
+
+def _parse_spec_from_prefill_text(row: dict[str, Any]) -> dict[str, Any]:
+    if all(not _is_blank(row.get(field)) for field in TRADE_PREFILL_SPEC_FIELDS):
+        return {}
+
+    title = _normalize_optional_text(row.get("title"))
+    body_text = _normalize_optional_text(row.get("body_text"))
+    parsing_title = title or body_text
+    if parsing_title is None:
+        return {}
+
+    try:
+        parsed = parse_listing_text(parsing_title, body_text=body_text)
+    except Exception:
+        return {}
+
+    parsed_values: dict[str, Any] = {}
+    for field in TRADE_PREFILL_SPEC_FIELDS:
+        if not _is_blank(row.get(field)):
+            continue
+        parsed_value = parsed.get(field)
+        if _is_blank(parsed_value):
+            continue
+        normalized = _normalize_for_column(field, parsed_value)
+        if normalized is not None:
+            parsed_values[field] = normalized
+    return parsed_values
+
+
+def _apply_non_blank_values(target: dict[str, Any], values: dict[str, Any]) -> None:
+    for field, value in _filter_trade_prefill_values(values).items():
+        if _is_blank(target.get(field)):
+            target[field] = value
+
+
+def _fill_prefill_blanks_from_seed(row: dict[str, Any], seed_values: Optional[dict[str, Any]]) -> dict[str, Any]:
+    merged = dict(row)
+    for field, value in _filter_trade_prefill_values(dict(seed_values or {})).items():
+        if _is_blank(merged.get(field)):
+            merged[field] = value
+    return merged
+
+
+def _build_trade_prefill_from_source_rows(
+    *,
+    user_id: str,
+    product_id: str,
+    alert_row: dict[str, Any],
+    listing_analysis_row: dict[str, Any],
+    url_analysis_row: dict[str, Any],
+    seen_product_row: dict[str, Any],
+    search_result_row: dict[str, Any],
+) -> dict[str, Any]:
+    alert_values = _build_alert_mapping(alert_row)
+    listing_values = _build_listing_analysis_mapping(listing_analysis_row)
+    url_values = _build_url_analysis_log_mapping(url_analysis_row)
+    seen_values = _build_seen_product_mapping(seen_product_row)
+    search_values = _build_search_result_mapping(search_result_row, source=DEFAULT_SOURCE)
+
+    source_candidates = [
+        ("alert_events", alert_row, alert_values, _source_timestamp(alert_row, "sort_date", "analyzed_at", "created_at")),
+        (
+            "listing_analysis_results",
+            listing_analysis_row,
+            listing_values,
+            _source_timestamp(listing_analysis_row, "updated_at", "created_at", "analysis_job_created_at"),
+        ),
+        ("url_analysis_logs", url_analysis_row, url_values, _source_timestamp(url_analysis_row, "updated_at", "created_at")),
+        (
+            "joongna_seen_products",
+            seen_product_row,
+            seen_values,
+            _source_timestamp(seen_product_row, "last_sort_date", "updated_at", "last_seen_at", "first_seen_at"),
+        ),
+        ("search_results", search_result_row, search_values, _source_timestamp(search_result_row, "sort_date", "fetched_at", "created_at")),
+    ]
+    used_sources = [name for name, raw_row, _values, _timestamp in source_candidates if raw_row]
+    if not used_sources:
+        return {
+            "ok": False,
+            "reason": "not_found",
+            "message": "기존 DB 기록 없음",
+            "user_id": user_id,
+            "product_id": product_id,
+            "row": {
+                "user_id": user_id,
+                "source": DEFAULT_SOURCE,
+                "product_id": product_id,
+                "current_stage": STAGE_DISCOVERED,
+            },
+            "sources": [],
+        }
+
+    resolved_source = (
+        _normalize_optional_text(
+            _first_non_blank(
+                alert_values.get("source"),
+                listing_analysis_row.get("analysis_source"),
+                url_values.get("source"),
+                search_values.get("source"),
+                seen_values.get("source"),
+            )
+        )
+        or DEFAULT_SOURCE
+    )
+    row: dict[str, Any] = {
+        "user_id": user_id,
+        "source": resolved_source,
+        "product_id": product_id,
+    }
+
+    for _name, _raw_row, values, _timestamp in source_candidates:
+        _apply_non_blank_values(row, values)
+
+    latest_state_values: dict[str, tuple[Optional[datetime], int, Any]] = {}
+    for priority_index, (_name, _raw_row, values, timestamp) in enumerate(source_candidates):
+        for field in TRADE_PREFILL_STATE_FIELDS:
+            value = values.get(field)
+            if _is_blank(value):
+                continue
+            current = latest_state_values.get(field)
+            current_timestamp = current[0] if current else None
+            should_replace = current is None
+            if not should_replace and timestamp is not None:
+                if current_timestamp is None or timestamp > current_timestamp:
+                    should_replace = True
+                elif timestamp == current_timestamp and priority_index < current[1]:
+                    should_replace = True
+            if should_replace:
+                latest_state_values[field] = (timestamp, priority_index, value)
+
+    for field, (_timestamp, _priority_index, value) in latest_state_values.items():
+        normalized = _normalize_for_column(field, value)
+        if normalized is not None:
+            row[field] = normalized
+
+    for field in TRADE_PREFILL_SPEC_FIELDS:
+        value = listing_values.get(field)
+        if not _is_blank(value):
+            normalized = _normalize_for_column(field, value)
+            if normalized is not None:
+                row[field] = normalized
+
+    row.update(_parse_spec_from_prefill_text(row))
+    row["user_id"] = user_id
+    row["source"] = _normalize_optional_text(row.get("source")) or DEFAULT_SOURCE
+    row["product_id"] = product_id
+    row["current_stage"] = STAGE_DISCOVERED
+
+    return {
+        "ok": True,
+        "existing": False,
+        "trade_journey_id": None,
+        "id": None,
+        "source": row.get("source"),
+        "product_id": product_id,
+        "current_stage": STAGE_DISCOVERED,
+        "row": _filter_trade_prefill_values(row),
+        "sources": used_sources,
+    }
+
+
+def _build_trade_prefill_from_existing_db_with_cursor(
+    cursor,
+    *,
+    product_id: str,
+    user_id: str,
+    source: Optional[str] = None,
+) -> dict[str, Any]:
+    normalized_user_id = _normalize_optional_text(user_id)
+    normalized_product_id = _normalize_optional_text(product_id)
+    if normalized_user_id is None:
+        raise ValueError("invalid_user_id")
+    if normalized_product_id is None:
+        raise ValueError("invalid_product_id")
+
+    normalized_source = _normalize_optional_text(source) or DEFAULT_SOURCE
+    alert_row = _fetch_latest_alert_event_by_reference(
+        cursor,
+        user_id=normalized_user_id,
+        source=normalized_source,
+        product_id=normalized_product_id,
+    )
+    if alert_row:
+        normalized_source = _normalize_optional_text(alert_row.get("source")) or normalized_source
+
+    listing_analysis_row = _fetch_latest_listing_analysis(
+        cursor,
+        source=normalized_source,
+        product_id=normalized_product_id,
+        user_id=normalized_user_id,
+    )
+    url_analysis_row = _fetch_latest_url_analysis_log(
+        cursor,
+        user_id=normalized_user_id,
+        product_id=normalized_product_id,
+    )
+    seen_product_row = _fetch_latest_seen_product(cursor, product_id=normalized_product_id)
+    search_result_row = _fetch_latest_search_result(cursor, product_id=normalized_product_id)
+
+    return _build_trade_prefill_from_source_rows(
+        user_id=normalized_user_id,
+        product_id=normalized_product_id,
+        alert_row=alert_row,
+        listing_analysis_row=listing_analysis_row,
+        url_analysis_row=url_analysis_row,
+        seen_product_row=seen_product_row,
+        search_result_row=search_result_row,
+    )
+
+
+def build_trade_prefill_from_existing_db(product_id, user_id):
+    normalized_user_id = _normalize_optional_text(user_id)
+    normalized_product_id = _normalize_optional_text(product_id)
+    if normalized_user_id is None:
+        raise ValueError("invalid_user_id")
+    if normalized_product_id is None:
+        raise ValueError("invalid_product_id")
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        return _build_trade_prefill_from_existing_db_with_cursor(
+            cursor,
+            product_id=normalized_product_id,
+            user_id=normalized_user_id,
+        )
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def build_trade_prefill_from_input(*, user_id: str, input_value: str) -> dict[str, Any]:
+    normalized_user_id = _normalize_optional_text(user_id)
+    if normalized_user_id is None:
+        raise ValueError("invalid_user_id")
+
+    source, product_id, seed_values = _build_basic_start_reference(
+        user_id=normalized_user_id,
+        reference=input_value,
+    )
+    if product_id is None:
+        return {"ok": False, "reason": "invalid_product_id"}
+
+    result = build_trade_prefill_from_existing_db(product_id, normalized_user_id)
+    if not result.get("ok"):
+        row = _fill_prefill_blanks_from_seed(dict(result.get("row") or {}), seed_values)
+        row["user_id"] = normalized_user_id
+        row["source"] = _normalize_optional_text(row.get("source")) or source
+        row["product_id"] = product_id
+        row["current_stage"] = row.get("current_stage") or STAGE_DISCOVERED
+        result = {**result, "source": row.get("source"), "product_id": product_id, "row": row}
+        return result
+
+    row = _fill_prefill_blanks_from_seed(dict(result.get("row") or {}), seed_values)
+    row["user_id"] = normalized_user_id
+    row["source"] = _normalize_optional_text(row.get("source")) or source
+    row["product_id"] = product_id
+    row["current_stage"] = row.get("current_stage") or STAGE_DISCOVERED
+    return {
+        **result,
+        "source": row.get("source"),
+        "product_id": product_id,
+        "current_stage": row.get("current_stage"),
+        "row": _filter_trade_prefill_values(row),
     }
 
 
@@ -1263,22 +1836,18 @@ def _hydrate_row_by_product(
     user_values: Optional[dict[str, Any]],
     writable_columns: set[str],
 ) -> dict[str, Any]:
-    alert_event = _build_alert_mapping(_fetch_latest_alert_event(cursor, user_id=user_id, source=source, product_id=product_id))
-    analysis_job = _build_analysis_job_mapping(_fetch_latest_analysis_job(cursor, user_id=user_id, source=source, product_id=product_id))
-    seen_product = _build_seen_product_mapping(_fetch_latest_seen_product(cursor, product_id=product_id))
-    search_result = _build_search_result_mapping(_fetch_latest_search_result(cursor, product_id=product_id), source=source)
-    listing_analysis = _build_listing_analysis_mapping(_fetch_latest_listing_analysis(cursor, source=source, product_id=product_id))
+    prefill_result = _build_trade_prefill_from_existing_db_with_cursor(
+        cursor,
+        product_id=product_id,
+        user_id=user_id,
+        source=source,
+    )
+    prefill_candidate = dict(prefill_result.get("row") or {}) if prefill_result.get("ok") else {}
 
     merged_updates = _merge_by_priority(
         user_values=user_values or {},
         existing_row=row,
-        source_candidates=[
-            alert_event,
-            analysis_job,
-            seen_product,
-            search_result,
-            listing_analysis,
-        ],
+        source_candidates=[prefill_candidate],
         writable_columns=writable_columns,
     )
 
@@ -1298,27 +1867,8 @@ def _build_prefill_row_by_product(
     source: str,
     product_id: str,
     seed_values: Optional[dict[str, Any]] = None,
+    prefill_result: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    alert_event = _build_alert_mapping(_fetch_latest_alert_event(cursor, user_id=user_id, source=source, product_id=product_id))
-    analysis_job = _build_analysis_job_mapping(_fetch_latest_analysis_job(cursor, user_id=user_id, source=source, product_id=product_id))
-    seen_product = _build_seen_product_mapping(_fetch_latest_seen_product(cursor, product_id=product_id))
-    search_result = _build_search_result_mapping(_fetch_latest_search_result(cursor, product_id=product_id), source=source)
-    listing_analysis = _build_listing_analysis_mapping(_fetch_latest_listing_analysis(cursor, source=source, product_id=product_id))
-
-    normalized_seed_values: dict[str, Any] = {}
-    for field, value in dict(seed_values or {}).items():
-        normalized_value = _normalize_for_column(field, value)
-        if normalized_value is not None:
-            normalized_seed_values[field] = normalized_value
-
-    normalized_seed_values.update(
-        {
-            "user_id": user_id,
-            "source": source,
-            "product_id": product_id,
-        }
-    )
-
     base_row: dict[str, Any] = {
         "id": None,
         "user_id": user_id,
@@ -1326,23 +1876,20 @@ def _build_prefill_row_by_product(
         "product_id": product_id,
         "current_stage": STAGE_DISCOVERED,
     }
-
-    merged_prefill = _merge_by_priority(
-        user_values=normalized_seed_values,
-        existing_row=base_row,
-        source_candidates=[
-            alert_event,
-            analysis_job,
-            seen_product,
-            search_result,
-            listing_analysis,
-        ],
-        writable_columns=set(AUTO_HYDRATE_FIELDS),
-    )
-
     prefill_row = dict(base_row)
-    prefill_row.update(merged_prefill)
-    prefill_row["source"] = source
+    resolved_prefill_result = prefill_result
+    if resolved_prefill_result is None:
+        resolved_prefill_result = _build_trade_prefill_from_existing_db_with_cursor(
+            cursor,
+            product_id=product_id,
+            user_id=user_id,
+            source=source,
+        )
+    if resolved_prefill_result.get("ok"):
+        prefill_row.update(_filter_trade_prefill_values(dict(resolved_prefill_result.get("row") or {})))
+
+    prefill_row = _fill_prefill_blanks_from_seed(prefill_row, seed_values)
+    prefill_row["source"] = _normalize_optional_text(prefill_row.get("source")) or source
     prefill_row["product_id"] = product_id
     prefill_row["user_id"] = user_id
     if _is_blank(prefill_row.get("current_stage")):
@@ -1510,6 +2057,7 @@ def start_or_prefill_resale_trade_journey_from_product(
     source: str,
     product_id: str,
     seed_values: Optional[dict[str, Any]] = None,
+    allow_empty_prefill: bool = True,
 ) -> dict[str, Any]:
     normalized_user_id, normalized_source, normalized_product_id = _normalize_identity(
         user_id=user_id,
@@ -1531,16 +2079,28 @@ def start_or_prefill_resale_trade_journey_from_product(
             product_id=normalized_product_id,
             for_update=True,
         )
+        if not existing_row:
+            existing_row = _fetch_journey_by_product_id(
+                cursor,
+                user_id=normalized_user_id,
+                product_id=normalized_product_id,
+                for_update=True,
+            )
         existing_row_id = _normalize_optional_int((existing_row or {}).get("id"))
 
         if existing_row_id is not None and existing_row_id > 0:
+            resolved_source = _normalize_optional_text(existing_row.get("source")) or normalized_source
+            resolved_product_id = _normalize_optional_text(existing_row.get("product_id")) or normalized_product_id
+            existing_seed_values = dict(seed_values or {})
+            existing_seed_values["source"] = resolved_source
+            existing_seed_values["product_id"] = resolved_product_id
             hydrated_row = _hydrate_row_by_product(
                 cursor,
                 row=existing_row,
                 user_id=normalized_user_id,
-                source=normalized_source,
-                product_id=normalized_product_id,
-                user_values=seed_values or {},
+                source=resolved_source,
+                product_id=resolved_product_id,
+                user_values=existing_seed_values,
                 writable_columns=writable_columns,
             )
             connection.commit()
@@ -1549,10 +2109,30 @@ def start_or_prefill_resale_trade_journey_from_product(
                 "existing": True,
                 "trade_journey_id": existing_row_id,
                 "id": existing_row_id,
-                "source": normalized_source,
-                "product_id": normalized_product_id,
+                "source": hydrated_row.get("source") or resolved_source,
+                "product_id": hydrated_row.get("product_id") or resolved_product_id,
                 "current_stage": hydrated_row.get("current_stage"),
                 "row": hydrated_row,
+            }
+
+        prefill_result = _build_trade_prefill_from_existing_db_with_cursor(
+            cursor,
+            product_id=normalized_product_id,
+            user_id=normalized_user_id,
+            source=normalized_source,
+        )
+        if not allow_empty_prefill and not prefill_result.get("ok"):
+            row = _fill_prefill_blanks_from_seed(dict(prefill_result.get("row") or {}), seed_values)
+            row["user_id"] = normalized_user_id
+            row["source"] = _normalize_optional_text(row.get("source")) or normalized_source
+            row["product_id"] = normalized_product_id
+            row["current_stage"] = row.get("current_stage") or STAGE_DISCOVERED
+            return {
+                **prefill_result,
+                "source": row.get("source"),
+                "product_id": normalized_product_id,
+                "current_stage": row.get("current_stage"),
+                "row": _filter_trade_prefill_values(row),
             }
 
         prefill_row = _build_prefill_row_by_product(
@@ -1561,16 +2141,18 @@ def start_or_prefill_resale_trade_journey_from_product(
             source=normalized_source,
             product_id=normalized_product_id,
             seed_values=seed_values,
+            prefill_result=prefill_result,
         )
         return {
             "ok": True,
             "existing": False,
             "trade_journey_id": None,
             "id": None,
-            "source": normalized_source,
+            "source": prefill_row.get("source") or normalized_source,
             "product_id": normalized_product_id,
             "current_stage": prefill_row.get("current_stage"),
             "row": prefill_row,
+            "sources": prefill_result.get("sources", []),
         }
     finally:
         if cursor is not None:
@@ -1591,37 +2173,24 @@ def start_resale_trade_journey_from_url(*, user_id: str, url: str) -> dict[str, 
         user_id=normalized_user_id,
         reference=normalized_reference,
     )
-
-    connection = None
-    cursor = None
-    try:
-        connection = get_connection()
-        cursor = connection.cursor(dictionary=True)
-        source, product_id, seed_values = _resolve_start_reference_from_alerts(
-            cursor,
-            user_id=normalized_user_id,
-            reference=normalized_reference,
-        )
-    except ValueError as exc:
-        if str(exc) == "invalid_product_id":
-            return {"ok": False, "reason": "invalid_product_id"}
-        raise
-    except Exception as exc:
-        print(f"[resale_trade_journeys] alert reference lookup skipped: {exc}")
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if connection is not None and connection.is_connected():
-            connection.close()
-
     if product_id is None:
         return {"ok": False, "reason": "invalid_product_id"}
+
+    prefill_result = build_trade_prefill_from_input(
+        user_id=normalized_user_id,
+        input_value=normalized_reference,
+    )
+    if prefill_result.get("ok"):
+        prefill_row = dict(prefill_result.get("row") or {})
+        source = _normalize_optional_text(prefill_row.get("source")) or _normalize_optional_text(prefill_result.get("source")) or source
+        seed_values = _fill_prefill_blanks_from_seed(prefill_row, seed_values)
 
     result = start_or_prefill_resale_trade_journey_from_product(
         user_id=normalized_user_id,
         source=source,
         product_id=product_id,
         seed_values=seed_values,
+        allow_empty_prefill=bool(prefill_result.get("ok")),
     )
     return result
 
@@ -1660,6 +2229,12 @@ def start_resale_trade_journey_from_alert(*, user_id: str, alert_event_id: int) 
     if product_id is None:
         return {"ok": False, "reason": "invalid_product_id"}
 
+    prefill_result = build_trade_prefill_from_existing_db(product_id, normalized_user_id)
+    if prefill_result.get("ok"):
+        prefill_row = dict(prefill_result.get("row") or {})
+        source = _normalize_optional_text(prefill_row.get("source")) or _normalize_optional_text(prefill_result.get("source")) or source
+        seed_values = _fill_prefill_blanks_from_seed(prefill_row, seed_values)
+
     if resolved_url is not None:
         seed_values["url"] = resolved_url
     seed_values["source"] = source
@@ -1670,6 +2245,7 @@ def start_resale_trade_journey_from_alert(*, user_id: str, alert_event_id: int) 
         source=source,
         product_id=product_id,
         seed_values=seed_values,
+        allow_empty_prefill=True,
     )
     return result
 
@@ -1731,6 +2307,12 @@ def start_resale_trade_journey_from_read_archive(*, user_id: str, read_archive_e
     if product_id is None:
         return {"ok": False, "reason": "invalid_product_id"}
 
+    prefill_result = build_trade_prefill_from_existing_db(product_id, normalized_user_id)
+    if prefill_result.get("ok"):
+        prefill_row = dict(prefill_result.get("row") or {})
+        source = _normalize_optional_text(prefill_row.get("source")) or _normalize_optional_text(prefill_result.get("source")) or source
+        seed_values = _fill_prefill_blanks_from_seed(prefill_row, seed_values)
+
     if resolved_url is not None:
         seed_values["url"] = resolved_url
     seed_values["source"] = source
@@ -1741,6 +2323,7 @@ def start_resale_trade_journey_from_read_archive(*, user_id: str, read_archive_e
         source=source,
         product_id=product_id,
         seed_values=seed_values,
+        allow_empty_prefill=True,
     )
     return result
 

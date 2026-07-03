@@ -62,6 +62,12 @@ interface UmtpApiService {
         @Body request: TradeJourneyStartFromUrlRequest,
     ): TradeJourneyStartResponse
 
+    @GET("resale/prefill")
+    suspend fun getResaleTradePrefill(
+        @Query("user_id") userId: String,
+        @Query("input") input: String,
+    ): TradeJourneyStartResponse
+
     @POST("trade-journeys/start-from-alert")
     suspend fun startTradeJourneyFromAlert(
         @Body request: TradeJourneyStartFromAlertRequest,

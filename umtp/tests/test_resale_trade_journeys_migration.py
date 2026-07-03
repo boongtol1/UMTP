@@ -1,7 +1,6 @@
 import os
 import sys
 import unittest
-import uuid
 
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -40,7 +39,7 @@ class ResaleTradeJourneysMigrationTest(unittest.TestCase):
         else:
             connection.close()
 
-    def test_migration_creates_table_and_core_columns_idempotently(self):
+    def test_migration_creates_current_table_idempotently(self):
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
         try:
@@ -62,34 +61,46 @@ class ResaleTradeJourneysMigrationTest(unittest.TestCase):
                 "source",
                 "product_id",
                 "url",
-                "listing_created_at",
-                "discovered_at",
+                "title",
                 "listing_price_krw",
+                "seller_nickname",
+                "seller_location",
+                "image_urls",
+                "body_text",
+                "product_type",
+                "chip",
+                "screen_inch",
+                "ram_gb",
+                "ssd_gb",
                 "fair_price_krw",
+                "discount_rate_percent",
+                "contacted_at",
+                "seller_response_at",
                 "purchased_at",
-                "sale_price_krw",
-                "net_profit_krw",
-                "current_stage",
-                "purchase_contact_record",
-                "purchase_conversation_text",
-                "resale_contact_record",
-                "resale_conversation_text",
-                "money_sent_at",
-                "money_received_at",
-                "purchase_account_number",
-                "resale_account_number",
+                "purchase_price_krw",
+                "purchase_method",
+                "purchase_location",
+                "transport_cost_krw",
+                "shipping_cost_krw",
+                "total_cost_krw",
+                "payment_method",
                 "serial_number",
                 "model_number",
-                "cpu_core_count",
-                "gpu_core_count",
                 "battery_cycle_count",
                 "battery_health_percent",
-                "applecare_status",
                 "activation_lock_off",
                 "mdm_lock_none",
-                "response_time_minutes",
-                "total_cost_krw",
-                "roi_percent",
+                "inspection_notes",
+                "resale_listing_price_krw",
+                "resale_platform",
+                "resale_url",
+                "sold_at",
+                "sale_price_krw",
+                "buyer_nickname",
+                "sale_method",
+                "sale_location",
+                "sale_platform",
+                "current_stage",
             ]
 
             for column_name in expected_columns:
@@ -105,6 +116,56 @@ class ResaleTradeJourneysMigrationTest(unittest.TestCase):
                 )
                 row = cursor.fetchone() or {}
                 self.assertEqual(int(row.get("column_count", 0)), 1, f"missing column: {column_name}")
+
+            removed_columns = [
+                "gross_profit_krw",
+                "net_profit_krw",
+                "roi_percent",
+                "url_digest",
+                "listing_created_at",
+                "discovered_at",
+                "seller_shop_id",
+                "purchase_contact_record",
+                "purchase_conversation_text",
+                "response_time_minutes",
+                "money_sent_at",
+                "money_received_at",
+                "purchase_account_number",
+                "cpu_core_count",
+                "gpu_core_count",
+                "applecare_status",
+                "minimum_accept_price_krw",
+                "resale_listing_created_at",
+                "resale_product_id",
+                "initial_resale_price_krw",
+                "resale_contact_record",
+                "resale_conversation_text",
+                "resale_account_number",
+                "final_shipping_cost_krw",
+                "platform_fee_krw",
+                "refund_or_claim",
+                "expected_profit_krw",
+                "risk_score",
+                "reason_tags",
+                "purchase_speed_minutes",
+                "sale_duration_hours",
+                "total_holding_time_hours",
+                "profit_per_day_krw",
+                "final_result_notes",
+            ]
+
+            cursor.execute(
+                f"""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'resale_trade_journeys'
+                  AND column_name IN ({", ".join(["%s"] * len(removed_columns))})
+                """,
+                tuple(removed_columns),
+            )
+            rows = cursor.fetchall() or []
+            self.assertEqual(rows, [])
 
             expected_indexes = [
                 "uniq_resale_journey_user_source_product",
@@ -126,155 +187,6 @@ class ResaleTradeJourneysMigrationTest(unittest.TestCase):
                 row = cursor.fetchone() or {}
                 self.assertGreaterEqual(int(row.get("index_count", 0)), 1, f"missing index: {index_name}")
         finally:
-            cursor.close()
-            connection.close()
-
-    def test_migration_normalizes_money_flow_fields_for_existing_rows(self):
-        connection = get_connection()
-        cursor = connection.cursor(dictionary=True)
-        marker = f"migration_money_norm_{uuid.uuid4().hex[:10]}"
-        try:
-            _execute_sql_script(connection, MIGRATION_SQL_PATH)
-
-            # 구매 맥락: money_received_at만 있는 레거시 행
-            cursor.execute(
-                """
-                INSERT INTO resale_trade_journeys (
-                    user_id, source, product_id, current_stage, money_received_at
-                ) VALUES (%s, %s, %s, %s, %s)
-                """,
-                (marker, "joongna", "purchase-ctx", "INSPECTED", "2026-05-25 10:00:00"),
-            )
-
-            # 되팔이 맥락: money_sent_at만 있는 레거시 행(구매 정보 없음)
-            cursor.execute(
-                """
-                INSERT INTO resale_trade_journeys (
-                    user_id, source, product_id, current_stage,
-                    resale_listing_created_at, money_sent_at
-                ) VALUES (%s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    marker,
-                    "joongna",
-                    "resale-ctx",
-                    "RESALE_LISTED",
-                    "2026-05-26 09:00:00",
-                    "2026-05-26 09:30:00",
-                ),
-            )
-            connection.commit()
-
-            _execute_sql_script(connection, MIGRATION_SQL_PATH)
-
-            cursor.execute(
-                """
-                SELECT product_id, money_sent_at, money_received_at
-                FROM resale_trade_journeys
-                WHERE user_id = %s
-                ORDER BY product_id
-                """,
-                (marker,),
-            )
-            rows = cursor.fetchall() or []
-            by_product = {row["product_id"]: row for row in rows}
-
-            purchase_row = by_product.get("purchase-ctx") or {}
-            resale_row = by_product.get("resale-ctx") or {}
-
-            self.assertIsNotNone(purchase_row.get("money_sent_at"))
-            self.assertIsNone(purchase_row.get("money_received_at"))
-
-            self.assertIsNone(resale_row.get("money_sent_at"))
-            self.assertIsNotNone(resale_row.get("money_received_at"))
-        finally:
-            try:
-                cursor.execute("DELETE FROM resale_trade_journeys WHERE user_id = %s", (marker,))
-                connection.commit()
-            except Exception:
-                pass
-            cursor.close()
-            connection.close()
-
-    def test_migration_backfills_split_contact_fields_from_legacy_shared_fields(self):
-        connection = get_connection()
-        cursor = connection.cursor(dictionary=True)
-        marker = f"migration_split_contact_{uuid.uuid4().hex[:10]}"
-        try:
-            _execute_sql_script(connection, MIGRATION_SQL_PATH)
-
-            # 구버전 테이블 상태 시뮬레이션: legacy 공통 컬럼 임시 추가
-            cursor.execute(
-                """
-                ALTER TABLE resale_trade_journeys
-                ADD COLUMN contact_record VARCHAR(255) NULL,
-                ADD COLUMN conversation_text LONGTEXT NULL,
-                ADD COLUMN account_number VARCHAR(100) NULL
-                """
-            )
-            cursor.execute(
-                """
-                INSERT INTO resale_trade_journeys (
-                    user_id, source, product_id, current_stage,
-                    contact_record, conversation_text, account_number
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    marker,
-                    "joongna",
-                    "split-contact",
-                    "INSPECTED",
-                    "010-2222-3333",
-                    "기존 공통 대화내용",
-                    "111-222-333",
-                ),
-            )
-            connection.commit()
-
-            _execute_sql_script(connection, MIGRATION_SQL_PATH)
-
-            cursor.execute(
-                """
-                SELECT
-                    purchase_contact_record,
-                    purchase_conversation_text,
-                    purchase_account_number,
-                    resale_contact_record,
-                    resale_conversation_text,
-                    resale_account_number
-                FROM resale_trade_journeys
-                WHERE user_id = %s
-                  AND product_id = %s
-                LIMIT 1
-                """,
-                (marker, "split-contact"),
-            )
-            row = cursor.fetchone() or {}
-
-            self.assertEqual(row.get("purchase_contact_record"), "010-2222-3333")
-            self.assertEqual(row.get("purchase_conversation_text"), "기존 공통 대화내용")
-            self.assertEqual(row.get("purchase_account_number"), "111-222-333")
-            self.assertEqual(row.get("resale_contact_record"), "010-2222-3333")
-            self.assertEqual(row.get("resale_conversation_text"), "기존 공통 대화내용")
-            self.assertEqual(row.get("resale_account_number"), "111-222-333")
-
-            cursor.execute(
-                """
-                SELECT COUNT(*) AS legacy_count
-                FROM information_schema.columns
-                WHERE table_schema = DATABASE()
-                  AND table_name = 'resale_trade_journeys'
-                  AND column_name IN ('contact_record', 'conversation_text', 'account_number')
-                """
-            )
-            legacy_row = cursor.fetchone() or {}
-            self.assertEqual(int(legacy_row.get("legacy_count", 0)), 0)
-        finally:
-            try:
-                cursor.execute("DELETE FROM resale_trade_journeys WHERE user_id = %s", (marker,))
-                connection.commit()
-            except Exception:
-                pass
             cursor.close()
             connection.close()
 

@@ -36,53 +36,29 @@ def main():
     source = _ask_optional_text("source(기본 joongna)") or "joongna"
     product_id = _ask_optional_text("product_id(없으면 URL에서 추출)")
     url = _ask_optional_text("url(옵션)")
-    resale_contact_record = _ask_optional_text("연락처 기록")
-    resale_conversation_text = _ask_optional_text("대화내용 기록")
-    resale_account_number = _ask_optional_text("계좌번호")
-    money_received_at = _ask_optional_datetime("돈 들어온 시각")
-    resale_listing_created_at = _ask_optional_datetime("되팔이 게시 시각")
     resale_listing_price_krw = _ask_optional_int("되팔이 게시가")
-    minimum_accept_price_krw = _ask_optional_int("최저 수락가")
     resale_platform = _ask_optional_text("되팔이 플랫폼")
     resale_url = _ask_optional_text("되팔이 URL")
-    resale_product_id = _ask_optional_text("되팔이 product_id")
-    initial_resale_price_krw = _ask_optional_int("되팔이 초기 가격")
 
     sold_at = _ask_optional_datetime("판매 완료 시각")
     sale_price_krw = _ask_optional_int("최종 판매 금액")
     sale_method = _ask_optional_text("판매 방식(직거래/택배)")
     sale_location = _ask_optional_text("판매 장소")
     sale_platform = _ask_optional_text("판매 플랫폼")
-    final_shipping_cost_krw = _ask_optional_int("최종 배송비")
-    platform_fee_krw = _ask_optional_int("플랫폼 수수료")
-    refund_or_claim = _ask_optional_text("환불/클레임 여부")
-    final_result_notes = _ask_optional_text("최종 정산 메모")
 
     payload = {
         "user_id": user_id,
         "source": source,
         "product_id": product_id,
         "url": url,
-        "resale_contact_record": resale_contact_record,
-        "resale_conversation_text": resale_conversation_text,
-        "resale_account_number": resale_account_number,
-        "money_received_at": money_received_at,
-        "resale_listing_created_at": resale_listing_created_at,
         "resale_listing_price_krw": resale_listing_price_krw,
-        "minimum_accept_price_krw": minimum_accept_price_krw,
         "resale_platform": resale_platform,
         "resale_url": resale_url,
-        "resale_product_id": resale_product_id,
-        "initial_resale_price_krw": initial_resale_price_krw,
         "sold_at": sold_at,
         "sale_price_krw": sale_price_krw,
         "sale_method": sale_method,
         "sale_location": sale_location,
         "sale_platform": sale_platform,
-        "final_shipping_cost_krw": final_shipping_cost_krw,
-        "platform_fee_krw": platform_fee_krw,
-        "refund_or_claim": refund_or_claim,
-        "final_result_notes": final_result_notes,
     }
 
     payload = {key: value for key, value in payload.items() if value is not None}

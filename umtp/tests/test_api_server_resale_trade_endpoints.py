@@ -95,6 +95,23 @@ class ApiServerResaleTradeEndpointsTest(unittest.TestCase):
         )
 
     @patch(
+        "src.api_server.build_trade_prefill_from_input",
+        return_value={"ok": True, "product_id": "123", "row": {"product_id": "123"}},
+    )
+    @patch("src.api_server.register_user", return_value={"ok": True, "user_id": "boongtol"})
+    def test_get_resale_prefill_endpoint(self, _mock_register, mock_prefill):
+        response = api_server.get_resale_trade_prefill(
+            user_id="boongtol",
+            input="https://web.joongna.com/product/123",
+        )
+
+        self.assertTrue(response.get("ok"))
+        mock_prefill.assert_called_once_with(
+            user_id="boongtol",
+            input_value="https://web.joongna.com/product/123",
+        )
+
+    @patch(
         "src.api_server.start_resale_trade_journey_from_alert",
         return_value={"ok": True, "trade_journey_id": 102, "existing": True},
     )

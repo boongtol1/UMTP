@@ -57,13 +57,9 @@ private val AUTO_DISABLED_FIELDS = listOf(
     "source",
     "product_id",
     "url",
-    "url_digest",
     "title",
-    "listing_created_at",
-    "discovered_at",
     "listing_price_krw",
     "seller_nickname",
-    "seller_shop_id",
     "image_urls",
     "body_text",
     "product_type",
@@ -73,20 +69,9 @@ private val AUTO_DISABLED_FIELDS = listOf(
     "ssd_gb",
     "fair_price_krw",
     "discount_rate_percent",
-    "expected_profit_krw",
-    "risk_score",
-    "reason_tags",
     "created_at",
     "updated_at",
     "total_cost_krw",
-    "gross_profit_krw",
-    "net_profit_krw",
-    "roi_percent",
-    "purchase_speed_minutes",
-    "sale_duration_hours",
-    "total_holding_time_hours",
-    "profit_per_day_krw",
-    "response_time_minutes",
     "first_inquiry_delay_minutes",
 )
 
@@ -101,11 +86,8 @@ private val PRODUCT_BASE_SPEC_FIELDS = listOf(
 private val EXACT_VERIFICATION_FIELDS = listOf(
     LabeledInputField("serial_number", "일련번호"),
     LabeledInputField("model_number", "정확한 모델번호"),
-    LabeledInputField("cpu_core_count", "CPU 코어 수"),
-    LabeledInputField("gpu_core_count", "GPU 코어 수"),
     LabeledInputField("battery_cycle_count", "배터리 사이클 수"),
     LabeledInputField("battery_health_percent", "배터리 성능 최대치 %"),
-    LabeledInputField("applecare_status", "AppleCare 상태"),
     LabeledInputField(
         "activation_lock_off",
         "활성화 잠금 해제 확인",
@@ -127,8 +109,6 @@ private val EXACT_VERIFICATION_FIELD_KEYS = EXACT_VERIFICATION_FIELDS.map { it.k
 private val PURCHASE_INPUT_FIELDS = listOf(
     "contacted_at",
     "seller_response_at",
-    "purchase_contact_record",
-    "purchase_conversation_text",
     "purchased_at",
     "purchase_method",
     "purchase_location",
@@ -136,35 +116,20 @@ private val PURCHASE_INPUT_FIELDS = listOf(
     "transport_cost_krw",
     "shipping_cost_krw",
     "payment_method",
-    "money_sent_at",
-    "purchase_account_number",
     "sale_platform",
     "inspection_notes",
-    "final_result_notes",
     "current_stage",
 )
 
 private val RESALE_INPUT_FIELDS = listOf(
-    "resale_listing_created_at",
     "resale_platform",
     "resale_url",
-    "resale_product_id",
-    "initial_resale_price_krw",
     "resale_listing_price_krw",
-    "minimum_accept_price_krw",
-    "resale_contact_record",
-    "resale_conversation_text",
     "buyer_nickname",
     "sale_method",
     "sale_location",
     "sold_at",
     "sale_price_krw",
-    "money_received_at",
-    "resale_account_number",
-    "final_shipping_cost_krw",
-    "platform_fee_krw",
-    "refund_or_claim",
-    "final_result_notes",
     "current_stage",
 )
 
@@ -175,13 +140,7 @@ private val INT_INPUT_FIELDS = setOf(
     "transport_cost_krw",
     "shipping_cost_krw",
     "resale_listing_price_krw",
-    "minimum_accept_price_krw",
-    "initial_resale_price_krw",
     "sale_price_krw",
-    "final_shipping_cost_krw",
-    "platform_fee_krw",
-    "cpu_core_count",
-    "gpu_core_count",
     "battery_cycle_count",
     "battery_health_percent",
 )
@@ -630,7 +589,7 @@ fun ResaleTradeInputScreen(
                 },
                 label = {
                     Text(
-                        "#${item.id} [${stageLabel(item.current_stage)}] ${item.title ?: "(제목없음)"} / ${formatWon(item.sale_price_krw)} / ROI ${item.roi_percent ?: "-"}%"
+                        "#${item.id} [${stageLabel(item.current_stage)}] ${item.title ?: "(제목없음)"} / ${formatWon(item.sale_price_krw)}"
                     )
                 },
             )
