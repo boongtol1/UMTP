@@ -117,6 +117,22 @@ class ResaleTradeJourneysMigrationTest(unittest.TestCase):
                 row = cursor.fetchone() or {}
                 self.assertEqual(int(row.get("column_count", 0)), 1, f"missing column: {column_name}")
 
+            cursor.execute(
+                """
+                SELECT column_name AS name
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'resale_trade_journeys'
+                  AND column_name IN ('seller_nickname', 'seller_location', 'image_urls')
+                ORDER BY ordinal_position
+                """
+            )
+            ordered_location_columns = [row.get("name") for row in cursor.fetchall() or []]
+            self.assertEqual(
+                ordered_location_columns,
+                ["seller_nickname", "seller_location", "image_urls"],
+            )
+
             removed_columns = [
                 "gross_profit_krw",
                 "net_profit_krw",

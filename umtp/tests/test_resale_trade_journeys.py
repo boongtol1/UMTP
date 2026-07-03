@@ -133,6 +133,7 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             updates,
             {
                 "purchase_price_krw": 650000,
+                "listing_price_krw": 700000,
                 "contacted_at": datetime(2026, 5, 25, 12, 0, 0),
                 "seller_response_at": datetime(2026, 5, 25, 12, 30, 0),
                 "inspection_notes": "상태 양호",

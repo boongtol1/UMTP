@@ -579,6 +579,20 @@ PREPARE stmt_add_active_columns FROM @sql_add_active_columns;
 EXECUTE stmt_add_active_columns;
 DEALLOCATE PREPARE stmt_add_active_columns;
 
+SELECT COUNT(*) INTO @has_seller_location
+FROM information_schema.columns
+WHERE table_schema = @target_db
+  AND table_name = 'resale_trade_journeys'
+  AND column_name = 'seller_location';
+SET @sql_reposition_seller_location = IF(
+  @has_seller_location = 0,
+  'SELECT ''resale_trade_journeys.seller_location absent''',
+  'ALTER TABLE resale_trade_journeys MODIFY COLUMN seller_location VARCHAR(255) NULL AFTER seller_nickname'
+);
+PREPARE stmt_reposition_seller_location FROM @sql_reposition_seller_location;
+EXECUTE stmt_reposition_seller_location;
+DEALLOCATE PREPARE stmt_reposition_seller_location;
+
 SELECT COUNT(*) INTO @has_total_cost_krw
 FROM information_schema.columns
 WHERE table_schema = @target_db
