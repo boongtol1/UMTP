@@ -211,6 +211,7 @@ PURCHASE_PATCH_FIELDS = {
 }
 
 RESALE_PATCH_FIELDS = {
+    "seller_location",
     "resale_contact_record",
     "resale_conversation_text",
     "resale_account_number",
@@ -1052,12 +1053,61 @@ def _extract_image_url_from_payload(value: Any) -> Optional[str]:
     return _normalize_optional_text(value)
 
 
+LOCATION_PAYLOAD_KEYS = (
+    "seller_location",
+    "sellerLocation",
+    "location",
+    "location_name",
+    "locationName",
+    "location_names",
+    "locationNames",
+)
+
+LOCATION_PAYLOAD_CONTAINER_KEYS = (
+    "item",
+    "product",
+    "listing",
+    "data",
+    "payload",
+    "content",
+)
+
+
 def _normalize_location_value(value: Any) -> Optional[str]:
     if isinstance(value, list):
-        parts = [_normalize_optional_text(item) for item in value]
+        parts = [
+            _normalize_optional_text(item)
+            for item in value
+            if not isinstance(item, (dict, list))
+        ]
         parts = [part for part in parts if part]
         return ", ".join(parts) if parts else None
     return _normalize_optional_text(value)
+
+
+def _extract_location_from_payload(value: Any) -> Optional[str]:
+    if isinstance(value, dict):
+        for key in LOCATION_PAYLOAD_KEYS:
+            location = _normalize_location_value(value.get(key))
+            if location is not None:
+                return location
+        for key in LOCATION_PAYLOAD_CONTAINER_KEYS:
+            location = _extract_location_from_payload(value.get(key))
+            if location is not None:
+                return location
+        return None
+
+    if isinstance(value, list):
+        location = _normalize_location_value(value)
+        if location is not None:
+            return location
+        for item in value:
+            location = _extract_location_from_payload(item)
+            if location is not None:
+                return location
+        return None
+
+    return _normalize_location_value(value)
 
 
 def _build_alert_mapping(row: dict[str, Any]) -> dict[str, Any]:
@@ -1213,18 +1263,10 @@ def _build_search_result_mapping(row: dict[str, Any], *, source: str) -> dict[st
 
     raw_json = _decode_json_value(row.get("raw_json"))
     raw_image_url = _extract_image_url_from_payload(raw_json) if isinstance(raw_json, (dict, list)) else None
-    raw_location = None
-    if isinstance(raw_json, dict):
-        raw_location = _normalize_location_value(
-            _first_non_blank(
-                raw_json.get("seller_location"),
-                raw_json.get("location"),
-                raw_json.get("location_name"),
-                raw_json.get("locationName"),
-                raw_json.get("location_names"),
-                raw_json.get("locationNames"),
-            )
-        )
+    raw_location = _extract_location_from_payload(raw_json) if isinstance(raw_json, (dict, list)) else None
+    row_location = _normalize_location_value(
+        _first_non_blank(*(row.get(key) for key in LOCATION_PAYLOAD_KEYS))
+    )
 
     return _filter_active_journey_values({
         "source": source,
@@ -1234,7 +1276,7 @@ def _build_search_result_mapping(row: dict[str, Any], *, source: str) -> dict[st
         "listing_price_krw": _normalize_optional_int(_first_non_blank(row.get("price_krw"), row.get("price"))),
         "seller_nickname": _normalize_optional_text(_first_non_blank(row.get("seller_nickname"), row.get("seller_store_name"))),
         "seller_shop_id": _normalize_optional_text(_first_non_blank(row.get("seller_shop_id"), row.get("seller_store_seq"))),
-        "seller_location": _normalize_optional_text(row.get("seller_location")) or raw_location,
+        "seller_location": row_location or raw_location,
         "image_urls": _normalize_json_text(_first_non_blank(row.get("image_urls"), row.get("image_url"), raw_image_url)),
         "body_text": _normalize_optional_text(row.get("body_text")),
         "discovered_at": _normalize_optional_datetime(_first_non_blank(row.get("created_at"), row.get("fetched_at"))),

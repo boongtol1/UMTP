@@ -259,6 +259,7 @@ class ResaleTradeJourneysTest(unittest.TestCase):
                 "resale_listing_price_krw": "790000",
                 "sale_price_krw": "810000",
                 "purchase_price_krw": "700000",
+                "seller_location": "  서울특별시 동작구 노량진제1동  ",
                 "current_stage": "SOLD",
             },
             journeys.RESALE_RECORD_PATCH_FIELDS,
@@ -271,6 +272,7 @@ class ResaleTradeJourneysTest(unittest.TestCase):
                 "resale_listing_price_krw",
                 "sale_price_krw",
                 "purchase_price_krw",
+                "seller_location",
                 "current_stage",
             },
         )
@@ -280,6 +282,7 @@ class ResaleTradeJourneysTest(unittest.TestCase):
             {
                 "resale_listing_price_krw": 790000,
                 "sale_price_krw": 810000,
+                "seller_location": "서울특별시 동작구 노량진제1동",
                 "current_stage": "SOLD",
             },
         )
@@ -410,6 +413,27 @@ class ResaleTradeJourneysTest(unittest.TestCase):
         self.assertEqual(row.get("ssd_gb"), 512)
         self.assertIn("img.example.com/229.jpg", row.get("image_urls") or "")
         self.assertEqual(row.get("seller_location"), "서울, 강남구")
+
+    def test_build_trade_prefill_maps_search_result_raw_location_names_string(self):
+        result = journeys._build_trade_prefill_from_source_rows(
+            user_id="boongtol",
+            product_id="229268685",
+            alert_row={},
+            listing_analysis_row={},
+            url_analysis_row={},
+            seen_product_row={},
+            search_result_row={
+                "product_id": "229268685",
+                "title": "맥북에어 M1 13인치",
+                "price": 690000,
+                "raw_json": '{"location_names": "서울특별시 동작구 노량진제1동"}',
+                "created_at": "2026-07-03 16:30:00",
+            },
+        )
+
+        row = result.get("row", {})
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(row.get("seller_location"), "서울특별시 동작구 노량진제1동")
 
     def test_build_trade_prefill_returns_not_found_when_no_existing_records(self):
         result = journeys._build_trade_prefill_from_source_rows(
