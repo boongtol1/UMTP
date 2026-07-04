@@ -2483,6 +2483,109 @@ def _refresh_training_labels_for_candidates(
     return len(update_rows)
 
 
+def ensure_store_snapshots_for_fraud_scoring(
+    cursor,
+    *,
+    store_id: Any,
+    first_seen_product_id: Optional[str] = None,
+    first_seen_sort_date: Optional[datetime] = None,
+    lookback_days: Optional[int] = None,
+) -> Dict[str, Any]:
+    normalized_store_id = _normalize_store_id(store_id)
+    if normalized_store_id is None:
+        return {
+            "ok": False,
+            "reason": "invalid_store_id",
+            "status": STATUS_ERROR,
+            "profile_available": False,
+            "profile_field_snapshot_inserted": False,
+            "activity_snapshot_inserted": False,
+        }
+
+    normalized_lookback_days = max(int(lookback_days or DEFAULT_LOOKBACK_DAYS), 1)
+    checked_at = _utc_now_naive()
+    probe = _probe_store_status(normalized_store_id)
+    normalized_status = (_safe_text(probe.get("status")) or STATUS_UNKNOWN).lower()
+    probe_checked_at = probe.get("checked_at") or checked_at
+    profile = probe.get("profile")
+
+    _insert_status_snapshot(
+        cursor,
+        store_id=normalized_store_id,
+        checked_at=probe_checked_at,
+        status=normalized_status,
+        is_active=int(probe.get("is_active") or 0),
+        raw_status_text=_safe_text(probe.get("raw_status_text")),
+        raw_response_json=probe.get("raw_response_json"),
+        first_seen_product_id=_safe_text(first_seen_product_id),
+        first_seen_sort_date=_safe_datetime(first_seen_sort_date),
+        error_message=_safe_text(probe.get("error_message")),
+        source=_safe_text(probe.get("source")),
+        http_status=_safe_int(probe.get("http_status")),
+        meta_code=_safe_int(probe.get("meta_code")),
+        meta_message=_safe_text(probe.get("meta_message")),
+        raw_snippet=_safe_text(probe.get("raw_snippet")),
+    )
+
+    if isinstance(profile, dict):
+        _upsert_joongna_store_profile_snapshot(
+            cursor,
+            store_id=normalized_store_id,
+            checked_at=probe_checked_at,
+            profile=profile,
+            status=normalized_status,
+            status_reason=_safe_text(probe.get("raw_status_text")),
+            source=_safe_text(probe.get("source")) or "my_store_api",
+        )
+    else:
+        _upsert_joongna_store_profile_status(
+            cursor,
+            store_id=normalized_store_id,
+            checked_at=probe_checked_at,
+            status=normalized_status,
+            status_reason=_safe_text(probe.get("raw_status_text")),
+            error_message=_safe_text(probe.get("error_message")),
+        )
+
+    profile_field_snapshot_inserted = False
+    activity_snapshot_inserted = False
+    if normalized_status == STATUS_ACTIVE and isinstance(profile, dict):
+        profile_field_snapshot_inserted = _insert_store_profile_field_snapshot(
+            cursor,
+            store_id=normalized_store_id,
+            checked_at=probe_checked_at,
+            status=normalized_status,
+            source=_safe_text(probe.get("source")),
+            profile=profile,
+        )
+        activity = _compute_activity_snapshot_from_db(
+            cursor,
+            store_id=normalized_store_id,
+            checked_at=probe_checked_at,
+            lookback_days=normalized_lookback_days,
+        )
+        activity_snapshot_inserted = _insert_activity_snapshot(
+            cursor,
+            store_id=normalized_store_id,
+            checked_at=probe_checked_at,
+            activity=activity,
+            first_seen_product_id=_safe_text(first_seen_product_id),
+            first_seen_sort_date=_safe_datetime(first_seen_sort_date),
+            profile=profile,
+        )
+
+    return {
+        "ok": True,
+        "store_id": normalized_store_id,
+        "checked_at": probe_checked_at,
+        "status": normalized_status,
+        "profile_available": isinstance(profile, dict),
+        "profile_field_snapshot_inserted": bool(profile_field_snapshot_inserted),
+        "activity_snapshot_inserted": bool(activity_snapshot_inserted),
+        "source": _safe_text(probe.get("source")),
+    }
+
+
 def run_fraud_store_monitor_once(
     *,
     min_check_interval_minutes: Optional[int] = None,
@@ -2549,75 +2652,16 @@ def run_fraud_store_monitor_once(
                 continue
 
             try:
-                probe = _probe_store_status(store_id)
-                _insert_status_snapshot(
+                ensure_result = ensure_store_snapshots_for_fraud_scoring(
                     cursor,
                     store_id=store_id,
-                    checked_at=probe.get("checked_at") or checked_at,
-                    status=_safe_text(probe.get("status")) or STATUS_UNKNOWN,
-                    is_active=int(probe.get("is_active") or 0),
-                    raw_status_text=_safe_text(probe.get("raw_status_text")),
-                    raw_response_json=probe.get("raw_response_json"),
                     first_seen_product_id=_safe_text(target.get("first_seen_product_id")),
                     first_seen_sort_date=_safe_datetime(target.get("first_seen_sort_date")),
-                    error_message=_safe_text(probe.get("error_message")),
-                    source=_safe_text(probe.get("source")),
-                    http_status=_safe_int(probe.get("http_status")),
-                    meta_code=_safe_int(probe.get("meta_code")),
-                    meta_message=_safe_text(probe.get("meta_message")),
-                    raw_snippet=_safe_text(probe.get("raw_snippet")),
+                    lookback_days=stats["lookback_days"],
                 )
-
-                normalized_status = (_safe_text(probe.get("status")) or STATUS_UNKNOWN).lower()
-                probe_checked_at = probe.get("checked_at") or checked_at
-                profile = probe.get("profile")
-                if isinstance(profile, dict):
-                    _upsert_joongna_store_profile_snapshot(
-                        cursor,
-                        store_id=store_id,
-                        checked_at=probe_checked_at,
-                        profile=profile,
-                        status=normalized_status,
-                        status_reason=_safe_text(probe.get("raw_status_text")),
-                        source=_safe_text(probe.get("source")) or "my_store_api",
-                    )
-                else:
-                    _upsert_joongna_store_profile_status(
-                        cursor,
-                        store_id=store_id,
-                        checked_at=probe_checked_at,
-                        status=normalized_status,
-                        status_reason=_safe_text(probe.get("raw_status_text")),
-                        error_message=_safe_text(probe.get("error_message")),
-                    )
-
-                if normalized_status == STATUS_ACTIVE and isinstance(profile, dict):
-                    inserted_profile_fields = _insert_store_profile_field_snapshot(
-                        cursor,
-                        store_id=store_id,
-                        checked_at=probe_checked_at,
-                        status=normalized_status,
-                        source=_safe_text(probe.get("source")),
-                        profile=profile,
-                    )
-                    if inserted_profile_fields:
-                        stats["profile_field_snapshots_inserted"] += 1
-                    activity = _compute_activity_snapshot_from_db(
-                        cursor,
-                        store_id=store_id,
-                        checked_at=probe_checked_at,
-                        lookback_days=stats["lookback_days"],
-                    )
-                    _insert_activity_snapshot(
-                        cursor,
-                        store_id=store_id,
-                        checked_at=probe_checked_at,
-                        activity=activity,
-                        first_seen_product_id=_safe_text(target.get("first_seen_product_id")),
-                        first_seen_sort_date=_safe_datetime(target.get("first_seen_sort_date")),
-                        profile=profile,
-                    )
-
+                normalized_status = _safe_text(ensure_result.get("status")) or STATUS_UNKNOWN
+                if ensure_result.get("profile_field_snapshot_inserted"):
+                    stats["profile_field_snapshots_inserted"] += 1
                 if normalized_status == STATUS_ACTIVE:
                     stats["active_count"] += 1
                 elif normalized_status in INACTIVE_STORE_STATUSES:

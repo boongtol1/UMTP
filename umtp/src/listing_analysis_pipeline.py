@@ -20,6 +20,7 @@ try:
         mark_analysis_job_started,
     )
     from src.db import get_connection
+    from src.fraud_store_monitor_service import ensure_store_snapshots_for_fraud_scoring
     from src.fraud_probability_service import score_alert_fraud_probability
     from src.joongna_seen_products import (
         CHANGE_REASON_BODY_CHANGED,
@@ -58,6 +59,7 @@ except ModuleNotFoundError:
         mark_analysis_job_started,
     )
     from db import get_connection
+    from fraud_store_monitor_service import ensure_store_snapshots_for_fraud_scoring
     from fraud_probability_service import score_alert_fraud_probability
     from joongna_seen_products import (
         CHANGE_REASON_BODY_CHANGED,
@@ -798,6 +800,28 @@ def _find_alert_event_by_identity(
     return cursor.fetchone()
 
 
+def _ensure_store_snapshots_before_fraud_scoring(
+    cursor,
+    *,
+    store_id,
+    product_id,
+    sort_date,
+):
+    normalized_store_id = _normalize_optional_text(store_id)
+    if normalized_store_id is None:
+        return None
+    try:
+        return ensure_store_snapshots_for_fraud_scoring(
+            cursor,
+            store_id=normalized_store_id,
+            first_seen_product_id=_normalize_optional_text(product_id),
+            first_seen_sort_date=_coerce_datetime(sort_date),
+        )
+    except Exception as exc:
+        print(f"[listing_analysis_pipeline] fraud store snapshot skipped: {exc}")
+        return None
+
+
 def maybe_create_alert_event(
     cursor,
     *,
@@ -859,6 +883,13 @@ def maybe_create_alert_event(
             "reason": "duplicate_identity_alert",
             "alert_id": int(duplicate[0]) if isinstance(duplicate, (tuple, list)) else int(duplicate.get("id")),
         }
+
+    _ensure_store_snapshots_before_fraud_scoring(
+        cursor,
+        store_id=seller_store_seq,
+        product_id=normalized_product_id,
+        sort_date=normalized_sort_date,
+    )
 
     fraud_score = score_alert_fraud_probability(
         cursor,

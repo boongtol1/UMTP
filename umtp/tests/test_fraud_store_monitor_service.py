@@ -12,6 +12,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.fraud_store_monitor_service import (  # noqa: E402
+    ensure_store_snapshots_for_fraud_scoring,
     _fetch_latest_product_snapshot_before,
     _probe_store_status,
     _refresh_training_labels_for_candidates,
@@ -277,6 +278,70 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
         self.assertEqual(mock_upsert_profile.call_count, 1)
         self.assertEqual(mock_insert_activity.call_count, 1)
         self.assertEqual(mock_insert_profile_fields.call_count, 1)
+
+    def test_ensure_store_snapshots_for_fraud_scoring_writes_active_profile_snapshots(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        probe_result = {
+            "checked_at": now,
+            "status": "active",
+            "is_active": 1,
+            "raw_status_text": "ok",
+            "raw_response_json": {"meta": {"code": 0}},
+            "error_message": None,
+            "source": "my_store_api",
+            "http_status": 200,
+            "meta_code": 0,
+            "meta_message": "SUCCESS",
+            "raw_snippet": "ok",
+            "profile": {
+                "store_id": "200",
+                "store_name": "테스트상점",
+                "review_count": 0,
+                "safe_trade_count": 0,
+                "trust_score": 383,
+                "raw_json": {"storeName": "테스트상점"},
+            },
+        }
+
+        with patch("src.fraud_store_monitor_service._probe_store_status", return_value=probe_result):
+            with patch("src.fraud_store_monitor_service._insert_status_snapshot") as mock_insert_status:
+                with patch("src.fraud_store_monitor_service._upsert_joongna_store_profile_snapshot") as mock_upsert_profile:
+                    with patch(
+                        "src.fraud_store_monitor_service._insert_store_profile_field_snapshot",
+                        return_value=True,
+                    ) as mock_insert_profile_fields:
+                        with patch(
+                            "src.fraud_store_monitor_service._compute_activity_snapshot_from_db",
+                            return_value={
+                                "posts_last_1h": 1,
+                                "posts_last_6h": 1,
+                                "posts_last_24h": 1,
+                                "posts_last_7d": 1,
+                                "visible_product_count": 1,
+                            },
+                        ) as mock_compute_activity:
+                            with patch(
+                                "src.fraud_store_monitor_service._insert_activity_snapshot",
+                                return_value=True,
+                            ) as mock_insert_activity:
+                                result = ensure_store_snapshots_for_fraud_scoring(
+                                    _FakeCursor(),
+                                    store_id=200,
+                                    first_seen_product_id="p200",
+                                    first_seen_sort_date=now,
+                                    lookback_days=14,
+                                )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("status"), "active")
+        self.assertTrue(result.get("profile_available"))
+        self.assertTrue(result.get("profile_field_snapshot_inserted"))
+        self.assertTrue(result.get("activity_snapshot_inserted"))
+        mock_insert_status.assert_called_once()
+        mock_upsert_profile.assert_called_once()
+        mock_insert_profile_fields.assert_called_once()
+        mock_compute_activity.assert_called_once()
+        mock_insert_activity.assert_called_once()
 
     def test_product_snapshot_inserts_first_seen_for_new_product(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)

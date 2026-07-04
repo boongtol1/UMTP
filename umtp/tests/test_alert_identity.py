@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -75,6 +76,55 @@ class AlertIdentityTest(unittest.TestCase):
         self.assertTrue(result.get("created"))
         self.assertEqual(result.get("alert_id"), 9)
         self.assertIn("change_fingerprint", fake_cursor.executed[0][0].lower())
+
+    def test_insert_scores_after_store_snapshot_ensure(self):
+        fake_cursor = _FakeCursor(duplicate_row=None, lastrowid=19)
+        call_order = []
+
+        def ensure_side_effect(*args, **kwargs):
+            call_order.append("ensure")
+            return {"ok": True}
+
+        def score_side_effect(*args, **kwargs):
+            call_order.append("score")
+            return {
+                "fraud_probability": 0.7,
+                "fraud_probability_label": "HIGH",
+                "fraud_model_version": "test-model",
+                "fraud_scored_at": "2026-07-04 12:00:00",
+            }
+
+        with patch(
+            "src.listing_analysis_pipeline.ensure_store_snapshots_for_fraud_scoring",
+            side_effect=ensure_side_effect,
+        ) as mock_ensure:
+            with patch(
+                "src.listing_analysis_pipeline.score_alert_fraud_probability",
+                side_effect=score_side_effect,
+            ) as mock_score:
+                result = maybe_create_alert_event(
+                    fake_cursor,
+                    analysis_job_id=1,
+                    user_id="u1",
+                    watch_rule_id=1,
+                    product_id="p1",
+                    url="https://web.joongna.com/product/1",
+                    title="title",
+                    price_krw=100,
+                    fair_price_krw=200,
+                    target_price_krw=150,
+                    drop_rate_percent=50.0,
+                    trigger_reason="new_product",
+                    message="msg",
+                    sort_date="2026-05-19 10:30:00",
+                    seller_store_seq=1234,
+                )
+
+        self.assertTrue(result.get("created"))
+        self.assertEqual(call_order, ["ensure", "score"])
+        mock_ensure.assert_called_once()
+        self.assertEqual(mock_ensure.call_args.kwargs.get("store_id"), "1234")
+        mock_score.assert_called_once()
 
     def test_duplicate_insert_error_returns_existing_alert(self):
         class _DynamicCursor(_FakeCursor):
