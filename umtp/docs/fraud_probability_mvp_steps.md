@@ -142,6 +142,23 @@ FCM data payload에는 아래 값을 추가했다.
 
 Android 앱은 `AlertItem`에 fraud 필드를 추가하고, 일반 알림 상세와 읽음 보관함 상세에 `사기 가능성`을 표시한다. FCM foreground 수신 시에도 push 본문에 `사기 가능성` 문구를 붙인다.
 
+## Backfill / Troubleshooting
+
+이미 생성된 알림은 생성 시점에 fraud 컬럼이 비어 있을 수 있다. 아래 명령으로 `fraud_probability IS NULL`인 알림을 채울 수 있다.
+
+```bash
+cd /Users/boongtol_pro/Desktop/UMTP/umtp
+python src/backfill_fraud_probability_for_alerts.py --limit 100 --user-id boongtol
+```
+
+먼저 결과만 확인하려면 `--dry-run`을 붙인다.
+
+```bash
+python src/backfill_fraud_probability_for_alerts.py --limit 10 --user-id boongtol --dry-run
+```
+
+새 알림이 계속 `NULL`이면 analysis worker가 새 코드나 `umtp` conda 환경으로 실행되고 있는지 확인한다. `joblib`/`scikit-learn`이 없는 Python으로 worker가 실행되면 모델 로드가 실패하고 점수 계산은 스킵된다.
+
 ## 다음 단계
 
 10단계에서 1주일 정도 확률 분포와 false positive를 관찰한 뒤 알림 억제 정책을 적용한다.
