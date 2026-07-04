@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.boongtol.umtp_android.network.AlertItem
 import com.boongtol.umtp_android.network.TradeTypeFlags
+import kotlin.math.roundToInt
 
 @Composable
 fun ReadAlertArchiveScreen(
@@ -283,6 +284,12 @@ fun ReadAlertArchiveScreen(
                                     Text(
                                         text = "가격: ${formatKrwDisplay(resolveReadArchiveListingPrice(alert))}",
                                         style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    Text(
+                                        text = "사기 가능성: ${resolveReadArchiveFraudProbabilityText(alert)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = resolveReadArchiveFraudRiskColor(alert),
                                     )
                                     if (isConditionChangeCandidateNotice(alert)) {
                                         Text(
@@ -545,9 +552,9 @@ private fun buildReadArchiveDetailRows(alert: AlertItem, resolvedUrl: String?): 
         "시장가와의 차이" to formatPercentDisplay(resolveReadArchiveGapPercent(alert)),
         "설정 차이율" to formatPercentDisplay(alert.alert_drop_rate_percent),
         "알림 조건" to resolveReadArchiveConditionLabel(alert),
-        "위험도" to riskLabel,
-        "위험 점수" to (alert.risk_score?.toString() ?: "정보 없음"),
         "사기 가능성" to resolveReadArchiveFraudProbabilityText(alert),
+        "위험도" to riskLabel,
+        "위험 점수" to resolveReadArchiveFraudRiskScore(alert),
         "위험 키워드" to riskKeywordsText,
         "본문 내용" to resolveReadArchiveBodyText(alert),
         "매물 등록 시각" to resolveReadArchiveSortDate(alert),
@@ -577,15 +584,15 @@ private fun resolveReadArchiveConditionLabel(alert: AlertItem): String {
 }
 
 private fun resolveReadArchiveRiskLabel(alert: AlertItem): String {
-    val explicit = alert.formatted_risk_label?.takeIf { it.isNotBlank() }
-    if (explicit != null) {
-        return explicit
-    }
-    return when ((alert.risk_level ?: "").uppercase()) {
-        "LOW", "NONE" -> "낮음"
-        "MEDIUM" -> "주의"
-        "HIGH", "EXCLUDE" -> "위험"
-        else -> "정보 없음"
+    return resolveReadArchiveFraudProbabilityLabel(alert)
+}
+
+private fun resolveReadArchiveFraudRiskColor(alert: AlertItem): Color {
+    return when (resolveReadArchiveRiskLabel(alert)) {
+        "높음", "위험" -> Color(0xFFD32F2F)
+        "주의" -> Color(0xFFF57C00)
+        "낮음" -> Color(0xFF2E7D32)
+        else -> Color.Gray
     }
 }
 
@@ -624,12 +631,25 @@ private fun resolveReadArchiveFraudProbabilityLabel(alert: AlertItem): String {
     if (explicit != null) {
         return explicit
     }
+    alert.fraud_probability?.let { probability ->
+        return when {
+            probability >= 0.65 -> "높음"
+            probability >= 0.25 -> "주의"
+            else -> "낮음"
+        }
+    }
     return when ((alert.fraud_probability_label ?: "").uppercase()) {
         "LOW" -> "낮음"
         "MEDIUM" -> "주의"
         "HIGH" -> "높음"
         else -> "정보 없음"
     }
+}
+
+private fun resolveReadArchiveFraudRiskScore(alert: AlertItem): String {
+    val probability = alert.fraud_probability ?: return "정보 없음"
+    val score = (probability * 100).roundToInt().coerceIn(0, 100)
+    return "${score}점"
 }
 
 private fun resolveReadArchiveBodyText(alert: AlertItem): String {
@@ -671,8 +691,8 @@ private fun resolveReadArchiveSpecialNotesText(
     tradeFlagsText: String,
 ): String {
     val notes = mutableListOf<String>()
-    if (riskLabel == "주의" || riskLabel == "위험") {
-        notes += "위험도 $riskLabel"
+    if (riskLabel == "주의" || riskLabel == "높음" || riskLabel == "위험") {
+        notes += "사기 가능성 $riskLabel"
     }
     if (tradeFlagsText != "특이사항 없음" && tradeFlagsText != "정보 없음") {
         notes += "거래 유형: $tradeFlagsText"

@@ -60,26 +60,14 @@ class UMTPFirebaseMessagingService : FirebaseMessagingService() {
         val title = "UMTP 새 매물 알림"
         val listingTitle = data["listing_title"]
         val price = data["listing_price_krw"]
-        val risk = data["risk_level"]
         val fraudText = resolveFraudProbabilityText(data)
-        
-        val riskText = when (risk?.uppercase()) {
-            "LOW" -> "낮음"
-            "MEDIUM" -> "주의"
-            "HIGH" -> "위험"
-            else -> null
-        }
-        
+
         val body = buildString {
             if (listingTitle != null) append(listingTitle)
             if (price != null) {
                 if (isNotEmpty()) append(" · ")
                 append(formatPrice(price))
                 append("원")
-            }
-            if (riskText != null) {
-                if (isNotEmpty()) append(" · ")
-                append("위험도 $riskText")
             }
             if (fraudText != null) {
                 if (isNotEmpty()) append(" · ")
