@@ -20,6 +20,7 @@ try:
         mark_analysis_job_started,
     )
     from src.db import get_connection
+    from src.fraud_probability_service import score_alert_fraud_probability
     from src.joongna_seen_products import (
         CHANGE_REASON_BODY_CHANGED,
         CHANGE_REASON_CONTENT_CHANGED,
@@ -57,6 +58,7 @@ except ModuleNotFoundError:
         mark_analysis_job_started,
     )
     from db import get_connection
+    from fraud_probability_service import score_alert_fraud_probability
     from joongna_seen_products import (
         CHANGE_REASON_BODY_CHANGED,
         CHANGE_REASON_CONTENT_CHANGED,
@@ -858,6 +860,21 @@ def maybe_create_alert_event(
             "alert_id": int(duplicate[0]) if isinstance(duplicate, (tuple, list)) else int(duplicate.get("id")),
         }
 
+    fraud_score = score_alert_fraud_probability(
+        cursor,
+        product_id=normalized_product_id,
+        store_id=seller_store_seq,
+        alert_context={
+            "price_krw": price_krw,
+            "drop_rate_percent": drop_rate_percent,
+            "risk_score": risk_result.get("risk_score"),
+            "risk_level": risk_result.get("risk_level"),
+            "trade_type": risk_result.get("trade_type"),
+            "is_exchange_post": risk_result.get("is_exchange_post"),
+            "risk_keywords_json": risk_result.get("risk_keywords_json"),
+        },
+    )
+
     try:
         cursor.execute(
             """
@@ -884,6 +901,10 @@ def maybe_create_alert_event(
                 alert_price_direction,
                 risk_level,
                 risk_score,
+                fraud_probability,
+                fraud_probability_label,
+                fraud_model_version,
+                fraud_scored_at,
                 risk_keywords,
                 is_exchange_post,
                 trade_type,
@@ -900,7 +921,8 @@ def maybe_create_alert_event(
             VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, 'pending', 0
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, 'pending', 0
             )
             """,
             (
@@ -926,6 +948,10 @@ def maybe_create_alert_event(
                 _normalize_optional_text(alert_price_direction),
                 _normalize_optional_text(risk_result.get("risk_level")),
                 _normalize_optional_int(risk_result.get("risk_score")),
+                _normalize_optional_float(fraud_score.get("fraud_probability")),
+                _normalize_optional_text(fraud_score.get("fraud_probability_label")),
+                _normalize_optional_text(fraud_score.get("fraud_model_version")),
+                fraud_score.get("fraud_scored_at"),
                 _normalize_optional_text(risk_result.get("risk_keywords_json")),
                 bool(risk_result.get("is_exchange_post")) if risk_result.get("is_exchange_post") is not None else None,
                 _normalize_optional_text(risk_result.get("trade_type")),
