@@ -169,6 +169,19 @@ class NotificationWorkerTest(unittest.TestCase):
             self.assertGreater(current_index, last_index, msg=f"order mismatch at: {token}")
             last_index = current_index
 
+    def test_build_telegram_message_displays_fraud_probability(self):
+        message = _build_telegram_message(
+            {
+                "source": "joongna",
+                "title": "사기 확률 표시 테스트",
+                "url": "https://web.joongna.com/product/1002",
+                "fraud_probability": 0.755,
+                "fraud_probability_label": "HIGH",
+            }
+        )
+
+        self.assertIn("사기 가능성\n높음 (76%)", message)
+
     def test_build_telegram_message_marks_refresh_based_alerts(self):
         message = _build_telegram_message(
             {
@@ -284,6 +297,61 @@ class NotificationWorkerTest(unittest.TestCase):
         self.assertEqual(result.get("reason"), "telegram_sent")
         self.assertEqual(mock_mark_sent.call_count, 1)
         self.assertEqual(mock_send_telegram.call_args.kwargs.get("chat_id"), "123456")
+
+    def test_send_alert_event_scores_missing_fraud_probability_before_telegram(self):
+        class FakeCursor:
+            def close(self):
+                pass
+
+        class FakeConnection:
+            def cursor(self, dictionary=False):
+                return FakeCursor()
+
+            def is_connected(self):
+                return True
+
+            def close(self):
+                pass
+
+        score = {
+            "fraud_probability": 0.755,
+            "fraud_probability_label": "HIGH",
+            "fraud_model_version": "fraud-logreg-v1",
+            "fraud_scored_at": "2026-07-04 08:30:00",
+        }
+
+        with patch(
+            "src.notification_worker.resolve_user_alert_delivery_policy",
+            return_value={
+                "enabled": True,
+                "telegram_chat_id": "123456",
+                "allow_global_fallback": False,
+            },
+        ):
+            with patch("src.notification_worker.get_connection", return_value=FakeConnection()):
+                with patch("src.notification_worker.score_alert_fraud_probability", return_value=score) as mock_score:
+                    with patch("src.notification_worker._update_alert_event_fraud_probability", return_value=True) as mock_update_score:
+                        with patch("src.notification_worker._send_fcm_to_user", return_value={"sent": 0, "failed": 0, "attempted": 0, "reason": "no_active_push_tokens"}) as mock_send_fcm:
+                            with patch("src.notification_worker._telegram_configured", return_value=True):
+                                with patch("src.notification_worker._fetch_listing_image_url_by_product_id", return_value=None):
+                                    with patch("src.notification_worker.send_telegram_alert", return_value=True) as mock_send_telegram:
+                                        with patch("src.notification_worker.mark_alert_event_sent"):
+                                            result = send_alert_event(
+                                                {
+                                                    "id": 31,
+                                                    "user_id": "boongtol",
+                                                    "product_id": "1002",
+                                                    "title": "사기 확률 표시 테스트",
+                                                    "fraud_probability": None,
+                                                }
+                                            )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("status"), "sent")
+        mock_score.assert_called_once()
+        mock_update_score.assert_called_once_with(31, score)
+        self.assertEqual(mock_send_fcm.call_args.args[1].get("fraud_probability_label"), "HIGH")
+        self.assertIn("사기 가능성\n높음 (76%)", mock_send_telegram.call_args.args[0])
 
     def test_send_alert_event_passes_listing_image_url_to_telegram(self):
         with patch(

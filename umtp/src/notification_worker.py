@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 try:
     from src.alert_price_direction import ABOVE_OR_EQUAL, BELOW_OR_EQUAL, normalize_alert_price_direction
     from src.db import get_connection
+    from src.fraud_probability_service import score_alert_fraud_probability
     from src.push_token_service import (
         deactivate_user_push_token,
         list_active_user_push_tokens,
@@ -18,6 +19,7 @@ try:
 except ModuleNotFoundError:
     from alert_price_direction import ABOVE_OR_EQUAL, BELOW_OR_EQUAL, normalize_alert_price_direction
     from db import get_connection
+    from fraud_probability_service import score_alert_fraud_probability
     from push_token_service import (
         deactivate_user_push_token,
         list_active_user_push_tokens,
@@ -2193,6 +2195,108 @@ def mark_alert_event_failed(alert_id, error_message):
     return _update_alert_event_status(alert_id, "failed", error_message=error_message, set_sent_at=False)
 
 
+def _update_alert_event_fraud_probability(alert_id, score):
+    normalized_alert_id = _normalize_alert_id(alert_id)
+    if not score:
+        return False
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            UPDATE alert_events
+            SET
+                fraud_probability = %s,
+                fraud_probability_label = %s,
+                fraud_model_version = %s,
+                fraud_scored_at = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (
+                score.get("fraud_probability"),
+                score.get("fraud_probability_label"),
+                score.get("fraud_model_version"),
+                score.get("fraud_scored_at"),
+                normalized_alert_id,
+            ),
+        )
+        connection.commit()
+        return cursor.rowcount > 0
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
+def _build_fraud_probability_alert_context(alert):
+    if not isinstance(alert, dict):
+        return {}
+    return {
+        "price_krw": alert.get("price_krw"),
+        "drop_rate_percent": alert.get("drop_rate_percent"),
+        "risk_score": alert.get("risk_score"),
+        "risk_level": alert.get("risk_level"),
+        "trade_type": alert.get("trade_type"),
+        "is_exchange_post": alert.get("is_exchange_post"),
+        "risk_keywords_json": alert.get("risk_keywords"),
+    }
+
+
+def _ensure_alert_fraud_probability_for_delivery(alert):
+    if not isinstance(alert, dict):
+        return alert
+    if _normalize_optional_float(alert.get("fraud_probability")) is not None:
+        return alert
+
+    product_id = _resolve_alert_product_id_for_image_lookup(alert)
+    if product_id is None:
+        return alert
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor(dictionary=True)
+        score = score_alert_fraud_probability(
+            cursor,
+            product_id=product_id,
+            store_id=alert.get("seller_store_seq"),
+            alert_context=_build_fraud_probability_alert_context(alert),
+        )
+    except Exception as exc:
+        print(f"[notification_worker] fraud probability scoring skipped: {exc}")
+        return alert
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+    if not score:
+        return alert
+
+    alert.update(
+        {
+            "fraud_probability": score.get("fraud_probability"),
+            "fraud_probability_label": score.get("fraud_probability_label"),
+            "fraud_model_version": score.get("fraud_model_version"),
+            "fraud_scored_at": score.get("fraud_scored_at"),
+        }
+    )
+
+    try:
+        _update_alert_event_fraud_probability(alert.get("id"), score)
+    except Exception as exc:
+        print(f"[notification_worker] fraud probability score not persisted: {exc}")
+
+    return alert
+
+
 def send_alert_event(alert):
     if not isinstance(alert, dict):
         raise ValueError("invalid_alert")
@@ -2219,6 +2323,7 @@ def send_alert_event(alert):
     except Exception:
         # Alert delivery should continue even when best-effort display enrichment fails.
         pass
+    _ensure_alert_fraud_probability_for_delivery(alert)
 
     push_result = _send_fcm_to_user(user_id, alert)
     push_sent = int(push_result.get("sent", 0))
