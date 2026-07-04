@@ -5,3 +5,6 @@ beautifulsoup4
 fastapi
 uvicorn
 firebase-admin
+joblib
+numpy
+scikit-learn
