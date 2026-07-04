@@ -119,7 +119,29 @@ mysql -u <DB_USER> -p < sql/add_fraud_probability_columns.sql
 
 `src/listing_analysis_pipeline.py`는 alert insert 전에 확률을 계산하고 위 컬럼에 저장한다.
 
+## 9. 앱 / Telegram / FCM 표시
+
+`src/notification_worker.py`는 `alert_events`의 fraud 컬럼을 읽어 `/alerts` 응답 item에 포함한다.
+
+추가 응답 필드:
+
+- `fraud_probability`
+- `fraud_probability_label`
+- `formatted_fraud_probability_label`
+- `fraud_probability_text`
+- `fraud_model_version`
+- `fraud_scored_at`
+
+Telegram 메시지에는 `사기 가능성` row를 추가했다.
+
+FCM data payload에는 아래 값을 추가했다.
+
+- `fraud_probability`
+- `fraud_probability_label`
+- `fraud_probability_text`
+
+Android 앱은 `AlertItem`에 fraud 필드를 추가하고, 일반 알림 상세와 읽음 보관함 상세에 `사기 가능성`을 표시한다. FCM foreground 수신 시에도 push 본문에 `사기 가능성` 문구를 붙인다.
+
 ## 다음 단계
 
-9단계에서 `/alerts`, Telegram, FCM, Android 화면에 `fraud_probability`를 표시한다.
-
+10단계에서 1주일 정도 확률 분포와 false positive를 관찰한 뒤 알림 억제 정책을 적용한다.

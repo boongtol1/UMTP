@@ -629,6 +629,39 @@ def _resolve_risk_score_for_display(alert):
     return str(risk_score)
 
 
+def _build_formatted_fraud_probability_label(label):
+    normalized = _normalize_optional_text(label)
+    if normalized is None:
+        return "정보 없음"
+    normalized_upper = normalized.upper()
+    if normalized_upper == "LOW":
+        return "낮음"
+    if normalized_upper == "MEDIUM":
+        return "주의"
+    if normalized_upper == "HIGH":
+        return "높음"
+    return normalized
+
+
+def _format_fraud_probability_percent(probability):
+    parsed = _normalize_optional_float(probability)
+    if parsed is None:
+        return None
+    return f"{parsed * 100:.0f}%"
+
+
+def _resolve_fraud_probability_text_for_display(alert):
+    percent_text = _format_fraud_probability_percent(alert.get("fraud_probability"))
+    label_text = _build_formatted_fraud_probability_label(alert.get("fraud_probability_label"))
+    if percent_text is None and label_text == "정보 없음":
+        return "정보 없음"
+    if percent_text is None:
+        return label_text
+    if label_text == "정보 없음":
+        return percent_text
+    return f"{label_text} ({percent_text})"
+
+
 def _resolve_risk_keywords_text_for_display(alert):
     parsed_keywords = _parse_risk_keywords(alert.get("risk_keywords"))
     if not parsed_keywords:
@@ -1021,6 +1054,10 @@ def _fetch_alert_rows(
                 alert_price_direction,
                 risk_level,
                 risk_score,
+                fraud_probability,
+                fraud_probability_label,
+                fraud_model_version,
+                fraud_scored_at,
                 risk_keywords,
                 is_exchange_post,
                 trade_type,
@@ -1078,6 +1115,10 @@ def _fetch_alert_rows(
                     alert_price_direction,
                     risk_level,
                     risk_score,
+                    NULL AS fraud_probability,
+                    NULL AS fraud_probability_label,
+                    NULL AS fraud_model_version,
+                    NULL AS fraud_scored_at,
                     risk_keywords,
                     is_exchange_post,
                     trade_type,
@@ -1124,6 +1165,15 @@ def _fetch_alert_rows(
                 fair_price_krw,
                 target_price_krw,
                 drop_rate_percent,
+                NULL AS risk_level,
+                NULL AS risk_score,
+                NULL AS fraud_probability,
+                NULL AS fraud_probability_label,
+                NULL AS fraud_model_version,
+                NULL AS fraud_scored_at,
+                NULL AS risk_keywords,
+                NULL AS is_exchange_post,
+                NULL AS trade_type,
                 trigger_reason,
                 message,
                 status,
@@ -1761,6 +1811,8 @@ def _build_push_notification_payload(alert):
     listing_price_krw = _safe_int(alert.get("price_krw"))
     risk_level = _normalize_optional_text(alert.get("risk_level"))
     risk_label = _build_formatted_risk_label(risk_level)
+    fraud_probability = _normalize_optional_float(alert.get("fraud_probability"))
+    fraud_probability_text = _resolve_fraud_probability_text_for_display(alert)
 
     body = _normalize_optional_text(alert.get("body_excerpt"))
     if body is None:
@@ -1771,13 +1823,20 @@ def _build_push_notification_payload(alert):
             segments.append(f"{listing_price_krw:,}원")
         if risk_label != "정보 없음":
             segments.append(f"위험도 {risk_label}")
+        if fraud_probability_text != "정보 없음":
+            segments.append(f"사기 가능성 {fraud_probability_text}")
         body = " · ".join(segments) if segments else "새로운 매물이 등록되었습니다."
+    elif fraud_probability_text != "정보 없음":
+        body = f"사기 가능성 {fraud_probability_text} · {body}"
 
     data_payload = {
         "alert_id": str(_safe_int(alert.get("id")) or ""),
         "listing_title": title,
         "listing_price_krw": str(listing_price_krw) if listing_price_krw is not None else "",
         "risk_level": _normalize_optional_text(alert.get("risk_level")) or "",
+        "fraud_probability": str(fraud_probability) if fraud_probability is not None else "",
+        "fraud_probability_label": _normalize_optional_text(alert.get("fraud_probability_label")) or "",
+        "fraud_probability_text": fraud_probability_text if fraud_probability_text != "정보 없음" else "",
         "product_id": _normalize_optional_text(alert.get("product_id")) or "",
         "url": _normalize_optional_text(alert.get("url")) or "",
         "trigger_reason": _normalize_optional_text(alert.get("trigger_reason")) or "",
@@ -1856,6 +1915,7 @@ def _build_telegram_message(alert):
 
     risk_label = _resolve_risk_label_for_display(alert)
     risk_score = _resolve_risk_score_for_display(alert)
+    fraud_probability_text = _resolve_fraud_probability_text_for_display(alert)
     risk_keywords_text = _resolve_risk_keywords_text_for_display(alert)
     alert_type_label = _resolve_alert_type_label_for_display(alert)
     alert_condition_label = _resolve_alert_condition_label_for_display(alert)
@@ -1891,6 +1951,7 @@ def _build_telegram_message(alert):
         _build_telegram_detail_row("알림 조건", alert_condition_label),
         _build_telegram_detail_row("위험도", risk_label),
         _build_telegram_detail_row("위험 점수", risk_score),
+        _build_telegram_detail_row("사기 가능성", fraud_probability_text),
         _build_telegram_detail_row("위험 키워드", risk_keywords_text),
         _build_telegram_detail_row("본문 내용", body_text),
         _build_telegram_detail_row("분석 시각", analyzed_at_text),
@@ -1933,6 +1994,10 @@ def get_pending_alert_events(limit=20):
                     alert_drop_rate_percent,
                     alert_price_direction,
                     risk_level,
+                    fraud_probability,
+                    fraud_probability_label,
+                    fraud_model_version,
+                    fraud_scored_at,
                     body_excerpt,
                     body_text,
                     trigger_reason,
@@ -1977,6 +2042,10 @@ def get_pending_alert_events(limit=20):
                         alert_drop_rate_percent,
                         alert_price_direction,
                         risk_level,
+                        NULL AS fraud_probability,
+                        NULL AS fraud_probability_label,
+                        NULL AS fraud_model_version,
+                        NULL AS fraud_scored_at,
                         body_excerpt,
                         NULL AS body_text,
                         trigger_reason,
@@ -2011,6 +2080,11 @@ def get_pending_alert_events(limit=20):
                         fair_price_krw,
                         target_price_krw,
                         drop_rate_percent,
+                        NULL AS risk_level,
+                        NULL AS fraud_probability,
+                        NULL AS fraud_probability_label,
+                        NULL AS fraud_model_version,
+                        NULL AS fraud_scored_at,
                         trigger_reason,
                         message,
                         status,
@@ -2275,6 +2349,10 @@ def get_alert_event_by_id(alert_id):
                     alert_drop_rate_percent,
                     alert_price_direction,
                     risk_level,
+                    fraud_probability,
+                    fraud_probability_label,
+                    fraud_model_version,
+                    fraud_scored_at,
                     body_excerpt,
                     body_text,
                     trigger_reason,
@@ -2318,6 +2396,10 @@ def get_alert_event_by_id(alert_id):
                         alert_drop_rate_percent,
                         alert_price_direction,
                         risk_level,
+                        NULL AS fraud_probability,
+                        NULL AS fraud_probability_label,
+                        NULL AS fraud_model_version,
+                        NULL AS fraud_scored_at,
                         body_excerpt,
                         NULL AS body_text,
                         trigger_reason,
@@ -2351,6 +2433,11 @@ def get_alert_event_by_id(alert_id):
                         fair_price_krw,
                         target_price_krw,
                         drop_rate_percent,
+                        NULL AS risk_level,
+                        NULL AS fraud_probability,
+                        NULL AS fraud_probability_label,
+                        NULL AS fraud_model_version,
+                        NULL AS fraud_scored_at,
                         trigger_reason,
                         message,
                         status,
@@ -2510,6 +2597,8 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
             risk_keywords = _parse_risk_keywords(row.get("risk_keywords"))
             risk_level = _normalize_optional_text(row.get("risk_level"))
             risk_score = _safe_int(row.get("risk_score"))
+            fraud_probability = _normalize_optional_float(row.get("fraud_probability"))
+            fraud_probability_label = _normalize_optional_text(row.get("fraud_probability_label"))
             is_exchange_post = _normalize_optional_bool(row.get("is_exchange_post"))
             trade_type = _normalize_optional_text(row.get("trade_type"))
             source = _normalize_optional_text(row.get("source"))
@@ -2642,6 +2731,19 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
                     "risk_level": risk_level,
                     "formatted_risk_label": _build_formatted_risk_label(risk_level),
                     "risk_score": risk_score,
+                    "fraud_probability": fraud_probability,
+                    "fraud_probability_label": fraud_probability_label,
+                    "formatted_fraud_probability_label": _build_formatted_fraud_probability_label(
+                        fraud_probability_label
+                    ),
+                    "fraud_probability_text": _resolve_fraud_probability_text_for_display(
+                        {
+                            "fraud_probability": fraud_probability,
+                            "fraud_probability_label": fraud_probability_label,
+                        }
+                    ),
+                    "fraud_model_version": row.get("fraud_model_version"),
+                    "fraud_scored_at": row.get("fraud_scored_at"),
                     "risk_keywords": risk_keywords_display,
                     "trade_type_flags": trade_type_flags,
                     "is_exchange_post": bool(is_exchange_post) if is_exchange_post is not None else False,

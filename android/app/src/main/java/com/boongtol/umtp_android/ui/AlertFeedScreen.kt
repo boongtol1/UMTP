@@ -810,6 +810,40 @@ private fun resolveRiskKeywordsText(alert: AlertItem): String {
     return keywords.joinToString(", ")
 }
 
+private fun resolveFraudProbabilityText(alert: AlertItem): String {
+    val explicitText = alert.fraud_probability_text?.trim()
+    if (!explicitText.isNullOrEmpty() && explicitText != "정보 없음") {
+        return explicitText
+    }
+
+    val probability = alert.fraud_probability
+    val label = resolveFraudProbabilityLabel(alert)
+    if (probability == null) {
+        return label
+    }
+
+    val percentText = "${"%.0f".format(probability * 100)}%"
+    return if (label == "정보 없음") {
+        percentText
+    } else {
+        "$label ($percentText)"
+    }
+}
+
+private fun resolveFraudProbabilityLabel(alert: AlertItem): String {
+    alert.formatted_fraud_probability_label?.let {
+        if (it.isNotBlank() && it != "정보 없음") {
+            return it
+        }
+    }
+    return when ((alert.fraud_probability_label ?: "").uppercase()) {
+        "LOW" -> "낮음"
+        "MEDIUM" -> "주의"
+        "HIGH" -> "높음"
+        else -> "정보 없음"
+    }
+}
+
 private fun resolveBodyText(alert: AlertItem): String {
     val fullText = alert.body_text?.trim()
     if (!fullText.isNullOrEmpty()) {
@@ -962,6 +996,7 @@ private fun buildAlertDetailRows(
         "알림 조건" to resolveAlertConditionLabel(alert),
         "위험도" to resolveRiskLabel(alert),
         "위험 점수" to (alert.risk_score?.toString() ?: "정보 없음"),
+        "사기 가능성" to resolveFraudProbabilityText(alert),
         "위험 키워드" to resolveRiskKeywordsText(alert),
         "본문 내용" to resolveBodyText(alert),
         "매물 등록 시각" to (resolveSortDateText(alert) ?: "정보 없음"),

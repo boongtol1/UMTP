@@ -547,6 +547,7 @@ private fun buildReadArchiveDetailRows(alert: AlertItem, resolvedUrl: String?): 
         "알림 조건" to resolveReadArchiveConditionLabel(alert),
         "위험도" to riskLabel,
         "위험 점수" to (alert.risk_score?.toString() ?: "정보 없음"),
+        "사기 가능성" to resolveReadArchiveFraudProbabilityText(alert),
         "위험 키워드" to riskKeywordsText,
         "본문 내용" to resolveReadArchiveBodyText(alert),
         "매물 등록 시각" to resolveReadArchiveSortDate(alert),
@@ -594,6 +595,41 @@ private fun resolveReadArchiveRiskKeywordsText(alert: AlertItem): String {
         return "특이사항 없음"
     }
     return keywords.joinToString(", ")
+}
+
+private fun resolveReadArchiveFraudProbabilityText(alert: AlertItem): String {
+    val explicitText = alert.fraud_probability_text?.trim()
+    if (!explicitText.isNullOrEmpty() && explicitText != "정보 없음") {
+        return explicitText
+    }
+
+    val probability = alert.fraud_probability
+    val label = resolveReadArchiveFraudProbabilityLabel(alert)
+    if (probability == null) {
+        return label
+    }
+
+    val percentText = "${"%.0f".format(probability * 100)}%"
+    return if (label == "정보 없음") {
+        percentText
+    } else {
+        "$label ($percentText)"
+    }
+}
+
+private fun resolveReadArchiveFraudProbabilityLabel(alert: AlertItem): String {
+    val explicit = alert.formatted_fraud_probability_label?.takeIf {
+        it.isNotBlank() && it != "정보 없음"
+    }
+    if (explicit != null) {
+        return explicit
+    }
+    return when ((alert.fraud_probability_label ?: "").uppercase()) {
+        "LOW" -> "낮음"
+        "MEDIUM" -> "주의"
+        "HIGH" -> "높음"
+        else -> "정보 없음"
+    }
 }
 
 private fun resolveReadArchiveBodyText(alert: AlertItem): String {

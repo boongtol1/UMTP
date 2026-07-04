@@ -61,6 +61,7 @@ class UMTPFirebaseMessagingService : FirebaseMessagingService() {
         val listingTitle = data["listing_title"]
         val price = data["listing_price_krw"]
         val risk = data["risk_level"]
+        val fraudText = resolveFraudProbabilityText(data)
         
         val riskText = when (risk?.uppercase()) {
             "LOW" -> "낮음"
@@ -80,9 +81,38 @@ class UMTPFirebaseMessagingService : FirebaseMessagingService() {
                 if (isNotEmpty()) append(" · ")
                 append("위험도 $riskText")
             }
+            if (fraudText != null) {
+                if (isNotEmpty()) append(" · ")
+                append("사기 가능성 $fraudText")
+            }
         }.ifEmpty { data["alert_reason_message"] ?: "새로운 매물이 등록되었습니다." }
 
         showNotification(title, body, alertId)
+    }
+
+    private fun resolveFraudProbabilityText(data: Map<String, String>): String? {
+        data["fraud_probability_text"]?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            return it
+        }
+
+        val probability = data["fraud_probability"]?.toDoubleOrNull()
+        val label = when (data["fraud_probability_label"]?.uppercase()) {
+            "LOW" -> "낮음"
+            "MEDIUM" -> "주의"
+            "HIGH" -> "높음"
+            else -> null
+        }
+
+        if (probability == null) {
+            return label
+        }
+
+        val percentText = "${"%.0f".format(probability * 100)}%"
+        return if (label == null) {
+            percentText
+        } else {
+            "$label ($percentText)"
+        }
     }
 
     private fun formatPrice(priceStr: String): String {
