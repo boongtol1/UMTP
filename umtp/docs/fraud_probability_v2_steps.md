@@ -232,3 +232,44 @@ finally:
     conn.close()
 PY
 ```
+
+## 6. Current Model 교체
+
+v1 모델은 보존하고, 운영 기본 경로의 `current.*`를 v2 candidate로 교체했다.
+
+보존된 v1 파일:
+
+```text
+models/fraud_probability/fraud-logreg-v1.joblib
+models/fraud_probability/fraud-logreg-v1_metrics.json
+```
+
+운영 기본 모델:
+
+```text
+models/fraud_probability/current.joblib
+models/fraud_probability/current_metrics.json
+```
+
+현재 `current.joblib`의 `model_version`:
+
+```text
+fraud-logreg-tfidf-v2
+```
+
+검증 명령:
+
+```bash
+cd /Users/boongtol_pro/Desktop/UMTP/umtp
+python - <<'PY'
+import joblib
+
+artifact = joblib.load("models/fraud_probability/current.joblib")
+print(artifact["model_version"])
+PY
+```
+
+주의:
+
+- 이미 떠 있는 worker/API process는 모델을 메모리에 cache할 수 있다.
+- 새 알림에 v2 확률을 적용하려면 `notification_worker`, 앱/API 서버 등 fraud probability를 계산하는 process를 재시작한다.

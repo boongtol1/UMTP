@@ -1,0 +1,66 @@
+{
+  "model_version": "fraud-logreg-v1",
+  "trained_at": "2026-07-04T08:05:32Z",
+  "input_path": "data/fraud_probability/training_features.csv",
+  "row_count": 1526,
+  "train_count": 1220,
+  "test_count": 306,
+  "positive_count": 636,
+  "negative_count": 890,
+  "average_precision": 0.9308151123093351,
+  "roc_auc": 0.7454906204906205,
+  "brier_score": 0.28750649929067235,
+  "classification_report_at_0_5": {
+    "0": {
+      "precision": 0.2129032258064516,
+      "recall": 0.7857142857142857,
+      "f1-score": 0.3350253807106599,
+      "support": 42.0
+    },
+    "1": {
+      "precision": 0.9403973509933775,
+      "recall": 0.5378787878787878,
+      "f1-score": 0.6843373493975904,
+      "support": 264.0
+    },
+    "accuracy": 0.5718954248366013,
+    "macro avg": {
+      "precision": 0.5766502883999145,
+      "recall": 0.6617965367965368,
+      "f1-score": 0.5096813650541252,
+      "support": 306.0
+    },
+    "weighted avg": {
+      "precision": 0.8405452161637996,
+      "recall": 0.5718954248366013,
+      "f1-score": 0.6363925693817372,
+      "support": 306.0
+    }
+  },
+  "thresholds": {
+    "0.25": {
+      "flagged_count": 227,
+      "flagged_rate": 0.7418300653594772,
+      "true_positive_flagged": 211,
+      "false_positive_flagged": 16
+    },
+    "0.5": {
+      "flagged_count": 151,
+      "flagged_rate": 0.4934640522875817,
+      "true_positive_flagged": 142,
+      "false_positive_flagged": 9
+    },
+    "0.65": {
+      "flagged_count": 96,
+      "flagged_rate": 0.3137254901960784,
+      "true_positive_flagged": 90,
+      "false_positive_flagged": 6
+    },
+    "0.8": {
+      "flagged_count": 33,
+      "flagged_rate": 0.10784313725490197,
+      "true_positive_flagged": 30,
+      "false_positive_flagged": 3
+    }
+  }
+}
