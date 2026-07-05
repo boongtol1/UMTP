@@ -1,10 +1,13 @@
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 
 MODEL_VERSION_UNKNOWN = "unknown"
+V1_MODEL_VERSION_KEY = "v1"
+V2_MODEL_VERSION_KEY = "v2"
 LOW_LABEL = "LOW"
 MEDIUM_LABEL = "MEDIUM"
 HIGH_LABEL = "HIGH"
@@ -33,6 +36,8 @@ SELLER_HISTORY_FEATURES = {
 
 _MODEL_ARTIFACT = None
 _MODEL_LOAD_FAILED = False
+_MODEL_ARTIFACT_BY_PATH = {}
+_MODEL_LOAD_FAILED_PATHS = set()
 
 
 def _project_root() -> str:
@@ -41,6 +46,14 @@ def _project_root() -> str:
 
 def _default_model_path() -> str:
     return os.path.join(_project_root(), "models", "fraud_probability", "current.joblib")
+
+
+def _default_v1_model_path() -> str:
+    return os.path.join(_project_root(), "models", "fraud_probability", "fraud-logreg-v1.joblib")
+
+
+def _default_v2_model_path() -> str:
+    return os.path.join(_project_root(), "models", "fraud_probability", "fraud-logreg-tfidf-v2.joblib")
 
 
 def _utc_now_naive() -> datetime:
@@ -122,26 +135,58 @@ def probability_to_label(probability: Optional[float]) -> Optional[str]:
     return LOW_LABEL
 
 
-def _load_model_artifact() -> Optional[Dict[str, Any]]:
+def _resolve_model_path(model_path: Optional[str] = None) -> str:
+    return model_path or os.getenv("FRAUD_PROBABILITY_MODEL_PATH") or _default_model_path()
+
+
+def _load_model_artifact(model_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
     global _MODEL_ARTIFACT, _MODEL_LOAD_FAILED
-    if _MODEL_ARTIFACT is not None:
+    resolved_model_path = os.path.abspath(_resolve_model_path(model_path))
+
+    if model_path is None and _MODEL_ARTIFACT is not None:
         return _MODEL_ARTIFACT
-    if _MODEL_LOAD_FAILED:
+    if model_path is None and _MODEL_LOAD_FAILED:
+        return None
+    if resolved_model_path in _MODEL_ARTIFACT_BY_PATH:
+        return _MODEL_ARTIFACT_BY_PATH[resolved_model_path]
+    if resolved_model_path in _MODEL_LOAD_FAILED_PATHS:
         return None
 
-    model_path = os.getenv("FRAUD_PROBABILITY_MODEL_PATH") or _default_model_path()
-    if not os.path.exists(model_path):
-        _MODEL_LOAD_FAILED = True
+    if not os.path.exists(resolved_model_path):
+        if model_path is None:
+            _MODEL_LOAD_FAILED = True
+        _MODEL_LOAD_FAILED_PATHS.add(resolved_model_path)
         return None
 
     try:
+        project_root = _project_root()
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+
         import joblib
 
-        _MODEL_ARTIFACT = joblib.load(model_path)
-        return _MODEL_ARTIFACT
+        artifact = joblib.load(resolved_model_path)
+        _MODEL_ARTIFACT_BY_PATH[resolved_model_path] = artifact
+        if model_path is None:
+            _MODEL_ARTIFACT = artifact
+        return artifact
     except Exception:
-        _MODEL_LOAD_FAILED = True
+        if model_path is None:
+            _MODEL_LOAD_FAILED = True
+        _MODEL_LOAD_FAILED_PATHS.add(resolved_model_path)
         return None
+
+
+def _load_v1_model_artifact() -> Optional[Dict[str, Any]]:
+    return _load_model_artifact(
+        os.getenv("FRAUD_PROBABILITY_V1_MODEL_PATH") or _default_v1_model_path()
+    )
+
+
+def _load_v2_model_artifact() -> Optional[Dict[str, Any]]:
+    return _load_model_artifact(
+        os.getenv("FRAUD_PROBABILITY_V2_MODEL_PATH") or _default_v2_model_path()
+    )
 
 
 def _fetch_first_search_result(cursor, product_id: str) -> Dict[str, Any]:
@@ -549,51 +594,149 @@ def score_alert_fraud_probability(
     if not artifact or "model" not in artifact:
         return {}
 
+    result = _score_alert_fraud_probability_with_artifact(
+        cursor,
+        artifact=artifact,
+        product_id=product_id,
+        store_id=store_id,
+        alert_context=alert_context,
+    )
+    return result
+
+
+def _build_alert_fraud_features(
+    cursor,
+    *,
+    product_id: Any,
+    store_id: Any = None,
+    alert_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     normalized_product_id = _normalize_optional_text(product_id)
     if normalized_product_id is None:
         return {}
 
     alert_context = alert_context or {}
-    try:
-        search_result = _fetch_first_search_result(cursor, normalized_product_id)
-        normalized_store_id = _normalize_optional_text(store_id)
-        if normalized_store_id is None:
-            normalized_store_id = _normalize_optional_text(search_result.get("seller_store_seq"))
+    search_result = _fetch_first_search_result(cursor, normalized_product_id)
+    normalized_store_id = _normalize_optional_text(store_id)
+    if normalized_store_id is None:
+        normalized_store_id = _normalize_optional_text(search_result.get("seller_store_seq"))
 
-        activity = {}
-        profile = {}
-        feature_time = search_result.get("fetched_at")
-        if normalized_store_id is not None:
-            activity = _fetch_latest_activity(
-                cursor,
-                store_id=normalized_store_id,
-                feature_time=feature_time,
-            )
-            profile = _fetch_latest_profile(
-                cursor,
-                store_id=normalized_store_id,
-                feature_time=feature_time,
-            )
-
-        features = _build_features(
-            search_result=search_result,
-            activity=activity,
-            profile=profile,
-            seller_history=_fetch_seller_history(
-                cursor,
-                store_id=normalized_store_id,
-                product_id=normalized_product_id,
-                feature_time=feature_time,
-            ),
-            alert_context=alert_context,
+    activity = {}
+    profile = {}
+    feature_time = search_result.get("fetched_at")
+    if normalized_store_id is not None:
+        activity = _fetch_latest_activity(
+            cursor,
+            store_id=normalized_store_id,
+            feature_time=feature_time,
         )
-        probability = float(artifact["model"].predict_proba([features])[0][1])
-    except Exception:
+        profile = _fetch_latest_profile(
+            cursor,
+            store_id=normalized_store_id,
+            feature_time=feature_time,
+        )
+
+    return _build_features(
+        search_result=search_result,
+        activity=activity,
+        profile=profile,
+        seller_history=_fetch_seller_history(
+            cursor,
+            store_id=normalized_store_id,
+            product_id=normalized_product_id,
+            feature_time=feature_time,
+        ),
+        alert_context=alert_context,
+    )
+
+
+def _score_features_with_artifact(
+    artifact: Optional[Dict[str, Any]],
+    features: Dict[str, Any],
+    *,
+    scored_at: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    if not artifact or "model" not in artifact or not features:
         return {}
 
+    probability = float(artifact["model"].predict_proba([features])[0][1])
     return {
         "fraud_probability": probability,
         "fraud_probability_label": probability_to_label(probability),
         "fraud_model_version": _normalize_optional_text(artifact.get("model_version")) or MODEL_VERSION_UNKNOWN,
-        "fraud_scored_at": _utc_now_naive(),
+        "fraud_scored_at": scored_at or _utc_now_naive(),
     }
+
+
+def _score_alert_fraud_probability_with_artifact(
+    cursor,
+    *,
+    artifact: Dict[str, Any],
+    product_id: Any,
+    store_id: Any = None,
+    alert_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    try:
+        features = _build_alert_fraud_features(
+            cursor,
+            product_id=product_id,
+            store_id=store_id,
+            alert_context=alert_context,
+        )
+        return _score_features_with_artifact(artifact, features)
+    except Exception:
+        return {}
+
+
+def _add_versioned_score(
+    result: Dict[str, Any],
+    score: Dict[str, Any],
+    *,
+    version_key: str,
+) -> None:
+    result[f"fraud_probability_{version_key}"] = score.get("fraud_probability")
+    result[f"fraud_probability_label_{version_key}"] = score.get("fraud_probability_label")
+    result[f"fraud_model_version_{version_key}"] = score.get("fraud_model_version")
+    result[f"fraud_scored_at_{version_key}"] = score.get("fraud_scored_at")
+
+
+def score_alert_fraud_probability_comparison(
+    cursor,
+    *,
+    product_id: Any,
+    store_id: Any = None,
+    alert_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Score one alert with both the frozen v1 model and the current v2 model."""
+    try:
+        features = _build_alert_fraud_features(
+            cursor,
+            product_id=product_id,
+            store_id=store_id,
+            alert_context=alert_context,
+        )
+        if not features:
+            return {}
+
+        scored_at = _utc_now_naive()
+        v1_score = _score_features_with_artifact(
+            _load_v1_model_artifact(),
+            features,
+            scored_at=scored_at,
+        )
+        v2_score = _score_features_with_artifact(
+            _load_v2_model_artifact(),
+            features,
+            scored_at=scored_at,
+        )
+    except Exception:
+        return {}
+
+    primary_score = v2_score or v1_score
+    if not primary_score:
+        return {}
+
+    result = dict(primary_score)
+    _add_versioned_score(result, v1_score, version_key=V1_MODEL_VERSION_KEY)
+    _add_versioned_score(result, v2_score, version_key=V2_MODEL_VERSION_KEY)
+    return result

@@ -99,7 +99,7 @@ class AlertIdentityTest(unittest.TestCase):
             side_effect=ensure_side_effect,
         ) as mock_ensure:
             with patch(
-                "src.listing_analysis_pipeline.score_alert_fraud_probability",
+                "src.listing_analysis_pipeline.score_alert_fraud_probability_comparison",
                 side_effect=score_side_effect,
             ) as mock_score:
                 result = maybe_create_alert_event(

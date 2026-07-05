@@ -58,6 +58,118 @@ PREPARE stmt_fraud_scored_at FROM @sql_fraud_scored_at;
 EXECUTE stmt_fraud_scored_at;
 DEALLOCATE PREPARE stmt_fraud_scored_at;
 
+SELECT COUNT(*) INTO @has_fraud_probability_v1
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND COLUMN_NAME = 'fraud_probability_v1';
+SET @sql_fraud_probability_v1 = IF(
+  @has_fraud_probability_v1 = 0,
+  'ALTER TABLE alert_events ADD COLUMN fraud_probability_v1 DECIMAL(6,5) NULL AFTER fraud_scored_at',
+  'SELECT "fraud_probability_v1 exists"'
+);
+PREPARE stmt_fraud_probability_v1 FROM @sql_fraud_probability_v1;
+EXECUTE stmt_fraud_probability_v1;
+DEALLOCATE PREPARE stmt_fraud_probability_v1;
+
+SELECT COUNT(*) INTO @has_fraud_probability_label_v1
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND COLUMN_NAME = 'fraud_probability_label_v1';
+SET @sql_fraud_probability_label_v1 = IF(
+  @has_fraud_probability_label_v1 = 0,
+  'ALTER TABLE alert_events ADD COLUMN fraud_probability_label_v1 VARCHAR(20) NULL AFTER fraud_probability_v1',
+  'SELECT "fraud_probability_label_v1 exists"'
+);
+PREPARE stmt_fraud_probability_label_v1 FROM @sql_fraud_probability_label_v1;
+EXECUTE stmt_fraud_probability_label_v1;
+DEALLOCATE PREPARE stmt_fraud_probability_label_v1;
+
+SELECT COUNT(*) INTO @has_fraud_model_version_v1
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND COLUMN_NAME = 'fraud_model_version_v1';
+SET @sql_fraud_model_version_v1 = IF(
+  @has_fraud_model_version_v1 = 0,
+  'ALTER TABLE alert_events ADD COLUMN fraud_model_version_v1 VARCHAR(100) NULL AFTER fraud_probability_label_v1',
+  'SELECT "fraud_model_version_v1 exists"'
+);
+PREPARE stmt_fraud_model_version_v1 FROM @sql_fraud_model_version_v1;
+EXECUTE stmt_fraud_model_version_v1;
+DEALLOCATE PREPARE stmt_fraud_model_version_v1;
+
+SELECT COUNT(*) INTO @has_fraud_scored_at_v1
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND COLUMN_NAME = 'fraud_scored_at_v1';
+SET @sql_fraud_scored_at_v1 = IF(
+  @has_fraud_scored_at_v1 = 0,
+  'ALTER TABLE alert_events ADD COLUMN fraud_scored_at_v1 DATETIME NULL AFTER fraud_model_version_v1',
+  'SELECT "fraud_scored_at_v1 exists"'
+);
+PREPARE stmt_fraud_scored_at_v1 FROM @sql_fraud_scored_at_v1;
+EXECUTE stmt_fraud_scored_at_v1;
+DEALLOCATE PREPARE stmt_fraud_scored_at_v1;
+
+SELECT COUNT(*) INTO @has_fraud_probability_v2
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND COLUMN_NAME = 'fraud_probability_v2';
+SET @sql_fraud_probability_v2 = IF(
+  @has_fraud_probability_v2 = 0,
+  'ALTER TABLE alert_events ADD COLUMN fraud_probability_v2 DECIMAL(6,5) NULL AFTER fraud_scored_at_v1',
+  'SELECT "fraud_probability_v2 exists"'
+);
+PREPARE stmt_fraud_probability_v2 FROM @sql_fraud_probability_v2;
+EXECUTE stmt_fraud_probability_v2;
+DEALLOCATE PREPARE stmt_fraud_probability_v2;
+
+SELECT COUNT(*) INTO @has_fraud_probability_label_v2
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND COLUMN_NAME = 'fraud_probability_label_v2';
+SET @sql_fraud_probability_label_v2 = IF(
+  @has_fraud_probability_label_v2 = 0,
+  'ALTER TABLE alert_events ADD COLUMN fraud_probability_label_v2 VARCHAR(20) NULL AFTER fraud_probability_v2',
+  'SELECT "fraud_probability_label_v2 exists"'
+);
+PREPARE stmt_fraud_probability_label_v2 FROM @sql_fraud_probability_label_v2;
+EXECUTE stmt_fraud_probability_label_v2;
+DEALLOCATE PREPARE stmt_fraud_probability_label_v2;
+
+SELECT COUNT(*) INTO @has_fraud_model_version_v2
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND COLUMN_NAME = 'fraud_model_version_v2';
+SET @sql_fraud_model_version_v2 = IF(
+  @has_fraud_model_version_v2 = 0,
+  'ALTER TABLE alert_events ADD COLUMN fraud_model_version_v2 VARCHAR(100) NULL AFTER fraud_probability_label_v2',
+  'SELECT "fraud_model_version_v2 exists"'
+);
+PREPARE stmt_fraud_model_version_v2 FROM @sql_fraud_model_version_v2;
+EXECUTE stmt_fraud_model_version_v2;
+DEALLOCATE PREPARE stmt_fraud_model_version_v2;
+
+SELECT COUNT(*) INTO @has_fraud_scored_at_v2
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND COLUMN_NAME = 'fraud_scored_at_v2';
+SET @sql_fraud_scored_at_v2 = IF(
+  @has_fraud_scored_at_v2 = 0,
+  'ALTER TABLE alert_events ADD COLUMN fraud_scored_at_v2 DATETIME NULL AFTER fraud_model_version_v2',
+  'SELECT "fraud_scored_at_v2 exists"'
+);
+PREPARE stmt_fraud_scored_at_v2 FROM @sql_fraud_scored_at_v2;
+EXECUTE stmt_fraud_scored_at_v2;
+DEALLOCATE PREPARE stmt_fraud_scored_at_v2;
+
 SELECT COUNT(*) INTO @has_idx_alert_events_fraud_probability
 FROM INFORMATION_SCHEMA.STATISTICS
 WHERE TABLE_SCHEMA = @target_db
@@ -71,3 +183,17 @@ SET @sql_idx_alert_events_fraud_probability = IF(
 PREPARE stmt_idx_alert_events_fraud_probability FROM @sql_idx_alert_events_fraud_probability;
 EXECUTE stmt_idx_alert_events_fraud_probability;
 DEALLOCATE PREPARE stmt_idx_alert_events_fraud_probability;
+
+SELECT COUNT(*) INTO @has_idx_alert_events_fraud_probability_v2
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = @target_db
+  AND TABLE_NAME = 'alert_events'
+  AND INDEX_NAME = 'idx_alert_events_fraud_probability_v2';
+SET @sql_idx_alert_events_fraud_probability_v2 = IF(
+  @has_idx_alert_events_fraud_probability_v2 = 0,
+  'ALTER TABLE alert_events ADD INDEX idx_alert_events_fraud_probability_v2 (fraud_probability_v2)',
+  'SELECT "idx_alert_events_fraud_probability_v2 exists"'
+);
+PREPARE stmt_idx_alert_events_fraud_probability_v2 FROM @sql_idx_alert_events_fraud_probability_v2;
+EXECUTE stmt_idx_alert_events_fraud_probability_v2;
+DEALLOCATE PREPARE stmt_idx_alert_events_fraud_probability_v2;

@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 try:
     from src.alert_price_direction import ABOVE_OR_EQUAL, BELOW_OR_EQUAL, normalize_alert_price_direction
     from src.db import get_connection
-    from src.fraud_probability_service import score_alert_fraud_probability
+    from src.fraud_probability_service import score_alert_fraud_probability_comparison
     from src.push_token_service import (
         deactivate_user_push_token,
         list_active_user_push_tokens,
@@ -19,7 +19,7 @@ try:
 except ModuleNotFoundError:
     from alert_price_direction import ABOVE_OR_EQUAL, BELOW_OR_EQUAL, normalize_alert_price_direction
     from db import get_connection
-    from fraud_probability_service import score_alert_fraud_probability
+    from fraud_probability_service import score_alert_fraud_probability_comparison
     from push_token_service import (
         deactivate_user_push_token,
         list_active_user_push_tokens,
@@ -664,6 +664,47 @@ def _resolve_fraud_probability_text_for_display(alert):
     return f"{label_text} ({percent_text})"
 
 
+def _format_fraud_probability_delta_percent_points(v2_probability, v1_probability):
+    parsed_v2 = _normalize_optional_float(v2_probability)
+    parsed_v1 = _normalize_optional_float(v1_probability)
+    if parsed_v1 is None or parsed_v2 is None:
+        return None
+    delta = (parsed_v2 - parsed_v1) * 100
+    sign = "+" if delta >= 0 else ""
+    return f"{sign}{delta:.0f}%p"
+
+
+def _resolve_fraud_probability_comparison_text_for_display(alert):
+    v1_text = _resolve_fraud_probability_text_for_display(
+        {
+            "fraud_probability": alert.get("fraud_probability_v1"),
+            "fraud_probability_label": alert.get("fraud_probability_label_v1"),
+        }
+    )
+    v2_text = _resolve_fraud_probability_text_for_display(
+        {
+            "fraud_probability": alert.get("fraud_probability_v2"),
+            "fraud_probability_label": alert.get("fraud_probability_label_v2"),
+        }
+    )
+    if v1_text == "정보 없음" and v2_text == "정보 없음":
+        return "정보 없음"
+
+    segments = []
+    if v1_text != "정보 없음":
+        segments.append(f"v1 {v1_text}")
+    if v2_text != "정보 없음":
+        segments.append(f"v2 {v2_text}")
+
+    delta_text = _format_fraud_probability_delta_percent_points(
+        alert.get("fraud_probability_v2"),
+        alert.get("fraud_probability_v1"),
+    )
+    if delta_text is not None:
+        segments.append(f"차이 {delta_text}")
+    return " · ".join(segments) if segments else "정보 없음"
+
+
 def _resolve_risk_keywords_text_for_display(alert):
     parsed_keywords = _parse_risk_keywords(alert.get("risk_keywords"))
     if not parsed_keywords:
@@ -1060,6 +1101,14 @@ def _fetch_alert_rows(
                 fraud_probability_label,
                 fraud_model_version,
                 fraud_scored_at,
+                fraud_probability_v1,
+                fraud_probability_label_v1,
+                fraud_model_version_v1,
+                fraud_scored_at_v1,
+                fraud_probability_v2,
+                fraud_probability_label_v2,
+                fraud_model_version_v2,
+                fraud_scored_at_v2,
                 risk_keywords,
                 is_exchange_post,
                 trade_type,
@@ -1121,6 +1170,14 @@ def _fetch_alert_rows(
                     NULL AS fraud_probability_label,
                     NULL AS fraud_model_version,
                     NULL AS fraud_scored_at,
+                    NULL AS fraud_probability_v1,
+                    NULL AS fraud_probability_label_v1,
+                    NULL AS fraud_model_version_v1,
+                    NULL AS fraud_scored_at_v1,
+                    NULL AS fraud_probability_v2,
+                    NULL AS fraud_probability_label_v2,
+                    NULL AS fraud_model_version_v2,
+                    NULL AS fraud_scored_at_v2,
                     risk_keywords,
                     is_exchange_post,
                     trade_type,
@@ -1173,6 +1230,14 @@ def _fetch_alert_rows(
                 NULL AS fraud_probability_label,
                 NULL AS fraud_model_version,
                 NULL AS fraud_scored_at,
+                NULL AS fraud_probability_v1,
+                NULL AS fraud_probability_label_v1,
+                NULL AS fraud_model_version_v1,
+                NULL AS fraud_scored_at_v1,
+                NULL AS fraud_probability_v2,
+                NULL AS fraud_probability_label_v2,
+                NULL AS fraud_model_version_v2,
+                NULL AS fraud_scored_at_v2,
                 NULL AS risk_keywords,
                 NULL AS is_exchange_post,
                 NULL AS trade_type,
@@ -1815,6 +1880,9 @@ def _build_push_notification_payload(alert):
     risk_label = _build_formatted_risk_label(risk_level)
     fraud_probability = _normalize_optional_float(alert.get("fraud_probability"))
     fraud_probability_text = _resolve_fraud_probability_text_for_display(alert)
+    fraud_probability_v1 = _normalize_optional_float(alert.get("fraud_probability_v1"))
+    fraud_probability_v2 = _normalize_optional_float(alert.get("fraud_probability_v2"))
+    fraud_probability_comparison_text = _resolve_fraud_probability_comparison_text_for_display(alert)
 
     body = _normalize_optional_text(alert.get("body_excerpt"))
     if body is None:
@@ -1839,6 +1907,15 @@ def _build_push_notification_payload(alert):
         "fraud_probability": str(fraud_probability) if fraud_probability is not None else "",
         "fraud_probability_label": _normalize_optional_text(alert.get("fraud_probability_label")) or "",
         "fraud_probability_text": fraud_probability_text if fraud_probability_text != "정보 없음" else "",
+        "fraud_probability_v1": str(fraud_probability_v1) if fraud_probability_v1 is not None else "",
+        "fraud_probability_label_v1": _normalize_optional_text(alert.get("fraud_probability_label_v1")) or "",
+        "fraud_probability_v2": str(fraud_probability_v2) if fraud_probability_v2 is not None else "",
+        "fraud_probability_label_v2": _normalize_optional_text(alert.get("fraud_probability_label_v2")) or "",
+        "fraud_probability_comparison_text": (
+            fraud_probability_comparison_text
+            if fraud_probability_comparison_text != "정보 없음"
+            else ""
+        ),
         "product_id": _normalize_optional_text(alert.get("product_id")) or "",
         "url": _normalize_optional_text(alert.get("url")) or "",
         "trigger_reason": _normalize_optional_text(alert.get("trigger_reason")) or "",
@@ -2000,6 +2077,14 @@ def get_pending_alert_events(limit=20):
                     fraud_probability_label,
                     fraud_model_version,
                     fraud_scored_at,
+                    fraud_probability_v1,
+                    fraud_probability_label_v1,
+                    fraud_model_version_v1,
+                    fraud_scored_at_v1,
+                    fraud_probability_v2,
+                    fraud_probability_label_v2,
+                    fraud_model_version_v2,
+                    fraud_scored_at_v2,
                     body_excerpt,
                     body_text,
                     trigger_reason,
@@ -2048,6 +2133,14 @@ def get_pending_alert_events(limit=20):
                         NULL AS fraud_probability_label,
                         NULL AS fraud_model_version,
                         NULL AS fraud_scored_at,
+                        NULL AS fraud_probability_v1,
+                        NULL AS fraud_probability_label_v1,
+                        NULL AS fraud_model_version_v1,
+                        NULL AS fraud_scored_at_v1,
+                        NULL AS fraud_probability_v2,
+                        NULL AS fraud_probability_label_v2,
+                        NULL AS fraud_model_version_v2,
+                        NULL AS fraud_scored_at_v2,
                         body_excerpt,
                         NULL AS body_text,
                         trigger_reason,
@@ -2205,25 +2298,64 @@ def _update_alert_event_fraud_probability(alert_id, score):
     try:
         connection = get_connection()
         cursor = connection.cursor()
-        cursor.execute(
-            """
-            UPDATE alert_events
-            SET
-                fraud_probability = %s,
-                fraud_probability_label = %s,
-                fraud_model_version = %s,
-                fraud_scored_at = %s,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = %s
-            """,
-            (
-                score.get("fraud_probability"),
-                score.get("fraud_probability_label"),
-                score.get("fraud_model_version"),
-                score.get("fraud_scored_at"),
-                normalized_alert_id,
-            ),
-        )
+        try:
+            cursor.execute(
+                """
+                UPDATE alert_events
+                SET
+                    fraud_probability = %s,
+                    fraud_probability_label = %s,
+                    fraud_model_version = %s,
+                    fraud_scored_at = %s,
+                    fraud_probability_v1 = %s,
+                    fraud_probability_label_v1 = %s,
+                    fraud_model_version_v1 = %s,
+                    fraud_scored_at_v1 = %s,
+                    fraud_probability_v2 = %s,
+                    fraud_probability_label_v2 = %s,
+                    fraud_model_version_v2 = %s,
+                    fraud_scored_at_v2 = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (
+                    score.get("fraud_probability"),
+                    score.get("fraud_probability_label"),
+                    score.get("fraud_model_version"),
+                    score.get("fraud_scored_at"),
+                    score.get("fraud_probability_v1"),
+                    score.get("fraud_probability_label_v1"),
+                    score.get("fraud_model_version_v1"),
+                    score.get("fraud_scored_at_v1"),
+                    score.get("fraud_probability_v2"),
+                    score.get("fraud_probability_label_v2"),
+                    score.get("fraud_model_version_v2"),
+                    score.get("fraud_scored_at_v2"),
+                    normalized_alert_id,
+                ),
+            )
+        except Exception as exc:
+            if "unknown column" not in str(exc).lower():
+                raise
+            cursor.execute(
+                """
+                UPDATE alert_events
+                SET
+                    fraud_probability = %s,
+                    fraud_probability_label = %s,
+                    fraud_model_version = %s,
+                    fraud_scored_at = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (
+                    score.get("fraud_probability"),
+                    score.get("fraud_probability_label"),
+                    score.get("fraud_model_version"),
+                    score.get("fraud_scored_at"),
+                    normalized_alert_id,
+                ),
+            )
         connection.commit()
         return cursor.rowcount > 0
     finally:
@@ -2253,7 +2385,11 @@ def _build_fraud_probability_alert_context(alert):
 def _ensure_alert_fraud_probability_for_delivery(alert):
     if not isinstance(alert, dict):
         return alert
-    if _normalize_optional_float(alert.get("fraud_probability")) is not None:
+    if (
+        _normalize_optional_float(alert.get("fraud_probability")) is not None
+        and _normalize_optional_float(alert.get("fraud_probability_v1")) is not None
+        and _normalize_optional_float(alert.get("fraud_probability_v2")) is not None
+    ):
         return alert
 
     product_id = _resolve_alert_product_id_for_image_lookup(alert)
@@ -2265,7 +2401,7 @@ def _ensure_alert_fraud_probability_for_delivery(alert):
     try:
         connection = get_connection()
         cursor = connection.cursor(dictionary=True)
-        score = score_alert_fraud_probability(
+        score = score_alert_fraud_probability_comparison(
             cursor,
             product_id=product_id,
             store_id=alert.get("seller_store_seq"),
@@ -2289,6 +2425,14 @@ def _ensure_alert_fraud_probability_for_delivery(alert):
             "fraud_probability_label": score.get("fraud_probability_label"),
             "fraud_model_version": score.get("fraud_model_version"),
             "fraud_scored_at": score.get("fraud_scored_at"),
+            "fraud_probability_v1": score.get("fraud_probability_v1"),
+            "fraud_probability_label_v1": score.get("fraud_probability_label_v1"),
+            "fraud_model_version_v1": score.get("fraud_model_version_v1"),
+            "fraud_scored_at_v1": score.get("fraud_scored_at_v1"),
+            "fraud_probability_v2": score.get("fraud_probability_v2"),
+            "fraud_probability_label_v2": score.get("fraud_probability_label_v2"),
+            "fraud_model_version_v2": score.get("fraud_model_version_v2"),
+            "fraud_scored_at_v2": score.get("fraud_scored_at_v2"),
         }
     )
 
@@ -2461,6 +2605,14 @@ def get_alert_event_by_id(alert_id):
                     fraud_probability_label,
                     fraud_model_version,
                     fraud_scored_at,
+                    fraud_probability_v1,
+                    fraud_probability_label_v1,
+                    fraud_model_version_v1,
+                    fraud_scored_at_v1,
+                    fraud_probability_v2,
+                    fraud_probability_label_v2,
+                    fraud_model_version_v2,
+                    fraud_scored_at_v2,
                     body_excerpt,
                     body_text,
                     trigger_reason,
@@ -2508,6 +2660,14 @@ def get_alert_event_by_id(alert_id):
                         NULL AS fraud_probability_label,
                         NULL AS fraud_model_version,
                         NULL AS fraud_scored_at,
+                        NULL AS fraud_probability_v1,
+                        NULL AS fraud_probability_label_v1,
+                        NULL AS fraud_model_version_v1,
+                        NULL AS fraud_scored_at_v1,
+                        NULL AS fraud_probability_v2,
+                        NULL AS fraud_probability_label_v2,
+                        NULL AS fraud_model_version_v2,
+                        NULL AS fraud_scored_at_v2,
                         body_excerpt,
                         NULL AS body_text,
                         trigger_reason,
@@ -2546,6 +2706,14 @@ def get_alert_event_by_id(alert_id):
                         NULL AS fraud_probability_label,
                         NULL AS fraud_model_version,
                         NULL AS fraud_scored_at,
+                        NULL AS fraud_probability_v1,
+                        NULL AS fraud_probability_label_v1,
+                        NULL AS fraud_model_version_v1,
+                        NULL AS fraud_scored_at_v1,
+                        NULL AS fraud_probability_v2,
+                        NULL AS fraud_probability_label_v2,
+                        NULL AS fraud_model_version_v2,
+                        NULL AS fraud_scored_at_v2,
                         trigger_reason,
                         message,
                         status,
@@ -2707,6 +2875,44 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
             risk_score = _safe_int(row.get("risk_score"))
             fraud_probability = _normalize_optional_float(row.get("fraud_probability"))
             fraud_probability_label = _normalize_optional_text(row.get("fraud_probability_label"))
+            fraud_model_version = _normalize_optional_text(row.get("fraud_model_version"))
+            fraud_probability_v1 = _normalize_optional_float(row.get("fraud_probability_v1"))
+            fraud_probability_label_v1 = _normalize_optional_text(row.get("fraud_probability_label_v1"))
+            fraud_model_version_v1 = _normalize_optional_text(row.get("fraud_model_version_v1"))
+            fraud_probability_v2 = _normalize_optional_float(row.get("fraud_probability_v2"))
+            fraud_probability_label_v2 = _normalize_optional_text(row.get("fraud_probability_label_v2"))
+            fraud_model_version_v2 = _normalize_optional_text(row.get("fraud_model_version_v2"))
+            if fraud_probability_v1 is None and fraud_model_version and "v1" in fraud_model_version:
+                fraud_probability_v1 = fraud_probability
+                fraud_probability_label_v1 = fraud_probability_label
+                fraud_model_version_v1 = fraud_model_version
+            if fraud_probability_v2 is None and fraud_model_version and "v2" in fraud_model_version:
+                fraud_probability_v2 = fraud_probability
+                fraud_probability_label_v2 = fraud_probability_label
+                fraud_model_version_v2 = fraud_model_version
+            fraud_probability_delta_v2_minus_v1 = None
+            if fraud_probability_v1 is not None and fraud_probability_v2 is not None:
+                fraud_probability_delta_v2_minus_v1 = fraud_probability_v2 - fraud_probability_v1
+            fraud_probability_v1_text = _resolve_fraud_probability_text_for_display(
+                {
+                    "fraud_probability": fraud_probability_v1,
+                    "fraud_probability_label": fraud_probability_label_v1,
+                }
+            )
+            fraud_probability_v2_text = _resolve_fraud_probability_text_for_display(
+                {
+                    "fraud_probability": fraud_probability_v2,
+                    "fraud_probability_label": fraud_probability_label_v2,
+                }
+            )
+            fraud_probability_comparison_text = _resolve_fraud_probability_comparison_text_for_display(
+                {
+                    "fraud_probability_v1": fraud_probability_v1,
+                    "fraud_probability_label_v1": fraud_probability_label_v1,
+                    "fraud_probability_v2": fraud_probability_v2,
+                    "fraud_probability_label_v2": fraud_probability_label_v2,
+                }
+            )
             is_exchange_post = _normalize_optional_bool(row.get("is_exchange_post"))
             trade_type = _normalize_optional_text(row.get("trade_type"))
             source = _normalize_optional_text(row.get("source"))
@@ -2850,8 +3056,57 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
                             "fraud_probability_label": fraud_probability_label,
                         }
                     ),
-                    "fraud_model_version": row.get("fraud_model_version"),
+                    "fraud_model_version": fraud_model_version,
                     "fraud_scored_at": row.get("fraud_scored_at"),
+                    "fraud_probability_v1": fraud_probability_v1,
+                    "fraud_probability_label_v1": fraud_probability_label_v1,
+                    "formatted_fraud_probability_label_v1": _build_formatted_fraud_probability_label(
+                        fraud_probability_label_v1
+                    ),
+                    "fraud_probability_v1_text": fraud_probability_v1_text,
+                    "fraud_model_version_v1": fraud_model_version_v1,
+                    "fraud_scored_at_v1": row.get("fraud_scored_at_v1"),
+                    "fraud_probability_v2": fraud_probability_v2,
+                    "fraud_probability_label_v2": fraud_probability_label_v2,
+                    "formatted_fraud_probability_label_v2": _build_formatted_fraud_probability_label(
+                        fraud_probability_label_v2
+                    ),
+                    "fraud_probability_v2_text": fraud_probability_v2_text,
+                    "fraud_model_version_v2": fraud_model_version_v2,
+                    "fraud_scored_at_v2": row.get("fraud_scored_at_v2"),
+                    "fraud_probability_delta_v2_minus_v1": fraud_probability_delta_v2_minus_v1,
+                    "fraud_probability_delta_v2_minus_v1_text": _format_fraud_probability_delta_percent_points(
+                        fraud_probability_v2,
+                        fraud_probability_v1,
+                    ),
+                    "fraud_probability_comparison_text": fraud_probability_comparison_text,
+                    "fraud_probability_comparison": {
+                        "v1": {
+                            "probability": fraud_probability_v1,
+                            "label": fraud_probability_label_v1,
+                            "formatted_label": _build_formatted_fraud_probability_label(
+                                fraud_probability_label_v1
+                            ),
+                            "text": fraud_probability_v1_text,
+                            "model_version": fraud_model_version_v1,
+                            "scored_at": row.get("fraud_scored_at_v1"),
+                        },
+                        "v2": {
+                            "probability": fraud_probability_v2,
+                            "label": fraud_probability_label_v2,
+                            "formatted_label": _build_formatted_fraud_probability_label(
+                                fraud_probability_label_v2
+                            ),
+                            "text": fraud_probability_v2_text,
+                            "model_version": fraud_model_version_v2,
+                            "scored_at": row.get("fraud_scored_at_v2"),
+                        },
+                        "delta_v2_minus_v1": fraud_probability_delta_v2_minus_v1,
+                        "delta_v2_minus_v1_text": _format_fraud_probability_delta_percent_points(
+                            fraud_probability_v2,
+                            fraud_probability_v1,
+                        ),
+                    },
                     "risk_keywords": risk_keywords_display,
                     "trade_type_flags": trade_type_flags,
                     "is_exchange_post": bool(is_exchange_post) if is_exchange_post is not None else False,

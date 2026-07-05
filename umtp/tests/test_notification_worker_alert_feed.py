@@ -65,6 +65,18 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
                     "alert_price_direction": "BELOW_OR_EQUAL",
                     "risk_level": "LOW",
                     "risk_score": 0,
+                    "fraud_probability": 0.44,
+                    "fraud_probability_label": "MEDIUM",
+                    "fraud_model_version": "fraud-logreg-tfidf-v2",
+                    "fraud_scored_at": "2026-07-05T13:00:00",
+                    "fraud_probability_v1": 0.31,
+                    "fraud_probability_label_v1": "MEDIUM",
+                    "fraud_model_version_v1": "fraud-logreg-v1",
+                    "fraud_scored_at_v1": "2026-07-05T13:00:00",
+                    "fraud_probability_v2": 0.44,
+                    "fraud_probability_label_v2": "MEDIUM",
+                    "fraud_model_version_v2": "fraud-logreg-tfidf-v2",
+                    "fraud_scored_at_v2": "2026-07-05T13:00:00",
                     "risk_keywords": "[]",
                     "is_exchange_post": False,
                     "trade_type": "sale",
@@ -97,6 +109,15 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
         self.assertEqual(item.get("alert_condition_label"), "이 가격 이하이면 알림")
         self.assertEqual(item.get("alert_type_label"), "정식 알림")
         self.assertEqual(item.get("formatted_risk_label"), "낮음")
+        self.assertEqual(item.get("fraud_probability"), 0.44)
+        self.assertEqual(item.get("fraud_probability_v1"), 0.31)
+        self.assertEqual(item.get("fraud_probability_v2"), 0.44)
+        self.assertEqual(item.get("fraud_probability_v1_text"), "주의 (31%)")
+        self.assertEqual(item.get("fraud_probability_v2_text"), "주의 (44%)")
+        self.assertEqual(item.get("fraud_probability_delta_v2_minus_v1_text"), "+13%p")
+        self.assertEqual(item.get("fraud_probability_comparison_text"), "v1 주의 (31%) · v2 주의 (44%) · 차이 +13%p")
+        self.assertEqual(item.get("fraud_probability_comparison", {}).get("v1", {}).get("model_version"), "fraud-logreg-v1")
+        self.assertEqual(item.get("fraud_probability_comparison", {}).get("v2", {}).get("model_version"), "fraud-logreg-tfidf-v2")
         self.assertEqual(item.get("risk_keywords"), [])
         self.assertEqual(item.get("body_excerpt"), "상태 좋고 배터리 정상")
         self.assertEqual(item.get("body_text"), "상태 좋고 배터리 정상. 사용감 적음.")

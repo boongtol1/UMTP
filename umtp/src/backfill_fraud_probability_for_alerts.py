@@ -3,10 +3,10 @@ from typing import Any, Dict, List, Optional
 
 try:
     from src.db import get_connection
-    from src.fraud_probability_service import score_alert_fraud_probability
+    from src.fraud_probability_service import score_alert_fraud_probability_comparison
 except ModuleNotFoundError:
     from db import get_connection
-    from fraud_probability_service import score_alert_fraud_probability
+    from fraud_probability_service import score_alert_fraud_probability_comparison
 
 
 DEFAULT_LIMIT = 100
@@ -22,12 +22,35 @@ def _normalize_optional_text(value: Any) -> Optional[str]:
     return cleaned or None
 
 
-def _fetch_alert_rows(cursor, *, limit: int, user_id: Optional[str], only_unread: bool) -> List[Dict[str, Any]]:
-    where_tokens = [
-        "fraud_probability IS NULL",
-        "product_id IS NOT NULL",
-        "CHAR_LENGTH(TRIM(CAST(product_id AS CHAR))) > 0",
-    ]
+def _format_probability_for_log(value: Any) -> str:
+    if value is None:
+        return "None"
+    try:
+        return f"{float(value):.5f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _fetch_alert_rows(
+    cursor,
+    *,
+    limit: int,
+    user_id: Optional[str],
+    only_unread: bool,
+    since_hours: Optional[int],
+    force: bool,
+) -> List[Dict[str, Any]]:
+    where_tokens = []
+    if not force:
+        where_tokens.append(
+            "(fraud_probability IS NULL OR fraud_probability_v1 IS NULL OR fraud_probability_v2 IS NULL)"
+        )
+    where_tokens.extend(
+        [
+            "product_id IS NOT NULL",
+            "CHAR_LENGTH(TRIM(CAST(product_id AS CHAR))) > 0",
+        ]
+    )
     params: List[Any] = []
 
     normalized_user_id = _normalize_optional_text(user_id)
@@ -37,6 +60,11 @@ def _fetch_alert_rows(cursor, *, limit: int, user_id: Optional[str], only_unread
 
     if only_unread:
         where_tokens.append("COALESCE(is_read, 0) = 0")
+
+    if since_hours is not None:
+        normalized_since_hours = max(int(since_hours), 1)
+        where_tokens.append("created_at >= DATE_SUB(CURRENT_TIMESTAMP, INTERVAL %s HOUR)")
+        params.append(normalized_since_hours)
 
     params.append(max(int(limit), 1))
     cursor.execute(
@@ -65,7 +93,15 @@ def _fetch_alert_rows(cursor, *, limit: int, user_id: Optional[str], only_unread
     return cursor.fetchall() or []
 
 
-def backfill_fraud_probability(*, limit: int = DEFAULT_LIMIT, user_id: Optional[str] = None, only_unread: bool = False, dry_run: bool = False) -> Dict[str, Any]:
+def backfill_fraud_probability(
+    *,
+    limit: int = DEFAULT_LIMIT,
+    user_id: Optional[str] = None,
+    only_unread: bool = False,
+    since_hours: Optional[int] = None,
+    force: bool = False,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
     connection = get_connection()
     updated_count = 0
     scored_count = 0
@@ -78,10 +114,12 @@ def backfill_fraud_probability(*, limit: int = DEFAULT_LIMIT, user_id: Optional[
             limit=limit,
             user_id=user_id,
             only_unread=only_unread,
+            since_hours=since_hours,
+            force=force,
         )
 
         for row in rows:
-            score = score_alert_fraud_probability(
+            score = score_alert_fraud_probability_comparison(
                 cursor,
                 product_id=row.get("product_id"),
                 store_id=row.get("seller_store_seq"),
@@ -106,8 +144,10 @@ def backfill_fraud_probability(*, limit: int = DEFAULT_LIMIT, user_id: Optional[
             if dry_run:
                 print(
                     f"dry_run alert_id={row.get('id')} product_id={row.get('product_id')} "
-                    f"probability={score.get('fraud_probability'):.5f} "
-                    f"label={score.get('fraud_probability_label')}"
+                    f"probability={_format_probability_for_log(score.get('fraud_probability'))} "
+                    f"label={score.get('fraud_probability_label')} "
+                    f"v1={_format_probability_for_log(score.get('fraud_probability_v1'))} "
+                    f"v2={_format_probability_for_log(score.get('fraud_probability_v2'))}"
                 )
                 continue
 
@@ -118,7 +158,15 @@ def backfill_fraud_probability(*, limit: int = DEFAULT_LIMIT, user_id: Optional[
                     fraud_probability = %s,
                     fraud_probability_label = %s,
                     fraud_model_version = %s,
-                    fraud_scored_at = %s
+                    fraud_scored_at = %s,
+                    fraud_probability_v1 = %s,
+                    fraud_probability_label_v1 = %s,
+                    fraud_model_version_v1 = %s,
+                    fraud_scored_at_v1 = %s,
+                    fraud_probability_v2 = %s,
+                    fraud_probability_label_v2 = %s,
+                    fraud_model_version_v2 = %s,
+                    fraud_scored_at_v2 = %s
                 WHERE id = %s
                 """,
                 (
@@ -126,6 +174,14 @@ def backfill_fraud_probability(*, limit: int = DEFAULT_LIMIT, user_id: Optional[
                     score.get("fraud_probability_label"),
                     score.get("fraud_model_version"),
                     score.get("fraud_scored_at"),
+                    score.get("fraud_probability_v1"),
+                    score.get("fraud_probability_label_v1"),
+                    score.get("fraud_model_version_v1"),
+                    score.get("fraud_scored_at_v1"),
+                    score.get("fraud_probability_v2"),
+                    score.get("fraud_probability_label_v2"),
+                    score.get("fraud_model_version_v2"),
+                    score.get("fraud_scored_at_v2"),
                     row.get("id"),
                 ),
             )
@@ -141,6 +197,8 @@ def backfill_fraud_probability(*, limit: int = DEFAULT_LIMIT, user_id: Optional[
             "scored_count": scored_count,
             "updated_count": updated_count,
             "skipped_count": skipped_count,
+            "since_hours": since_hours,
+            "force": force,
             "dry_run": dry_run,
         }
     except Exception:
@@ -159,6 +217,8 @@ def parse_args():
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     parser.add_argument("--user-id", default=None)
     parser.add_argument("--only-unread", action="store_true")
+    parser.add_argument("--since-hours", type=int, default=None)
+    parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -169,6 +229,8 @@ def main():
         limit=args.limit,
         user_id=args.user_id,
         only_unread=args.only_unread,
+        since_hours=args.since_hours,
+        force=args.force,
         dry_run=args.dry_run,
     )
     print(result)

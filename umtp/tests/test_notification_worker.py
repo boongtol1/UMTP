@@ -316,8 +316,16 @@ class NotificationWorkerTest(unittest.TestCase):
         score = {
             "fraud_probability": 0.755,
             "fraud_probability_label": "HIGH",
-            "fraud_model_version": "fraud-logreg-v1",
+            "fraud_model_version": "fraud-logreg-tfidf-v2",
             "fraud_scored_at": "2026-07-04 08:30:00",
+            "fraud_probability_v1": 0.455,
+            "fraud_probability_label_v1": "MEDIUM",
+            "fraud_model_version_v1": "fraud-logreg-v1",
+            "fraud_scored_at_v1": "2026-07-04 08:30:00",
+            "fraud_probability_v2": 0.755,
+            "fraud_probability_label_v2": "HIGH",
+            "fraud_model_version_v2": "fraud-logreg-tfidf-v2",
+            "fraud_scored_at_v2": "2026-07-04 08:30:00",
         }
 
         with patch(
@@ -329,7 +337,7 @@ class NotificationWorkerTest(unittest.TestCase):
             },
         ):
             with patch("src.notification_worker.get_connection", return_value=FakeConnection()):
-                with patch("src.notification_worker.score_alert_fraud_probability", return_value=score) as mock_score:
+                with patch("src.notification_worker.score_alert_fraud_probability_comparison", return_value=score) as mock_score:
                     with patch("src.notification_worker._update_alert_event_fraud_probability", return_value=True) as mock_update_score:
                         with patch("src.notification_worker._send_fcm_to_user", return_value={"sent": 0, "failed": 0, "attempted": 0, "reason": "no_active_push_tokens"}) as mock_send_fcm:
                             with patch("src.notification_worker._telegram_configured", return_value=True):
@@ -351,6 +359,8 @@ class NotificationWorkerTest(unittest.TestCase):
         mock_score.assert_called_once()
         mock_update_score.assert_called_once_with(31, score)
         self.assertEqual(mock_send_fcm.call_args.args[1].get("fraud_probability_label"), "HIGH")
+        self.assertEqual(mock_send_fcm.call_args.args[1].get("fraud_probability_label_v1"), "MEDIUM")
+        self.assertEqual(mock_send_fcm.call_args.args[1].get("fraud_probability_label_v2"), "HIGH")
         self.assertIn("사기 가능성\n높음 (76%)", mock_send_telegram.call_args.args[0])
 
     def test_send_alert_event_passes_listing_image_url_to_telegram(self):

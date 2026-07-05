@@ -273,3 +273,69 @@ PY
 
 - 이미 떠 있는 worker/API process는 모델을 메모리에 cache할 수 있다.
 - 새 알림에 v2 확률을 적용하려면 `notification_worker`, 앱/API 서버 등 fraud probability를 계산하는 process를 재시작한다.
+
+## 7. 앱 Feed에서 V1/V2 비교 표시
+
+새 알림 생성/발송 시 v1과 v2 모델을 둘 다 실행해서 비교 가능한 값을 저장한다.
+
+보존된 모델 파일:
+
+```text
+models/fraud_probability/fraud-logreg-v1.joblib
+models/fraud_probability/fraud-logreg-tfidf-v2.joblib
+```
+
+저장 방식:
+
+- 기존 `fraud_probability`, `fraud_probability_label`, `fraud_model_version`, `fraud_scored_at`은 v2 대표값으로 유지한다.
+- 비교용으로 아래 컬럼을 추가 저장한다.
+
+```text
+fraud_probability_v1
+fraud_probability_label_v1
+fraud_model_version_v1
+fraud_scored_at_v1
+fraud_probability_v2
+fraud_probability_label_v2
+fraud_model_version_v2
+fraud_scored_at_v2
+```
+
+앱 feed 응답에는 아래 필드가 내려간다.
+
+```text
+fraud_probability_v1_text
+fraud_probability_v2_text
+fraud_probability_delta_v2_minus_v1
+fraud_probability_delta_v2_minus_v1_text
+fraud_probability_comparison_text
+fraud_probability_comparison
+```
+
+예시:
+
+```text
+v1 주의 (31%) · v2 주의 (44%) · 차이 +13%p
+```
+
+주의:
+
+- `fraud_probability`는 앱 기존 호환성을 위해 계속 v2 대표값으로 둔다.
+- v1/v2 비교 계산은 같은 DB feature snapshot을 한 번 만든 뒤, 모델만 각각 실행한다.
+- 새 컬럼 적용 후 worker/API process를 재시작해야 새 코드와 새 모델 cache가 반영된다.
+
+최근 알림 backfill:
+
+```bash
+cd /Users/boongtol_pro/Desktop/UMTP/umtp
+python src/backfill_fraud_probability_for_alerts.py --since-hours 12 --force --limit 500
+```
+
+2026-07-05 실행 결과:
+
+```text
+candidate_count: 21
+scored_count: 21
+updated_count: 21
+skipped_count: 0
+```

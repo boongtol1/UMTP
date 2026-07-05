@@ -1,0 +1,162 @@
+{
+  "model_version": "fraud-logreg-tfidf-v2",
+  "trained_at": "2026-07-05T04:40:48Z",
+  "input_path": "data/fraud_probability/training_features_v2_step2.csv",
+  "row_count": 1561,
+  "train_count": 1248,
+  "test_count": 313,
+  "positive_count": 651,
+  "negative_count": 910,
+  "feature_schema": {
+    "structured_features": [
+      "activity_review_count",
+      "activity_score",
+      "drop_rate_percent",
+      "has_activity_snapshot",
+      "has_default_profile_image",
+      "has_profile_image",
+      "has_profile_snapshot",
+      "has_seller_history",
+      "is_exchange_post",
+      "notified_score",
+      "posts_last_1h",
+      "posts_last_24h",
+      "posts_last_6h",
+      "posts_last_7d",
+      "price_krw",
+      "profile_activity_score",
+      "profile_is_official_account",
+      "profile_notified_score",
+      "profile_reliability_score",
+      "profile_review_count",
+      "profile_safe_trade_count",
+      "profile_trust_score",
+      "profile_visit_today_count",
+      "profile_visit_total_count",
+      "reliability_score",
+      "risk_keyword_count",
+      "risk_level",
+      "risk_score",
+      "safe_trade_count",
+      "seller_alert_count_30d",
+      "seller_alert_count_before",
+      "seller_alert_product_count_30d",
+      "seller_avg_price_7d",
+      "seller_content_change_count_7d",
+      "seller_history_age_hours",
+      "seller_max_price_7d",
+      "seller_min_price_7d",
+      "seller_price_change_count_7d",
+      "seller_product_snapshot_count_7d",
+      "seller_product_snapshot_count_before",
+      "seller_review_count",
+      "seller_search_result_count_7d",
+      "seller_search_result_count_before",
+      "seller_seen_product_count_24h",
+      "seller_seen_product_count_7d",
+      "seller_seen_product_count_before",
+      "seller_store_name_change_count_30d",
+      "seller_store_name_change_count_before",
+      "sort_dayofweek",
+      "sort_hour",
+      "store_name_len",
+      "title_len",
+      "trade_type",
+      "trust_score",
+      "visible_product_count",
+      "visit_today_count",
+      "visit_total_count"
+    ],
+    "text_features": [
+      "body_text",
+      "title_text"
+    ],
+    "categorical_features": [
+      "risk_level",
+      "trade_type"
+    ],
+    "skip_features": [
+      "label",
+      "product_id",
+      "store_id"
+    ],
+    "title_tfidf": {
+      "analyzer": "char_wb",
+      "ngram_range": [
+        2,
+        5
+      ],
+      "min_df": 2,
+      "max_df": 0.95,
+      "max_features": 800,
+      "sublinear_tf": true
+    },
+    "body_tfidf": {
+      "analyzer": "char_wb",
+      "ngram_range": [
+        2,
+        5
+      ],
+      "min_df": 2,
+      "max_df": 0.95,
+      "max_features": 2500,
+      "sublinear_tf": true
+    }
+  },
+  "average_precision": 0.9471277876554566,
+  "roc_auc": 0.8183962264150944,
+  "brier_score": 0.2747523180321389,
+  "classification_report_at_0_5": {
+    "0": {
+      "precision": 0.24561403508771928,
+      "recall": 0.875,
+      "f1-score": 0.3835616438356164,
+      "support": 48.0
+    },
+    "1": {
+      "precision": 0.9577464788732394,
+      "recall": 0.5132075471698113,
+      "f1-score": 0.6683046683046683,
+      "support": 265.0
+    },
+    "accuracy": 0.5686900958466453,
+    "macro avg": {
+      "precision": 0.6016802569804793,
+      "recall": 0.6941037735849056,
+      "f1-score": 0.5259331560701423,
+      "support": 313.0
+    },
+    "weighted avg": {
+      "precision": 0.8485376696026166,
+      "recall": 0.5686900958466453,
+      "f1-score": 0.6246380064052609,
+      "support": 313.0
+    }
+  },
+  "thresholds": {
+    "0.25": {
+      "flagged_count": 236,
+      "flagged_rate": 0.7539936102236422,
+      "true_positive_flagged": 220,
+      "false_positive_flagged": 16
+    },
+    "0.5": {
+      "flagged_count": 142,
+      "flagged_rate": 0.4536741214057508,
+      "true_positive_flagged": 136,
+      "false_positive_flagged": 6
+    },
+    "0.65": {
+      "flagged_count": 95,
+      "flagged_rate": 0.3035143769968051,
+      "true_positive_flagged": 93,
+      "false_positive_flagged": 2
+    },
+    "0.8": {
+      "flagged_count": 24,
+      "flagged_rate": 0.07667731629392971,
+      "true_positive_flagged": 22,
+      "false_positive_flagged": 2
+    }
+  }
+}

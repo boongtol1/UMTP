@@ -14,7 +14,7 @@ from src.alert_price_direction import (
     normalize_alert_price_direction,
 )
 from src.db import get_connection
-from src.fraud_probability_service import score_alert_fraud_probability
+from src.fraud_probability_service import score_alert_fraud_probability_comparison
 from src.macbook_air_units import (
     SUPPORTED_PRODUCT_TYPES,
     generate_supported_units,
@@ -957,7 +957,7 @@ def _insert_condition_change_candidate_notice_alert_event(
     if trade_type is None:
         trade_type = "exchange" if is_exchange_post else "sale"
 
-    fraud_score = score_alert_fraud_probability(
+    fraud_score = score_alert_fraud_probability_comparison(
         cursor,
         product_id=product_id,
         alert_context={
@@ -1003,6 +1003,14 @@ def _insert_condition_change_candidate_notice_alert_event(
                 fraud_probability_label,
                 fraud_model_version,
                 fraud_scored_at,
+                fraud_probability_v1,
+                fraud_probability_label_v1,
+                fraud_model_version_v1,
+                fraud_scored_at_v1,
+                fraud_probability_v2,
+                fraud_probability_label_v2,
+                fraud_model_version_v2,
+                fraud_scored_at_v2,
                 risk_keywords,
                 is_exchange_post,
                 trade_type,
@@ -1020,7 +1028,8 @@ def _insert_condition_change_candidate_notice_alert_event(
                 %s, %s, NULL, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, NULL, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, 'pending', 0, 0, NULL
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, 'pending', 0, 0, NULL
             )
             """,
             (
@@ -1047,6 +1056,14 @@ def _insert_condition_change_candidate_notice_alert_event(
                 _safe_text(fraud_score.get("fraud_probability_label")),
                 _safe_text(fraud_score.get("fraud_model_version")),
                 fraud_score.get("fraud_scored_at"),
+                _safe_float(fraud_score.get("fraud_probability_v1")),
+                _safe_text(fraud_score.get("fraud_probability_label_v1")),
+                _safe_text(fraud_score.get("fraud_model_version_v1")),
+                fraud_score.get("fraud_scored_at_v1"),
+                _safe_float(fraud_score.get("fraud_probability_v2")),
+                _safe_text(fraud_score.get("fraud_probability_label_v2")),
+                _safe_text(fraud_score.get("fraud_model_version_v2")),
+                fraud_score.get("fraud_scored_at_v2"),
                 risk_keywords,
                 bool(is_exchange_post),
                 trade_type,
