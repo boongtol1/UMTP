@@ -139,6 +139,97 @@ first_url_log AS (
      )
   ) ranked
   WHERE rn = 1
+),
+first_url_log_any_time AS (
+  SELECT *
+  FROM (
+    SELECT
+      l.product_id AS labeled_product_id,
+      ual.title,
+      ual.body_text,
+      ROW_NUMBER() OVER (
+        PARTITION BY l.product_id
+        ORDER BY ual.created_at ASC, ual.id ASC
+      ) AS rn
+    FROM labeled l
+    JOIN first_search_result fsr
+      ON CAST(fsr.product_id AS CHAR) = l.product_id
+    JOIN url_analysis_logs ual
+      ON ual.url = fsr.url
+  ) ranked
+  WHERE rn = 1
+),
+first_alert_archive AS (
+  SELECT *
+  FROM (
+    SELECT
+      l.product_id AS labeled_product_id,
+      area.alert_body_text,
+      area.alert_body_excerpt,
+      ROW_NUMBER() OVER (
+        PARTITION BY l.product_id
+        ORDER BY area.created_at ASC, area.id ASC
+      ) AS rn
+    FROM labeled l
+    JOIN alert_read_archive_events area
+      ON CAST(area.alert_product_id AS CHAR) = l.product_id
+  ) ranked
+  WHERE rn = 1
+),
+first_listing_result_by_alert_job AS (
+  SELECT *
+  FROM (
+    SELECT
+      l.product_id AS labeled_product_id,
+      lar.body_text,
+      ROW_NUMBER() OVER (
+        PARTITION BY l.product_id
+        ORDER BY lar.created_at ASC, lar.id ASC
+      ) AS rn
+    FROM labeled l
+    JOIN first_alert fa
+      ON CAST(fa.product_id AS CHAR) = l.product_id
+    JOIN listing_analysis_results lar
+      ON lar.analysis_job_id = fa.analysis_job_id
+  ) ranked
+  WHERE rn = 1
+),
+first_listing_result_by_analysis_job AS (
+  SELECT *
+  FROM (
+    SELECT
+      l.product_id AS labeled_product_id,
+      lar.body_text,
+      ROW_NUMBER() OVER (
+        PARTITION BY l.product_id
+        ORDER BY lar.created_at ASC, lar.id ASC
+      ) AS rn
+    FROM labeled l
+    JOIN analysis_jobs aj
+      ON CAST(aj.product_id AS CHAR) = l.product_id
+    JOIN listing_analysis_results lar
+      ON lar.analysis_job_id = aj.id
+  ) ranked
+  WHERE rn = 1
+),
+first_listing_result_by_title_price AS (
+  SELECT *
+  FROM (
+    SELECT
+      l.product_id AS labeled_product_id,
+      lar.body_text,
+      ROW_NUMBER() OVER (
+        PARTITION BY l.product_id
+        ORDER BY lar.created_at ASC, lar.id ASC
+      ) AS rn
+    FROM labeled l
+    JOIN first_search_result fsr
+      ON CAST(fsr.product_id AS CHAR) = l.product_id
+    JOIN listing_analysis_results lar
+      ON lar.title = fsr.title
+     AND lar.listing_price_krw = fsr.price
+  ) ranked
+  WHERE rn = 1
 )
 SELECT
   l.label,
@@ -155,6 +246,12 @@ SELECT
     NULLIF(TRIM(fa.body_text), ''),
     NULLIF(TRIM(fa.body_excerpt), ''),
     NULLIF(TRIM(ful.body_text), ''),
+    NULLIF(TRIM(faa.alert_body_text), ''),
+    NULLIF(TRIM(faa.alert_body_excerpt), ''),
+    NULLIF(TRIM(flj.body_text), ''),
+    NULLIF(TRIM(fla.body_text), ''),
+    NULLIF(TRIM(fua.body_text), ''),
+    NULLIF(TRIM(flt.body_text), ''),
     ''
   ) AS body_text,
 
@@ -217,6 +314,16 @@ LEFT JOIN first_alert fa
   ON CAST(fa.product_id AS CHAR) = l.product_id
 LEFT JOIN first_url_log ful
   ON ful.labeled_product_id = l.product_id
+LEFT JOIN first_url_log_any_time fua
+  ON fua.labeled_product_id = l.product_id
+LEFT JOIN first_alert_archive faa
+  ON faa.labeled_product_id = l.product_id
+LEFT JOIN first_listing_result_by_alert_job flj
+  ON flj.labeled_product_id = l.product_id
+LEFT JOIN first_listing_result_by_analysis_job fla
+  ON fla.labeled_product_id = l.product_id
+LEFT JOIN first_listing_result_by_title_price flt
+  ON flt.labeled_product_id = l.product_id
 ORDER BY l.listing_sort_date ASC
 """
 
