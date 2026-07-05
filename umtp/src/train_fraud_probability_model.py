@@ -9,6 +9,7 @@ import joblib
 import numpy as np
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.feature_extraction import DictVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     average_precision_score,
@@ -16,27 +17,46 @@ from sklearn.metrics import (
     classification_report,
     roc_auc_score,
 )
+from sklearn.pipeline import FeatureUnion
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import FunctionTransformer
 
 
 DEFAULT_INPUT_PATH = os.path.join(
     "data",
     "fraud_probability",
-    "training_features.csv",
+    "training_features_v2_step2.csv",
 )
 DEFAULT_MODEL_PATH = os.path.join(
     "models",
     "fraud_probability",
-    "current.joblib",
+    "v2_candidate.joblib",
 )
 DEFAULT_METRICS_PATH = os.path.join(
     "models",
     "fraud_probability",
-    "current_metrics.json",
+    "v2_candidate_metrics.json",
 )
-MODEL_VERSION = "fraud-logreg-v1"
+MODEL_VERSION = "fraud-logreg-tfidf-v2"
 CATEGORICAL_FEATURES = {"risk_level", "trade_type"}
 SKIP_FEATURES = {"label", "product_id", "store_id"}
+TEXT_FEATURES = {"title_text", "body_text"}
+TITLE_TFIDF_CONFIG = {
+    "analyzer": "char_wb",
+    "ngram_range": (2, 5),
+    "min_df": 2,
+    "max_df": 0.95,
+    "max_features": 800,
+    "sublinear_tf": True,
+}
+BODY_TFIDF_CONFIG = {
+    "analyzer": "char_wb",
+    "ngram_range": (2, 5),
+    "min_df": 2,
+    "max_df": 0.95,
+    "max_features": 2500,
+    "sublinear_tf": True,
+}
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -70,6 +90,33 @@ def _coerce_value(key: str, value: Any) -> Any:
         return -1.0
 
 
+def _normalize_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip()
+
+
+def _extract_structured_feature_dicts(rows):
+    return [
+        {
+            key: _coerce_value(key, value)
+            for key, value in row.items()
+            if key not in TEXT_FEATURES
+        }
+        for row in rows
+    ]
+
+
+def _extract_title_texts(rows):
+    return [_normalize_text(row.get("title_text")) for row in rows]
+
+
+def _extract_body_texts(rows):
+    return [_normalize_text(row.get("body_text")) for row in rows]
+
+
 def _load_rows(input_path: str):
     rows = []
     with open(input_path, newline="", encoding="utf-8") as input_file:
@@ -77,7 +124,7 @@ def _load_rows(input_path: str):
         for row in reader:
             y_value = int(row["label"])
             features = {
-                key: _coerce_value(key, value)
+                key: _normalize_text(value) if key in TEXT_FEATURES else value
                 for key, value in row.items()
                 if key not in SKIP_FEATURES
             }
@@ -85,6 +132,72 @@ def _load_rows(input_path: str):
     if not rows:
         raise RuntimeError("fraud probability training rows are empty")
     return rows
+
+
+def _build_model_pipeline() -> Pipeline:
+    structured_pipeline = Pipeline(
+        [
+            (
+                "selector",
+                FunctionTransformer(_extract_structured_feature_dicts, validate=False),
+            ),
+            ("vectorizer", DictVectorizer(sparse=True)),
+        ]
+    )
+    title_pipeline = Pipeline(
+        [
+            (
+                "selector",
+                FunctionTransformer(_extract_title_texts, validate=False),
+            ),
+            ("tfidf", TfidfVectorizer(**TITLE_TFIDF_CONFIG)),
+        ]
+    )
+    body_pipeline = Pipeline(
+        [
+            (
+                "selector",
+                FunctionTransformer(_extract_body_texts, validate=False),
+            ),
+            ("tfidf", TfidfVectorizer(**BODY_TFIDF_CONFIG)),
+        ]
+    )
+
+    return Pipeline(
+        [
+            (
+                "features",
+                FeatureUnion(
+                    [
+                        ("structured", structured_pipeline),
+                        ("title_text", title_pipeline),
+                        ("body_text", body_pipeline),
+                    ]
+                ),
+            ),
+            (
+                "classifier",
+                LogisticRegression(
+                    max_iter=2000,
+                    class_weight="balanced",
+                    solver="liblinear",
+                ),
+            ),
+        ]
+    )
+
+
+def _feature_columns(rows):
+    if not rows:
+        return []
+    keys = set()
+    for features, _, _ in rows:
+        keys.update(features.keys())
+    return sorted(keys)
+
+
+def _structured_feature_columns(rows):
+    return [key for key in _feature_columns(rows) if key not in TEXT_FEATURES]
 
 
 def train_model(
@@ -102,19 +215,7 @@ def train_model(
     x_test = [item[0] for item in test_rows]
     y_test = [item[1] for item in test_rows]
 
-    base_pipeline = Pipeline(
-        [
-            ("vectorizer", DictVectorizer(sparse=True)),
-            (
-                "classifier",
-                LogisticRegression(
-                    max_iter=2000,
-                    class_weight="balanced",
-                    solver="liblinear",
-                ),
-            ),
-        ]
-    )
+    base_pipeline = _build_model_pipeline()
     model = CalibratedClassifierCV(base_pipeline, method="sigmoid", cv=5)
     model.fit(x_train, y_train)
 
@@ -129,6 +230,14 @@ def train_model(
         "test_count": len(test_rows),
         "positive_count": sum(y_value for _, y_value, _ in rows),
         "negative_count": len(rows) - sum(y_value for _, y_value, _ in rows),
+        "feature_schema": {
+            "structured_features": _structured_feature_columns(rows),
+            "text_features": sorted(TEXT_FEATURES),
+            "categorical_features": sorted(CATEGORICAL_FEATURES),
+            "skip_features": sorted(SKIP_FEATURES),
+            "title_tfidf": dict(TITLE_TFIDF_CONFIG),
+            "body_tfidf": dict(BODY_TFIDF_CONFIG),
+        },
         "average_precision": average_precision_score(y_test, probabilities),
         "roc_auc": roc_auc_score(y_test, probabilities),
         "brier_score": brier_score_loss(y_test, probabilities),
@@ -161,6 +270,10 @@ def train_model(
         "model": model,
         "categorical_features": sorted(CATEGORICAL_FEATURES),
         "skip_features": sorted(SKIP_FEATURES),
+        "text_features": sorted(TEXT_FEATURES),
+        "structured_features": _structured_feature_columns(rows),
+        "title_tfidf_config": dict(TITLE_TFIDF_CONFIG),
+        "body_tfidf_config": dict(BODY_TFIDF_CONFIG),
     }
 
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
@@ -202,4 +315,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

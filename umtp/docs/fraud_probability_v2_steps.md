@@ -95,3 +95,45 @@ data/fraud_probability/training_features_v2_step2.csv
 cd /Users/boongtol_pro/Desktop/UMTP/umtp
 python src/fraud_probability_features.py --output data/fraud_probability/training_features_v2_step2.csv
 ```
+
+## 3. TF-IDF Logistic Regression 학습 스크립트
+
+`src/train_fraud_probability_model.py`는 v2 기본 입력을 사용한다.
+
+기본 입력:
+
+```text
+data/fraud_probability/training_features_v2_step2.csv
+```
+
+기본 산출물:
+
+```text
+models/fraud_probability/v2_candidate.joblib
+models/fraud_probability/v2_candidate_metrics.json
+```
+
+아직 `current.joblib`은 덮어쓰지 않는다. `current.joblib` 교체는 metrics 비교 후 step6에서 진행한다.
+
+모델 구조:
+
+- `structured`: 숫자 feature + `risk_level`, `trade_type` 범주형 feature를 `DictVectorizer`로 변환
+- `title_text`: `TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 5))`
+- `body_text`: `TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 5))`
+- classifier: `LogisticRegression(class_weight="balanced", solver="liblinear")`
+- calibration: `CalibratedClassifierCV(method="sigmoid", cv=5)`
+
+재현 명령:
+
+```bash
+cd /Users/boongtol_pro/Desktop/UMTP/umtp
+python src/train_fraud_probability_model.py
+```
+
+운영 반영 전 임시 검증만 하려면 `/tmp` 등 별도 경로를 사용한다.
+
+```bash
+python src/train_fraud_probability_model.py \
+  --model-output /tmp/fraud_probability_v2_candidate.joblib \
+  --metrics-output /tmp/fraud_probability_v2_candidate_metrics.json
+```
