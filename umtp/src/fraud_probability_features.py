@@ -236,6 +236,145 @@ first_listing_result_by_title_price AS (
      AND NULLIF(TRIM(lar.body_text), '') IS NOT NULL
   ) ranked
   WHERE rn = 1
+),
+seller_search_history AS (
+  SELECT
+    l.product_id AS labeled_product_id,
+    COUNT(srh.id) AS seller_search_result_count_before,
+    COUNT(
+      CASE
+        WHEN srh.fetched_at >= DATE_SUB(fsr.fetched_at, INTERVAL 7 DAY)
+          THEN srh.id
+        ELSE NULL
+      END
+    ) AS seller_search_result_count_7d,
+    COUNT(DISTINCT CAST(srh.product_id AS CHAR)) AS seller_seen_product_count_before,
+    COUNT(
+      DISTINCT CASE
+        WHEN srh.fetched_at >= DATE_SUB(fsr.fetched_at, INTERVAL 24 HOUR)
+          THEN CAST(srh.product_id AS CHAR)
+        ELSE NULL
+      END
+    ) AS seller_seen_product_count_24h,
+    COUNT(
+      DISTINCT CASE
+        WHEN srh.fetched_at >= DATE_SUB(fsr.fetched_at, INTERVAL 7 DAY)
+          THEN CAST(srh.product_id AS CHAR)
+        ELSE NULL
+      END
+    ) AS seller_seen_product_count_7d,
+    TIMESTAMPDIFF(HOUR, MIN(srh.fetched_at), fsr.fetched_at) AS seller_history_age_hours,
+    AVG(
+      CASE
+        WHEN srh.fetched_at >= DATE_SUB(fsr.fetched_at, INTERVAL 7 DAY)
+          THEN srh.price
+        ELSE NULL
+      END
+    ) AS seller_avg_price_7d,
+    MIN(
+      CASE
+        WHEN srh.fetched_at >= DATE_SUB(fsr.fetched_at, INTERVAL 7 DAY)
+          THEN srh.price
+        ELSE NULL
+      END
+    ) AS seller_min_price_7d,
+    MAX(
+      CASE
+        WHEN srh.fetched_at >= DATE_SUB(fsr.fetched_at, INTERVAL 7 DAY)
+          THEN srh.price
+        ELSE NULL
+      END
+    ) AS seller_max_price_7d
+  FROM labeled l
+  JOIN first_search_result fsr
+    ON CAST(fsr.product_id AS CHAR) = l.product_id
+  LEFT JOIN search_results srh
+    ON CAST(srh.seller_store_seq AS CHAR) = l.store_id
+   AND CAST(srh.product_id AS CHAR) <> l.product_id
+   AND srh.fetched_at < fsr.fetched_at
+  GROUP BY l.product_id, fsr.fetched_at
+),
+seller_snapshot_history AS (
+  SELECT
+    l.product_id AS labeled_product_id,
+    COUNT(fph.id) AS seller_product_snapshot_count_before,
+    COUNT(
+      CASE
+        WHEN fph.observed_at >= DATE_SUB(fsr.fetched_at, INTERVAL 7 DAY)
+          THEN fph.id
+        ELSE NULL
+      END
+    ) AS seller_product_snapshot_count_7d,
+    SUM(
+      CASE
+        WHEN fph.observed_at >= DATE_SUB(fsr.fetched_at, INTERVAL 7 DAY)
+         AND fph.snapshot_reason = 'price_changed'
+          THEN 1
+        ELSE 0
+      END
+    ) AS seller_price_change_count_7d,
+    SUM(
+      CASE
+        WHEN fph.observed_at >= DATE_SUB(fsr.fetched_at, INTERVAL 7 DAY)
+         AND fph.snapshot_reason = 'content_changed'
+          THEN 1
+        ELSE 0
+      END
+    ) AS seller_content_change_count_7d
+  FROM labeled l
+  JOIN first_search_result fsr
+    ON CAST(fsr.product_id AS CHAR) = l.product_id
+  LEFT JOIN fraud_product_snapshots fph
+    ON fph.store_id = l.store_id
+   AND fph.product_id <> l.product_id
+   AND fph.observed_at < fsr.fetched_at
+  GROUP BY l.product_id
+),
+seller_alert_history AS (
+  SELECT
+    l.product_id AS labeled_product_id,
+    COUNT(aeh.id) AS seller_alert_count_before,
+    COUNT(
+      CASE
+        WHEN aeh.created_at >= DATE_SUB(fsr.fetched_at, INTERVAL 30 DAY)
+          THEN aeh.id
+        ELSE NULL
+      END
+    ) AS seller_alert_count_30d,
+    COUNT(
+      DISTINCT CASE
+        WHEN aeh.created_at >= DATE_SUB(fsr.fetched_at, INTERVAL 30 DAY)
+          THEN CAST(aeh.product_id AS CHAR)
+        ELSE NULL
+      END
+    ) AS seller_alert_product_count_30d
+  FROM labeled l
+  JOIN first_search_result fsr
+    ON CAST(fsr.product_id AS CHAR) = l.product_id
+  LEFT JOIN alert_events aeh
+    ON CAST(aeh.seller_store_seq AS CHAR) = l.store_id
+   AND (aeh.product_id IS NULL OR CAST(aeh.product_id AS CHAR) <> l.product_id)
+   AND aeh.created_at < fsr.fetched_at
+  GROUP BY l.product_id
+),
+seller_store_name_history AS (
+  SELECT
+    l.product_id AS labeled_product_id,
+    COUNT(jnc.id) AS seller_store_name_change_count_before,
+    COUNT(
+      CASE
+        WHEN jnc.changed_at >= DATE_SUB(fsr.fetched_at, INTERVAL 30 DAY)
+          THEN jnc.id
+        ELSE NULL
+      END
+    ) AS seller_store_name_change_count_30d
+  FROM labeled l
+  JOIN first_search_result fsr
+    ON CAST(fsr.product_id AS CHAR) = l.product_id
+  LEFT JOIN joongna_store_name_changes jnc
+    ON CAST(jnc.store_seq AS CHAR) = l.store_id
+   AND jnc.changed_at < fsr.fetched_at
+  GROUP BY l.product_id
 )
 SELECT
   l.label,
@@ -300,6 +439,33 @@ SELECT
   lp.profile_visit_total_count,
   lp.profile_is_official_account,
 
+  CASE
+    WHEN COALESCE(ssh.seller_seen_product_count_before, 0) > 0
+      OR COALESCE(sph.seller_product_snapshot_count_before, 0) > 0
+      OR COALESCE(sah.seller_alert_count_before, 0) > 0
+      OR COALESCE(ssnh.seller_store_name_change_count_before, 0) > 0
+      THEN 1
+    ELSE 0
+  END AS has_seller_history,
+  COALESCE(ssh.seller_search_result_count_before, 0) AS seller_search_result_count_before,
+  COALESCE(ssh.seller_search_result_count_7d, 0) AS seller_search_result_count_7d,
+  COALESCE(ssh.seller_seen_product_count_before, 0) AS seller_seen_product_count_before,
+  COALESCE(ssh.seller_seen_product_count_24h, 0) AS seller_seen_product_count_24h,
+  COALESCE(ssh.seller_seen_product_count_7d, 0) AS seller_seen_product_count_7d,
+  ssh.seller_history_age_hours,
+  ssh.seller_avg_price_7d,
+  ssh.seller_min_price_7d,
+  ssh.seller_max_price_7d,
+  COALESCE(sph.seller_product_snapshot_count_before, 0) AS seller_product_snapshot_count_before,
+  COALESCE(sph.seller_product_snapshot_count_7d, 0) AS seller_product_snapshot_count_7d,
+  COALESCE(sph.seller_price_change_count_7d, 0) AS seller_price_change_count_7d,
+  COALESCE(sph.seller_content_change_count_7d, 0) AS seller_content_change_count_7d,
+  COALESCE(sah.seller_alert_count_before, 0) AS seller_alert_count_before,
+  COALESCE(sah.seller_alert_count_30d, 0) AS seller_alert_count_30d,
+  COALESCE(sah.seller_alert_product_count_30d, 0) AS seller_alert_product_count_30d,
+  COALESCE(ssnh.seller_store_name_change_count_before, 0) AS seller_store_name_change_count_before,
+  COALESCE(ssnh.seller_store_name_change_count_30d, 0) AS seller_store_name_change_count_30d,
+
   fa.drop_rate_percent,
   fa.risk_score,
   COALESCE(fa.risk_level, 'unknown') AS risk_level,
@@ -331,6 +497,14 @@ LEFT JOIN first_listing_result_by_analysis_job fla
   ON fla.labeled_product_id = l.product_id
 LEFT JOIN first_listing_result_by_title_price flt
   ON flt.labeled_product_id = l.product_id
+LEFT JOIN seller_search_history ssh
+  ON ssh.labeled_product_id = l.product_id
+LEFT JOIN seller_snapshot_history sph
+  ON sph.labeled_product_id = l.product_id
+LEFT JOIN seller_alert_history sah
+  ON sah.labeled_product_id = l.product_id
+LEFT JOIN seller_store_name_history ssnh
+  ON ssnh.labeled_product_id = l.product_id
 ORDER BY l.listing_sort_date ASC
 """
 
