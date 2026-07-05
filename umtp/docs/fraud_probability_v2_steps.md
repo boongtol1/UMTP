@@ -160,3 +160,75 @@ python src/train_fraud_probability_model.py \
 - step4는 운영 feature 생성만 확장한다.
 - `current.joblib` 교체는 아직 하지 않는다.
 - v1 `current.joblib`은 추가 feature를 무시할 수 있어 기존 운영 점수 계산과 호환된다.
+
+## 5. V2 Candidate 학습 및 Metrics 비교
+
+산출물:
+
+```text
+models/fraud_probability/v2_candidate.joblib
+models/fraud_probability/v2_candidate_metrics.json
+models/fraud_probability/v2_metrics_comparison.json
+```
+
+비교 기준:
+
+- v1 baseline: `models/fraud_probability/current.joblib`
+- v2 candidate: `models/fraud_probability/v2_candidate.joblib`
+- 아직 `current.joblib`은 교체하지 않는다.
+
+주요 metrics:
+
+| metric | v1 | v2 candidate | delta |
+|---|---:|---:|---:|
+| rows | 1,526 | 1,561 | +35 |
+| positive | 636 | 651 | +15 |
+| negative | 890 | 910 | +20 |
+| average_precision | 0.9308 | 0.9471 | +0.0163 |
+| roc_auc | 0.7455 | 0.8184 | +0.0729 |
+| brier_score | 0.2875 | 0.2748 | -0.0128 |
+
+threshold 비교:
+
+| threshold | v1 flagged | v1 TP | v1 FP | v2 flagged | v2 TP | v2 FP |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0.25 | 227 | 211 | 16 | 236 | 220 | 16 |
+| 0.50 | 151 | 142 | 9 | 142 | 136 | 6 |
+| 0.65 | 96 | 90 | 6 | 95 | 93 | 2 |
+| 0.80 | 33 | 30 | 3 | 24 | 22 | 2 |
+
+해석:
+
+- v2는 ranking 지표인 `average_precision`, `roc_auc`가 모두 개선됐다.
+- calibration 지표인 `brier_score`도 낮아졌다.
+- `0.65` 기준에서는 flagged 수가 거의 같으면서 TP가 늘고 FP가 줄었다.
+- step6에서 `current.joblib`을 v2 candidate로 교체할 근거가 충분하다.
+
+검증:
+
+```bash
+python src/train_fraud_probability_model.py
+FRAUD_PROBABILITY_MODEL_PATH=models/fraud_probability/v2_candidate.joblib \
+  python - <<'PY'
+from src.db import get_connection
+from src.fraud_probability_service import score_alert_fraud_probability
+
+conn = get_connection()
+try:
+    cur = conn.cursor(dictionary=True)
+    print(score_alert_fraud_probability(
+        cur,
+        product_id="228109341",
+        store_id="379066",
+        alert_context={
+            "title": "맥북 에어 m1 16GB",
+            "body_text": "테스트 본문",
+            "price_krw": 650000,
+            "risk_level": "unknown",
+            "trade_type": "unknown",
+        },
+    ))
+finally:
+    conn.close()
+PY
+```

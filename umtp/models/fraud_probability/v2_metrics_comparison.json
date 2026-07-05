@@ -1,0 +1,89 @@
+{
+  "baseline_model_version": "fraud-logreg-v1",
+  "candidate_model_version": "fraud-logreg-tfidf-v2",
+  "baseline_metrics_path": "models/fraud_probability/current_metrics.json",
+  "candidate_metrics_path": "models/fraud_probability/v2_candidate_metrics.json",
+  "summary": {
+    "row_count": {
+      "baseline": 1526,
+      "candidate": 1561,
+      "delta": 35
+    },
+    "positive_count": {
+      "baseline": 636,
+      "candidate": 651,
+      "delta": 15
+    },
+    "negative_count": {
+      "baseline": 890,
+      "candidate": 910,
+      "delta": 20
+    },
+    "average_precision": {
+      "baseline": 0.9308151123093351,
+      "candidate": 0.9471277876554566,
+      "delta": 0.016312675346121464
+    },
+    "roc_auc": {
+      "baseline": 0.7454906204906205,
+      "candidate": 0.8183962264150944,
+      "delta": 0.07290560592447382
+    },
+    "brier_score": {
+      "baseline": 0.28750649929067235,
+      "candidate": 0.2747523180321389,
+      "delta": -0.012754181258533448
+    }
+  },
+  "thresholds": {
+    "0.25": {
+      "baseline": {
+        "flagged_count": 227,
+        "true_positive_flagged": 211,
+        "false_positive_flagged": 16
+      },
+      "candidate": {
+        "flagged_count": 236,
+        "true_positive_flagged": 220,
+        "false_positive_flagged": 16
+      }
+    },
+    "0.5": {
+      "baseline": {
+        "flagged_count": 151,
+        "true_positive_flagged": 142,
+        "false_positive_flagged": 9
+      },
+      "candidate": {
+        "flagged_count": 142,
+        "true_positive_flagged": 136,
+        "false_positive_flagged": 6
+      }
+    },
+    "0.65": {
+      "baseline": {
+        "flagged_count": 96,
+        "true_positive_flagged": 90,
+        "false_positive_flagged": 6
+      },
+      "candidate": {
+        "flagged_count": 95,
+        "true_positive_flagged": 93,
+        "false_positive_flagged": 2
+      }
+    },
+    "0.8": {
+      "baseline": {
+        "flagged_count": 33,
+        "true_positive_flagged": 30,
+        "false_positive_flagged": 3
+      },
+      "candidate": {
+        "flagged_count": 24,
+        "true_positive_flagged": 22,
+        "false_positive_flagged": 2
+      }
+    }
+  },
+  "decision": "candidate_improves_ranking_and_calibration_metrics; proceed_to_step6_current_model_replacement_after_review"
+}
