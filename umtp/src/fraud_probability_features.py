@@ -21,6 +21,7 @@ WITH labeled AS (
     product_id,
     store_id,
     listing_sort_date,
+    discovered_at,
     label
   FROM fraud_training_label_candidates
   WHERE label IS NOT NULL
@@ -113,11 +114,49 @@ first_alert AS (
       ON CAST(ae.product_id AS CHAR) = l.product_id
   ) ranked
   WHERE rn = 1
+),
+first_url_log AS (
+  SELECT *
+  FROM (
+    SELECT
+      l.product_id AS labeled_product_id,
+      ual.title,
+      ual.body_text,
+      ROW_NUMBER() OVER (
+        PARTITION BY l.product_id
+        ORDER BY ual.created_at ASC, ual.id ASC
+      ) AS rn
+    FROM labeled l
+    JOIN first_search_result fsr
+      ON CAST(fsr.product_id AS CHAR) = l.product_id
+    LEFT JOIN first_alert fa
+      ON CAST(fa.product_id AS CHAR) = l.product_id
+    JOIN url_analysis_logs ual
+      ON ual.url = fsr.url
+     AND ual.created_at <= DATE_ADD(
+       COALESCE(fa.created_at, l.discovered_at, fsr.fetched_at, l.listing_sort_date),
+       INTERVAL 30 MINUTE
+     )
+  ) ranked
+  WHERE rn = 1
 )
 SELECT
   l.label,
   l.product_id,
   l.store_id,
+
+  COALESCE(
+    NULLIF(TRIM(fa.title), ''),
+    NULLIF(TRIM(fsr.title), ''),
+    NULLIF(TRIM(ful.title), ''),
+    ''
+  ) AS title_text,
+  COALESCE(
+    NULLIF(TRIM(fa.body_text), ''),
+    NULLIF(TRIM(fa.body_excerpt), ''),
+    NULLIF(TRIM(ful.body_text), ''),
+    ''
+  ) AS body_text,
 
   fsr.price AS price_krw,
   CHAR_LENGTH(COALESCE(fsr.title, '')) AS title_len,
@@ -176,6 +215,8 @@ LEFT JOIN latest_profile lp
   ON lp.labeled_product_id = l.product_id
 LEFT JOIN first_alert fa
   ON CAST(fa.product_id AS CHAR) = l.product_id
+LEFT JOIN first_url_log ful
+  ON ful.labeled_product_id = l.product_id
 ORDER BY l.listing_sort_date ASC
 """
 
@@ -228,4 +269,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
