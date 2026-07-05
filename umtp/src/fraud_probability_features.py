@@ -137,6 +137,7 @@ first_url_log AS (
        COALESCE(fa.created_at, l.discovered_at, fsr.fetched_at, l.listing_sort_date),
        INTERVAL 30 MINUTE
      )
+     AND NULLIF(TRIM(ual.body_text), '') IS NOT NULL
   ) ranked
   WHERE rn = 1
 ),
@@ -156,6 +157,7 @@ first_url_log_any_time AS (
       ON CAST(fsr.product_id AS CHAR) = l.product_id
     JOIN url_analysis_logs ual
       ON ual.url = fsr.url
+     AND NULLIF(TRIM(ual.body_text), '') IS NOT NULL
   ) ranked
   WHERE rn = 1
 ),
@@ -173,6 +175,7 @@ first_alert_archive AS (
     FROM labeled l
     JOIN alert_read_archive_events area
       ON CAST(area.alert_product_id AS CHAR) = l.product_id
+     AND NULLIF(TRIM(COALESCE(area.alert_body_text, area.alert_body_excerpt, '')), '') IS NOT NULL
   ) ranked
   WHERE rn = 1
 ),
@@ -191,6 +194,7 @@ first_listing_result_by_alert_job AS (
       ON CAST(fa.product_id AS CHAR) = l.product_id
     JOIN listing_analysis_results lar
       ON lar.analysis_job_id = fa.analysis_job_id
+     AND NULLIF(TRIM(lar.body_text), '') IS NOT NULL
   ) ranked
   WHERE rn = 1
 ),
@@ -209,6 +213,7 @@ first_listing_result_by_analysis_job AS (
       ON CAST(aj.product_id AS CHAR) = l.product_id
     JOIN listing_analysis_results lar
       ON lar.analysis_job_id = aj.id
+     AND NULLIF(TRIM(lar.body_text), '') IS NOT NULL
   ) ranked
   WHERE rn = 1
 ),
@@ -228,6 +233,7 @@ first_listing_result_by_title_price AS (
     JOIN listing_analysis_results lar
       ON lar.title = fsr.title
      AND lar.listing_price_krw = fsr.price
+     AND NULLIF(TRIM(lar.body_text), '') IS NOT NULL
   ) ranked
   WHERE rn = 1
 )
