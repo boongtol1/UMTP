@@ -2237,6 +2237,9 @@ def _build_fraud_probability_alert_context(alert):
     if not isinstance(alert, dict):
         return {}
     return {
+        "title": alert.get("title"),
+        "body_excerpt": alert.get("body_excerpt"),
+        "body_text": alert.get("body_text"),
         "price_krw": alert.get("price_krw"),
         "drop_rate_percent": alert.get("drop_rate_percent"),
         "risk_score": alert.get("risk_score"),

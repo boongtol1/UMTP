@@ -2,6 +2,7 @@ import argparse
 import csv
 import json
 import os
+import sys
 from datetime import datetime
 from typing import Any
 
@@ -21,6 +22,29 @@ from sklearn.pipeline import FeatureUnion
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+try:
+    from src.fraud_probability_model_pipeline import (
+        CATEGORICAL_FEATURES,
+        TEXT_FEATURES,
+        extract_body_texts,
+        extract_structured_feature_dicts,
+        extract_title_texts,
+        normalize_text,
+    )
+except ModuleNotFoundError:
+    from fraud_probability_model_pipeline import (
+        CATEGORICAL_FEATURES,
+        TEXT_FEATURES,
+        extract_body_texts,
+        extract_structured_feature_dicts,
+        extract_title_texts,
+        normalize_text,
+    )
+
 
 DEFAULT_INPUT_PATH = os.path.join(
     "data",
@@ -38,9 +62,7 @@ DEFAULT_METRICS_PATH = os.path.join(
     "v2_candidate_metrics.json",
 )
 MODEL_VERSION = "fraud-logreg-tfidf-v2"
-CATEGORICAL_FEATURES = {"risk_level", "trade_type"}
 SKIP_FEATURES = {"label", "product_id", "store_id"}
-TEXT_FEATURES = {"title_text", "body_text"}
 TITLE_TFIDF_CONFIG = {
     "analyzer": "char_wb",
     "ngram_range": (2, 5),
@@ -75,48 +97,6 @@ def _to_jsonable(value: Any) -> Any:
     return value
 
 
-def _coerce_value(key: str, value: Any) -> Any:
-    if key in CATEGORICAL_FEATURES:
-        if value is None or str(value).strip() == "":
-            return "unknown"
-        return str(value).strip()
-
-    if value is None or str(value).strip() == "":
-        return -1.0
-
-    try:
-        return float(value)
-    except ValueError:
-        return -1.0
-
-
-def _normalize_text(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value.strip()
-    return str(value).strip()
-
-
-def _extract_structured_feature_dicts(rows):
-    return [
-        {
-            key: _coerce_value(key, value)
-            for key, value in row.items()
-            if key not in TEXT_FEATURES
-        }
-        for row in rows
-    ]
-
-
-def _extract_title_texts(rows):
-    return [_normalize_text(row.get("title_text")) for row in rows]
-
-
-def _extract_body_texts(rows):
-    return [_normalize_text(row.get("body_text")) for row in rows]
-
-
 def _load_rows(input_path: str):
     rows = []
     with open(input_path, newline="", encoding="utf-8") as input_file:
@@ -124,7 +104,7 @@ def _load_rows(input_path: str):
         for row in reader:
             y_value = int(row["label"])
             features = {
-                key: _normalize_text(value) if key in TEXT_FEATURES else value
+                key: normalize_text(value) if key in TEXT_FEATURES else value
                 for key, value in row.items()
                 if key not in SKIP_FEATURES
             }
@@ -139,7 +119,7 @@ def _build_model_pipeline() -> Pipeline:
         [
             (
                 "selector",
-                FunctionTransformer(_extract_structured_feature_dicts, validate=False),
+                FunctionTransformer(extract_structured_feature_dicts, validate=False),
             ),
             ("vectorizer", DictVectorizer(sparse=True)),
         ]
@@ -148,7 +128,7 @@ def _build_model_pipeline() -> Pipeline:
         [
             (
                 "selector",
-                FunctionTransformer(_extract_title_texts, validate=False),
+                FunctionTransformer(extract_title_texts, validate=False),
             ),
             ("tfidf", TfidfVectorizer(**TITLE_TFIDF_CONFIG)),
         ]
@@ -157,7 +137,7 @@ def _build_model_pipeline() -> Pipeline:
         [
             (
                 "selector",
-                FunctionTransformer(_extract_body_texts, validate=False),
+                FunctionTransformer(extract_body_texts, validate=False),
             ),
             ("tfidf", TfidfVectorizer(**BODY_TFIDF_CONFIG)),
         ]

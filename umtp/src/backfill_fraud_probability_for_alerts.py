@@ -45,13 +45,16 @@ def _fetch_alert_rows(cursor, *, limit: int, user_id: Optional[str], only_unread
             id,
             product_id,
             seller_store_seq,
+            title,
             price_krw,
             drop_rate_percent,
             risk_score,
             risk_level,
             risk_keywords,
             is_exchange_post,
-            trade_type
+            trade_type,
+            body_excerpt,
+            body_text
         FROM alert_events
         WHERE {" AND ".join(where_tokens)}
         ORDER BY id DESC
@@ -83,6 +86,9 @@ def backfill_fraud_probability(*, limit: int = DEFAULT_LIMIT, user_id: Optional[
                 product_id=row.get("product_id"),
                 store_id=row.get("seller_store_seq"),
                 alert_context={
+                    "title": row.get("title"),
+                    "body_excerpt": row.get("body_excerpt"),
+                    "body_text": row.get("body_text"),
                     "price_krw": row.get("price_krw"),
                     "drop_rate_percent": row.get("drop_rate_percent"),
                     "risk_score": row.get("risk_score"),
@@ -170,4 +176,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

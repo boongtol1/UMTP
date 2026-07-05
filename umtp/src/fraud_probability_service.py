@@ -8,6 +8,28 @@ MODEL_VERSION_UNKNOWN = "unknown"
 LOW_LABEL = "LOW"
 MEDIUM_LABEL = "MEDIUM"
 HIGH_LABEL = "HIGH"
+TEXT_FEATURES = {"title_text", "body_text"}
+SELLER_HISTORY_FEATURES = {
+    "has_seller_history": 0,
+    "seller_search_result_count_before": 0,
+    "seller_search_result_count_7d": 0,
+    "seller_seen_product_count_before": 0,
+    "seller_seen_product_count_24h": 0,
+    "seller_seen_product_count_7d": 0,
+    "seller_history_age_hours": None,
+    "seller_avg_price_7d": None,
+    "seller_min_price_7d": None,
+    "seller_max_price_7d": None,
+    "seller_product_snapshot_count_before": 0,
+    "seller_product_snapshot_count_7d": 0,
+    "seller_price_change_count_7d": 0,
+    "seller_content_change_count_7d": 0,
+    "seller_alert_count_before": 0,
+    "seller_alert_count_30d": 0,
+    "seller_alert_product_count_30d": 0,
+    "seller_store_name_change_count_before": 0,
+    "seller_store_name_change_count_30d": 0,
+}
 
 _MODEL_ARTIFACT = None
 _MODEL_LOAD_FAILED = False
@@ -85,6 +107,11 @@ def _risk_keyword_count(value: Any) -> int:
     return 0
 
 
+def _is_schema_missing_error(exc: Exception) -> bool:
+    lowered = str(exc).lower()
+    return "unknown column" in lowered or "doesn't exist" in lowered or "does not exist" in lowered
+
+
 def probability_to_label(probability: Optional[float]) -> Optional[str]:
     if probability is None:
         return None
@@ -118,6 +145,34 @@ def _load_model_artifact() -> Optional[Dict[str, Any]]:
 
 
 def _fetch_first_search_result(cursor, product_id: str) -> Dict[str, Any]:
+    try:
+        cursor.execute(
+            """
+            SELECT
+              id,
+              product_id,
+              title,
+              body_text,
+              price,
+              sort_date,
+              url,
+              seller_store_seq,
+              seller_store_name,
+              seller_profile_image_url,
+              seller_review_count,
+              fetched_at
+            FROM search_results
+            WHERE CAST(product_id AS CHAR) = %s
+            ORDER BY fetched_at ASC, id ASC
+            LIMIT 1
+            """,
+            (product_id,),
+        )
+        return cursor.fetchone() or {}
+    except Exception as exc:
+        if not _is_schema_missing_error(exc):
+            raise
+
     cursor.execute(
         """
         SELECT
@@ -198,7 +253,214 @@ def _fetch_latest_profile(cursor, *, store_id: str, feature_time: Any) -> Dict[s
     return cursor.fetchone() or {}
 
 
+def _seller_history_defaults() -> Dict[str, Any]:
+    return dict(SELLER_HISTORY_FEATURES)
+
+
+def _fetch_seller_history(cursor, *, store_id: str, product_id: str, feature_time: Any) -> Dict[str, Any]:
+    if store_id is None or product_id is None or feature_time is None:
+        return _seller_history_defaults()
+
+    history = _seller_history_defaults()
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+              COUNT(id) AS seller_search_result_count_before,
+              COUNT(
+                CASE
+                  WHEN fetched_at >= DATE_SUB(%s, INTERVAL 7 DAY)
+                    THEN id
+                  ELSE NULL
+                END
+              ) AS seller_search_result_count_7d,
+              COUNT(DISTINCT CAST(product_id AS CHAR)) AS seller_seen_product_count_before,
+              COUNT(
+                DISTINCT CASE
+                  WHEN fetched_at >= DATE_SUB(%s, INTERVAL 24 HOUR)
+                    THEN CAST(product_id AS CHAR)
+                  ELSE NULL
+                END
+              ) AS seller_seen_product_count_24h,
+              COUNT(
+                DISTINCT CASE
+                  WHEN fetched_at >= DATE_SUB(%s, INTERVAL 7 DAY)
+                    THEN CAST(product_id AS CHAR)
+                  ELSE NULL
+                END
+              ) AS seller_seen_product_count_7d,
+              TIMESTAMPDIFF(HOUR, MIN(fetched_at), %s) AS seller_history_age_hours,
+              AVG(
+                CASE
+                  WHEN fetched_at >= DATE_SUB(%s, INTERVAL 7 DAY)
+                    THEN price
+                  ELSE NULL
+                END
+              ) AS seller_avg_price_7d,
+              MIN(
+                CASE
+                  WHEN fetched_at >= DATE_SUB(%s, INTERVAL 7 DAY)
+                    THEN price
+                  ELSE NULL
+                END
+              ) AS seller_min_price_7d,
+              MAX(
+                CASE
+                  WHEN fetched_at >= DATE_SUB(%s, INTERVAL 7 DAY)
+                    THEN price
+                  ELSE NULL
+                END
+              ) AS seller_max_price_7d
+            FROM search_results
+            WHERE CAST(seller_store_seq AS CHAR) = %s
+              AND CAST(product_id AS CHAR) <> %s
+              AND fetched_at < %s
+            """,
+            (
+                feature_time,
+                feature_time,
+                feature_time,
+                feature_time,
+                feature_time,
+                feature_time,
+                feature_time,
+                store_id,
+                product_id,
+                feature_time,
+            ),
+        )
+        history.update(cursor.fetchone() or {})
+    except Exception as exc:
+        if not _is_schema_missing_error(exc):
+            raise
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+              COUNT(id) AS seller_product_snapshot_count_before,
+              COUNT(
+                CASE
+                  WHEN observed_at >= DATE_SUB(%s, INTERVAL 7 DAY)
+                    THEN id
+                  ELSE NULL
+                END
+              ) AS seller_product_snapshot_count_7d,
+              COALESCE(SUM(
+                CASE
+                  WHEN observed_at >= DATE_SUB(%s, INTERVAL 7 DAY)
+                   AND snapshot_reason = 'price_changed'
+                    THEN 1
+                  ELSE 0
+                END
+              ), 0) AS seller_price_change_count_7d,
+              COALESCE(SUM(
+                CASE
+                  WHEN observed_at >= DATE_SUB(%s, INTERVAL 7 DAY)
+                   AND snapshot_reason = 'content_changed'
+                    THEN 1
+                  ELSE 0
+                END
+              ), 0) AS seller_content_change_count_7d
+            FROM fraud_product_snapshots
+            WHERE store_id = %s
+              AND product_id <> %s
+              AND observed_at < %s
+            """,
+            (
+                feature_time,
+                feature_time,
+                feature_time,
+                store_id,
+                product_id,
+                feature_time,
+            ),
+        )
+        history.update(cursor.fetchone() or {})
+    except Exception as exc:
+        if not _is_schema_missing_error(exc):
+            raise
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+              COUNT(id) AS seller_alert_count_before,
+              COUNT(
+                CASE
+                  WHEN created_at >= DATE_SUB(%s, INTERVAL 30 DAY)
+                    THEN id
+                  ELSE NULL
+                END
+              ) AS seller_alert_count_30d,
+              COUNT(
+                DISTINCT CASE
+                  WHEN created_at >= DATE_SUB(%s, INTERVAL 30 DAY)
+                    THEN CAST(product_id AS CHAR)
+                  ELSE NULL
+                END
+              ) AS seller_alert_product_count_30d
+            FROM alert_events
+            WHERE CAST(seller_store_seq AS CHAR) = %s
+              AND (product_id IS NULL OR CAST(product_id AS CHAR) <> %s)
+              AND created_at < %s
+            """,
+            (
+                feature_time,
+                feature_time,
+                store_id,
+                product_id,
+                feature_time,
+            ),
+        )
+        history.update(cursor.fetchone() or {})
+    except Exception as exc:
+        if not _is_schema_missing_error(exc):
+            raise
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+              COUNT(id) AS seller_store_name_change_count_before,
+              COUNT(
+                CASE
+                  WHEN changed_at >= DATE_SUB(%s, INTERVAL 30 DAY)
+                    THEN id
+                  ELSE NULL
+                END
+              ) AS seller_store_name_change_count_30d
+            FROM joongna_store_name_changes
+            WHERE CAST(store_seq AS CHAR) = %s
+              AND changed_at < %s
+            """,
+            (
+                feature_time,
+                store_id,
+                feature_time,
+            ),
+        )
+        history.update(cursor.fetchone() or {})
+    except Exception as exc:
+        if not _is_schema_missing_error(exc):
+            raise
+
+    history["has_seller_history"] = 1 if any(
+        _safe_float(history.get(key)) not in (None, 0.0)
+        for key in (
+            "seller_seen_product_count_before",
+            "seller_product_snapshot_count_before",
+            "seller_alert_count_before",
+            "seller_store_name_change_count_before",
+        )
+    ) else 0
+    return history
+
+
 def _feature_value(key: str, value: Any) -> Any:
+    if key in TEXT_FEATURES:
+        return _normalize_optional_text(value) or ""
     if key in {"risk_level", "trade_type"}:
         return _normalize_optional_text(value) or "unknown"
     parsed = _safe_float(value)
@@ -212,9 +474,17 @@ def _build_features(
     search_result: Dict[str, Any],
     activity: Dict[str, Any],
     profile: Dict[str, Any],
+    seller_history: Dict[str, Any],
     alert_context: Dict[str, Any],
 ) -> Dict[str, Any]:
-    title = _normalize_optional_text(search_result.get("title")) or ""
+    search_title = _normalize_optional_text(search_result.get("title")) or ""
+    title_text = _normalize_optional_text(alert_context.get("title")) or search_title
+    body_text = (
+        _normalize_optional_text(alert_context.get("body_text"))
+        or _normalize_optional_text(alert_context.get("body_excerpt"))
+        or _normalize_optional_text(search_result.get("body_text"))
+        or ""
+    )
     sort_date = search_result.get("sort_date")
     sort_hour = getattr(sort_date, "hour", None)
     sort_dayofweek = None
@@ -222,8 +492,10 @@ def _build_features(
         sort_dayofweek = sort_date.isoweekday() % 7 + 1
 
     raw_features = {
+        "title_text": title_text,
+        "body_text": body_text,
         "price_krw": search_result.get("price") or alert_context.get("price_krw"),
-        "title_len": len(title),
+        "title_len": len(search_title or title_text),
         "sort_hour": sort_hour,
         "sort_dayofweek": sort_dayofweek,
         "has_profile_image": 1 if _normalize_optional_text(search_result.get("seller_profile_image_url")) else 0,
@@ -254,6 +526,8 @@ def _build_features(
         "profile_visit_today_count": profile.get("profile_visit_today_count"),
         "profile_visit_total_count": profile.get("profile_visit_total_count"),
         "profile_is_official_account": profile.get("profile_is_official_account"),
+        **_seller_history_defaults(),
+        **(seller_history or {}),
         "drop_rate_percent": alert_context.get("drop_rate_percent"),
         "risk_score": alert_context.get("risk_score"),
         "risk_level": alert_context.get("risk_level"),
@@ -305,6 +579,12 @@ def score_alert_fraud_probability(
             search_result=search_result,
             activity=activity,
             profile=profile,
+            seller_history=_fetch_seller_history(
+                cursor,
+                store_id=normalized_store_id,
+                product_id=normalized_product_id,
+                feature_time=feature_time,
+            ),
             alert_context=alert_context,
         )
         probability = float(artifact["model"].predict_proba([features])[0][1])
@@ -317,4 +597,3 @@ def score_alert_fraud_probability(
         "fraud_model_version": _normalize_optional_text(artifact.get("model_version")) or MODEL_VERSION_UNKNOWN,
         "fraud_scored_at": _utc_now_naive(),
     }
-

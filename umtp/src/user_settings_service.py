@@ -961,6 +961,9 @@ def _insert_condition_change_candidate_notice_alert_event(
         cursor,
         product_id=product_id,
         alert_context={
+            "title": title,
+            "body_excerpt": body_excerpt,
+            "body_text": body_text,
             "price_krw": normalized_listing_price_krw,
             "drop_rate_percent": None,
             "risk_score": risk_score,

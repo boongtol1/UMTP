@@ -137,3 +137,26 @@ python src/train_fraud_probability_model.py \
   --model-output /tmp/fraud_probability_v2_candidate.joblib \
   --metrics-output /tmp/fraud_probability_v2_candidate_metrics.json
 ```
+
+## 4. 운영 Feature 확장
+
+`src/fraud_probability_service.py`가 알림 생성/발송 시점에도 v2 학습 feature와 같은 shape의 dict를 만든다.
+
+추가 운영 feature:
+
+- `title_text`
+- `body_text`
+- step2의 seller history feature 19개
+
+연결 경로:
+
+- `listing_analysis_pipeline.py`: 새 알림 생성 전 fraud score 계산 시 `title`, `body_excerpt`, `body_text` 전달
+- `notification_worker.py`: 기존 알림 발송 직전 fraud score backfill 시 제목/본문 전달
+- `backfill_fraud_probability_for_alerts.py`: 수동 backfill 시 제목/본문 전달
+- `user_settings_service.py`: 조건 변경 후보 알림 생성 시 제목/본문 전달
+
+주의:
+
+- step4는 운영 feature 생성만 확장한다.
+- `current.joblib` 교체는 아직 하지 않는다.
+- v1 `current.joblib`은 추가 feature를 무시할 수 있어 기존 운영 점수 계산과 호환된다.

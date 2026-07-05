@@ -896,6 +896,9 @@ def maybe_create_alert_event(
         product_id=normalized_product_id,
         store_id=seller_store_seq,
         alert_context={
+            "title": title,
+            "body_excerpt": body_excerpt,
+            "body_text": body_text,
             "price_krw": price_krw,
             "drop_rate_percent": drop_rate_percent,
             "risk_score": risk_result.get("risk_score"),
