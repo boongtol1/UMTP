@@ -116,6 +116,7 @@ class NotificationWorkerAlertFeedTest(unittest.TestCase):
         self.assertEqual(item.get("fraud_probability_v2_text"), "주의 (44%)")
         self.assertEqual(item.get("fraud_probability_delta_v2_minus_v1_text"), "+13%p")
         self.assertEqual(item.get("fraud_probability_comparison_text"), "v1 주의 (31%) · v2 주의 (44%) · 차이 +13%p")
+        self.assertEqual(item.get("fraud_probability_text"), "v1 주의 (31%) · v2 주의 (44%) · 차이 +13%p")
         self.assertEqual(item.get("fraud_probability_comparison", {}).get("v1", {}).get("model_version"), "fraud-logreg-v1")
         self.assertEqual(item.get("fraud_probability_comparison", {}).get("v2", {}).get("model_version"), "fraud-logreg-tfidf-v2")
         self.assertEqual(item.get("risk_keywords"), [])

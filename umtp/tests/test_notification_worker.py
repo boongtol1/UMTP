@@ -9,6 +9,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.notification_worker import (  # noqa: E402
+    _build_push_notification_payload,
     _build_telegram_message,
     dispatch_alert_event_immediately,
     list_alert_events_for_user,
@@ -362,6 +363,27 @@ class NotificationWorkerTest(unittest.TestCase):
         self.assertEqual(mock_send_fcm.call_args.args[1].get("fraud_probability_label_v1"), "MEDIUM")
         self.assertEqual(mock_send_fcm.call_args.args[1].get("fraud_probability_label_v2"), "HIGH")
         self.assertIn("사기 가능성\n높음 (76%)", mock_send_telegram.call_args.args[0])
+
+    def test_push_payload_uses_comparison_text_for_existing_app_field(self):
+        _title, body, data = _build_push_notification_payload(
+            {
+                "id": 41,
+                "title": "사기 확률 비교 테스트",
+                "body_excerpt": "본문",
+                "fraud_probability": 0.755,
+                "fraud_probability_label": "HIGH",
+                "fraud_probability_v1": 0.455,
+                "fraud_probability_label_v1": "MEDIUM",
+                "fraud_probability_v2": 0.755,
+                "fraud_probability_label_v2": "HIGH",
+            }
+        )
+
+        self.assertEqual(
+            data.get("fraud_probability_text"),
+            "v1 주의 (46%) · v2 높음 (76%) · 차이 +30%p",
+        )
+        self.assertIn("사기 가능성 v1 주의 (46%) · v2 높음 (76%) · 차이 +30%p", body)
 
     def test_send_alert_event_passes_listing_image_url_to_telegram(self):
         with patch(

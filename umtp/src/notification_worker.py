@@ -705,6 +705,13 @@ def _resolve_fraud_probability_comparison_text_for_display(alert):
     return " · ".join(segments) if segments else "정보 없음"
 
 
+def _resolve_fraud_probability_display_text_for_app(alert):
+    comparison_text = _resolve_fraud_probability_comparison_text_for_display(alert)
+    if comparison_text != "정보 없음":
+        return comparison_text
+    return _resolve_fraud_probability_text_for_display(alert)
+
+
 def _resolve_risk_keywords_text_for_display(alert):
     parsed_keywords = _parse_risk_keywords(alert.get("risk_keywords"))
     if not parsed_keywords:
@@ -1879,10 +1886,10 @@ def _build_push_notification_payload(alert):
     risk_level = _normalize_optional_text(alert.get("risk_level"))
     risk_label = _build_formatted_risk_label(risk_level)
     fraud_probability = _normalize_optional_float(alert.get("fraud_probability"))
-    fraud_probability_text = _resolve_fraud_probability_text_for_display(alert)
     fraud_probability_v1 = _normalize_optional_float(alert.get("fraud_probability_v1"))
     fraud_probability_v2 = _normalize_optional_float(alert.get("fraud_probability_v2"))
     fraud_probability_comparison_text = _resolve_fraud_probability_comparison_text_for_display(alert)
+    fraud_probability_text = _resolve_fraud_probability_display_text_for_app(alert)
 
     body = _normalize_optional_text(alert.get("body_excerpt"))
     if body is None:
@@ -2913,6 +2920,16 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
                     "fraud_probability_label_v2": fraud_probability_label_v2,
                 }
             )
+            fraud_probability_display_text = (
+                fraud_probability_comparison_text
+                if fraud_probability_comparison_text != "정보 없음"
+                else _resolve_fraud_probability_text_for_display(
+                    {
+                        "fraud_probability": fraud_probability,
+                        "fraud_probability_label": fraud_probability_label,
+                    }
+                )
+            )
             is_exchange_post = _normalize_optional_bool(row.get("is_exchange_post"))
             trade_type = _normalize_optional_text(row.get("trade_type"))
             source = _normalize_optional_text(row.get("source"))
@@ -3050,12 +3067,7 @@ def list_alert_events_for_user(user_id, limit=200, is_read="0", exclude_read_arc
                     "formatted_fraud_probability_label": _build_formatted_fraud_probability_label(
                         fraud_probability_label
                     ),
-                    "fraud_probability_text": _resolve_fraud_probability_text_for_display(
-                        {
-                            "fraud_probability": fraud_probability,
-                            "fraud_probability_label": fraud_probability_label,
-                        }
-                    ),
+                    "fraud_probability_text": fraud_probability_display_text,
                     "fraud_model_version": fraud_model_version,
                     "fraud_scored_at": row.get("fraud_scored_at"),
                     "fraud_probability_v1": fraud_probability_v1,
