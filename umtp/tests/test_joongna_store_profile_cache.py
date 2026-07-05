@@ -12,6 +12,7 @@ if PROJECT_ROOT not in sys.path:
 from src.joongna_polling_service import (  # noqa: E402
     STORE_PROFILE_SUCCESS_TTL_HOURS,
     resolve_store_profile_for_store_seq,
+    resolve_search_result_body_text,
     save_group_search_results,
 )
 
@@ -184,6 +185,7 @@ class JoongnaStoreProfileCacheTest(unittest.TestCase):
                 "price": 1200000,
                 "sort_date": "2026-05-21 12:00:00",
                 "product_url": "https://web.joongna.com/product/1001",
+                "body_text": "상세 본문",
                 "storeSeq": 703755,
             }
         ]
@@ -210,6 +212,38 @@ class JoongnaStoreProfileCacheTest(unittest.TestCase):
         self.assertEqual(cached_row.get("fetch_status"), "failed")
         self.assertIsNotNone(cached_row.get("next_retry_at"))
         self.assertGreater(cached_row.get("next_retry_at"), datetime.now() - timedelta(minutes=1))
+
+    def test_search_result_body_text_uses_item_value_without_detail_fetch(self):
+        item = {
+            "product_id": 1001,
+            "body_text": "검색 API 본문",
+        }
+
+        with patch("src.joongna_polling_service.fetch_html") as mock_fetch_html:
+            body_text = resolve_search_result_body_text(
+                item,
+                url="https://web.joongna.com/product/1001",
+            )
+
+        self.assertEqual(body_text, "검색 API 본문")
+        self.assertEqual(mock_fetch_html.call_count, 0)
+
+    def test_search_result_body_text_falls_back_to_detail_page(self):
+        html = """
+        <html>
+          <head>
+            <meta name="twitter:description" content="상세 페이지 본문">
+          </head>
+        </html>
+        """
+
+        with patch("src.joongna_polling_service.fetch_html", return_value=html):
+            body_text = resolve_search_result_body_text(
+                {"product_id": 1001},
+                url="https://web.joongna.com/product/1001",
+            )
+
+        self.assertEqual(body_text, "상세 페이지 본문")
 
 
 if __name__ == "__main__":

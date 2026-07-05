@@ -3,6 +3,8 @@ import hashlib
 import json
 import os
 
+from bs4 import BeautifulSoup
+
 try:
     from src.db import get_connection
     from src.joongna_search_client import fetch_joongna_store_profile, search_joongna_products
@@ -15,6 +17,7 @@ try:
     from src.listing_analysis_pipeline import (
         enqueue_analysis_for_product,
     )
+    from src.listing_page_parser import fetch_html
     from src.search_keyword_utils import dedupe_keywords_keep_order, normalize_search_keyword
     from src.user_settings_service import (
         get_due_user_fair_price_polling_targets as get_due_watch_rules,
@@ -32,6 +35,7 @@ except ModuleNotFoundError:
     from listing_analysis_pipeline import (
         enqueue_analysis_for_product,
     )
+    from listing_page_parser import fetch_html
     from search_keyword_utils import dedupe_keywords_keep_order, normalize_search_keyword
     from user_settings_service import (
         get_due_user_fair_price_polling_targets as get_due_watch_rules,
@@ -241,6 +245,54 @@ def _safe_json_dumps(value):
         return "{}"
 
 
+def _extract_body_text_from_search_item(item):
+    if not isinstance(item, dict):
+        return None
+    for key in ("body_text", "body", "content", "description", "desc", "productDescription", "productDesc", "text"):
+        parsed = _safe_text(item.get(key))
+        if parsed is not None:
+            return parsed
+    nested_data = item.get("data")
+    if isinstance(nested_data, dict):
+        for key in ("body_text", "body", "content", "description", "desc", "productDescription", "productDesc", "text"):
+            parsed = _safe_text(nested_data.get(key))
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _extract_detail_body_text_from_html(html):
+    if not isinstance(html, str) or not html.strip():
+        return None
+    soup = BeautifulSoup(html, "html.parser")
+    for attrs in (
+        {"name": "twitter:description"},
+        {"property": "og:description"},
+        {"name": "description"},
+    ):
+        tag = soup.find("meta", attrs=attrs)
+        parsed = _safe_text(tag.get("content") if tag else None)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def resolve_search_result_body_text(item, *, url=None):
+    body_text = _extract_body_text_from_search_item(item)
+    if body_text is not None:
+        return body_text
+
+    normalized_url = _safe_text(url)
+    if normalized_url is None:
+        return None
+
+    try:
+        html = fetch_html(normalized_url)
+    except Exception:
+        return None
+    return _extract_detail_body_text_from_html(html)
+
+
 def _is_unknown_column_error(exc):
     lowered = str(exc).lower()
     return "unknown column" in lowered or "doesn't exist" in lowered
@@ -266,6 +318,7 @@ def _build_search_result_content_signature(
     seller_store_level,
     seller_trust_score,
     seller_review_count,
+    body_text,
     raw_json,
 ):
     payload = {
@@ -280,6 +333,7 @@ def _build_search_result_content_signature(
         "seller_store_level": _safe_text(seller_store_level),
         "seller_trust_score": _safe_int(seller_trust_score),
         "seller_review_count": _safe_int(seller_review_count),
+        "body_text": _safe_text(body_text),
         "raw_json_sha256": hashlib.sha256((raw_json or "{}").encode("utf-8")).hexdigest(),
     }
     signature_source = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -305,6 +359,7 @@ def _fetch_latest_search_result_content_signature(cursor, *, search_query_id, pr
                 price,
                 sort_date,
                 url,
+                body_text,
                 refresh_key,
                 seller_store_seq,
                 seller_store_name,
@@ -331,14 +386,15 @@ def _fetch_latest_search_result_content_signature(cursor, *, search_query_id, pr
                 price=_row_value(row, "price", 2),
                 sort_date=_row_value(row, "sort_date", 3),
                 url=_row_value(row, "url", 4),
-                refresh_key=_row_value(row, "refresh_key", 5),
-                seller_store_seq=_row_value(row, "seller_store_seq", 6),
-                seller_store_name=_row_value(row, "seller_store_name", 7),
-                seller_profile_image_url=_row_value(row, "seller_profile_image_url", 8),
-                seller_store_level=_row_value(row, "seller_store_level", 9),
-                seller_trust_score=_row_value(row, "seller_trust_score", 10),
-                seller_review_count=_row_value(row, "seller_review_count", 11),
-                raw_json=_safe_text(_row_value(row, "raw_json", 12)) or "{}",
+                body_text=_row_value(row, "body_text", 5),
+                refresh_key=_row_value(row, "refresh_key", 6),
+                seller_store_seq=_row_value(row, "seller_store_seq", 7),
+                seller_store_name=_row_value(row, "seller_store_name", 8),
+                seller_profile_image_url=_row_value(row, "seller_profile_image_url", 9),
+                seller_store_level=_row_value(row, "seller_store_level", 10),
+                seller_trust_score=_row_value(row, "seller_trust_score", 11),
+                seller_review_count=_row_value(row, "seller_review_count", 12),
+                raw_json=_safe_text(_row_value(row, "raw_json", 13)) or "{}",
             )
         return None
     except Exception as exc:
@@ -382,6 +438,7 @@ def _fetch_latest_search_result_content_signature(cursor, *, search_query_id, pr
                 seller_store_level=_row_value(row, "seller_store_level", 7),
                 seller_trust_score=_row_value(row, "seller_trust_score", 8),
                 seller_review_count=_row_value(row, "seller_review_count", 9),
+                body_text=None,
                 raw_json=_safe_text(_row_value(row, "raw_json", 10)) or "{}",
             )
         return None
@@ -420,6 +477,7 @@ def _fetch_latest_search_result_content_signature(cursor, *, search_query_id, pr
         seller_store_level=None,
         seller_trust_score=None,
         seller_review_count=None,
+        body_text=None,
         raw_json=_safe_text(_row_value(row, "raw_json", 4)) or "{}",
     )
 
@@ -440,6 +498,7 @@ def _insert_search_result_row(
     seller_store_level,
     seller_trust_score,
     seller_review_count,
+    body_text,
     raw_json,
     content_signature,
     fetched_at,
@@ -454,6 +513,7 @@ def _insert_search_result_row(
                 price,
                 sort_date,
                 url,
+                body_text,
                 refresh_key,
                 seller_store_seq,
                 seller_store_name,
@@ -465,13 +525,14 @@ def _insert_search_result_row(
                 content_signature,
                 fetched_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 fetched_at = GREATEST(fetched_at, VALUES(fetched_at)),
                 title = VALUES(title),
                 price = VALUES(price),
                 sort_date = VALUES(sort_date),
                 url = VALUES(url),
+                body_text = COALESCE(VALUES(body_text), body_text),
                 refresh_key = VALUES(refresh_key),
                 seller_store_seq = VALUES(seller_store_seq),
                 seller_store_name = VALUES(seller_store_name),
@@ -488,6 +549,7 @@ def _insert_search_result_row(
                 price,
                 sort_date,
                 url,
+                body_text,
                 refresh_key,
                 seller_store_seq,
                 seller_store_name,
@@ -515,6 +577,7 @@ def _insert_search_result_row(
                 price,
                 sort_date,
                 url,
+                body_text,
                 seller_store_seq,
                 seller_store_name,
                 seller_profile_image_url,
@@ -524,7 +587,7 @@ def _insert_search_result_row(
                 raw_json,
                 fetched_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 search_query_id,
@@ -533,12 +596,46 @@ def _insert_search_result_row(
                 price,
                 sort_date,
                 url,
+                body_text,
                 seller_store_seq,
                 seller_store_name,
                 seller_profile_image_url,
                 seller_store_level,
                 seller_trust_score,
                 seller_review_count,
+                raw_json,
+                fetched_at,
+            ),
+        )
+        return int(cursor.rowcount or 0)
+    except Exception as exc:
+        if not _is_unknown_column_error(exc):
+            raise
+
+    try:
+        cursor.execute(
+            """
+            INSERT INTO search_results (
+                search_query_id,
+                product_id,
+                title,
+                price,
+                sort_date,
+                url,
+                body_text,
+                raw_json,
+                fetched_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                search_query_id,
+                product_id,
+                title,
+                price,
+                sort_date,
+                url,
+                body_text,
                 raw_json,
                 fetched_at,
             ),
@@ -1292,6 +1389,9 @@ def save_group_search_results(
         sort_date = _coerce_datetime(item.get("sort_date"))
         url = _safe_text(item.get("product_url")) or ""
         refresh_key = _safe_text(item.get("refresh_key"))
+        body_text = resolve_search_result_body_text(item, url=url)
+        if body_text is not None:
+            item["body_text"] = body_text
         raw_json = _safe_json_dumps(item)
         content_signature = _build_search_result_content_signature(
             title=title,
@@ -1305,6 +1405,7 @@ def save_group_search_results(
             seller_store_level=seller_store_level,
             seller_trust_score=seller_trust_score,
             seller_review_count=seller_review_count,
+            body_text=body_text,
             raw_json=raw_json,
         )
 
@@ -1336,6 +1437,7 @@ def save_group_search_results(
             seller_store_level=seller_store_level,
             seller_trust_score=seller_trust_score,
             seller_review_count=seller_review_count,
+            body_text=body_text,
             raw_json=raw_json,
             content_signature=content_signature,
             fetched_at=normalized_fetched_at,

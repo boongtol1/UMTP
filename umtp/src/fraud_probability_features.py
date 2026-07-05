@@ -251,6 +251,7 @@ SELECT
   COALESCE(
     NULLIF(TRIM(fa.body_text), ''),
     NULLIF(TRIM(fa.body_excerpt), ''),
+    NULLIF(TRIM(fsr.body_text), ''),
     NULLIF(TRIM(ful.body_text), ''),
     NULLIF(TRIM(faa.alert_body_text), ''),
     NULLIF(TRIM(faa.alert_body_excerpt), ''),
