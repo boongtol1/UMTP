@@ -4,7 +4,7 @@ import re
 from hashlib import sha256
 from bisect import bisect_left
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import requests
 
@@ -259,6 +259,227 @@ def _snapshot_text_hash(value: Any) -> Optional[str]:
 def _snapshot_fingerprint(payload: Dict[str, Any]) -> str:
     normalized = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
     return _sha256_hex(normalized)
+
+
+_SNAPSHOT_RETENTION_SPECS = {
+    "fraud_product_snapshots": {
+        "key_column": "product_id",
+        "time_column": "observed_at",
+        "columns": (
+            "id",
+            "product_id",
+            "store_id",
+            "observed_at",
+            "sort_date",
+            "price_krw",
+            "title",
+            "title_hash",
+            "body_hash",
+            "content_hash",
+            "source",
+            "url",
+            "snapshot_reason",
+        ),
+    },
+    "fraud_store_status_snapshots": {
+        "key_column": "store_id",
+        "time_column": "checked_at",
+        "columns": (
+            "id",
+            "store_id",
+            "store_seq",
+            "checked_at",
+            "status",
+            "status_reason",
+            "source",
+            "is_active",
+            "http_status",
+            "meta_code",
+            "meta_message",
+            "raw_status_text",
+            "raw_snippet",
+            "first_seen_product_id",
+            "first_seen_sort_date",
+            "error_message",
+        ),
+    },
+    "fraud_store_activity_snapshots": {
+        "key_column": "store_id",
+        "time_column": "checked_at",
+        "columns": (
+            "id",
+            "store_id",
+            "store_seq",
+            "checked_at",
+            "posts_last_1h",
+            "posts_last_6h",
+            "posts_last_24h",
+            "posts_last_7d",
+            "visible_product_count",
+            "store_name_fingerprint",
+            "profile_fingerprint",
+            "profile_image_url",
+            "has_default_profile_image",
+            "store_level",
+            "store_level_number",
+            "review_count",
+            "reliability_score",
+            "activity_score",
+            "notified_score",
+            "safe_trade_count",
+            "trust_score",
+            "chat_response_ratio",
+            "chat_response_time",
+            "chat_response_time_text",
+            "visit_today_count",
+            "visit_total_count",
+            "store_grade",
+            "user_type",
+            "partner_center_seller_yn",
+            "is_official_account",
+            "store_desc",
+            "first_seen_product_id",
+            "first_seen_sort_date",
+        ),
+    },
+    "fraud_store_profile_field_snapshots": {
+        "key_column": "store_id",
+        "time_column": "checked_at",
+        "columns": (
+            "id",
+            "store_id",
+            "store_seq",
+            "checked_at",
+            "status",
+            "source",
+            "trust_score",
+            "review_count",
+            "store_level",
+            "store_level_number",
+            "safe_trade_count",
+            "reliability_score",
+            "activity_score",
+            "notified_score",
+            "visit_today_count",
+            "visit_total_count",
+            "is_official_account",
+        ),
+    },
+}
+
+
+def _fetch_snapshot_retention_rows(
+    cursor,
+    *,
+    table_name: str,
+    key_value: str,
+    newest_first: bool,
+    limit: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    spec = _SNAPSHOT_RETENTION_SPECS.get(table_name)
+    if spec is None:
+        raise ValueError(f"unsupported snapshot table: {table_name}")
+
+    direction = "DESC" if newest_first else "ASC"
+    limit_sql = f" LIMIT {max(int(limit), 1)}" if limit is not None else ""
+    columns_sql = ", ".join(spec["columns"])
+    cursor.execute(
+        f"""
+        SELECT {columns_sql}
+        FROM {table_name}
+        WHERE {spec['key_column']} = %s
+        ORDER BY {spec['time_column']} {direction}, id {direction}
+        {limit_sql}
+        FOR UPDATE
+        """,
+        (key_value,),
+    )
+    return [row for row in (cursor.fetchall() or []) if isinstance(row, dict)]
+
+
+def _delete_snapshot_rows(cursor, *, table_name: str, key_value: str, row_ids: List[int]) -> None:
+    if not row_ids:
+        return
+
+    spec = _SNAPSHOT_RETENTION_SPECS.get(table_name)
+    if spec is None:
+        raise ValueError(f"unsupported snapshot table: {table_name}")
+
+    for row_id_chunk in _chunked(row_ids, 500):
+        placeholders = ", ".join(["%s"] * len(row_id_chunk))
+        cursor.execute(
+            f"""
+            DELETE FROM {table_name}
+            WHERE {spec['key_column']} = %s
+              AND id IN ({placeholders})
+            """,
+            (key_value, *row_id_chunk),
+        )
+
+
+def _enforce_cleanup_snapshot_retention(
+    cursor,
+    *,
+    table_name: str,
+    key_value: str,
+    inserted_id: Optional[int],
+    fingerprint_builder: Callable[[Dict[str, Any]], str],
+) -> None:
+    """Keep state changes and the latest observation, matching the cleanup SQL policy."""
+    recent_rows = _fetch_snapshot_retention_rows(
+        cursor,
+        table_name=table_name,
+        key_value=key_value,
+        newest_first=True,
+        limit=3,
+    )
+    if not recent_rows:
+        return
+
+    newest_id = _safe_int(recent_rows[0].get("id"))
+    normalized_inserted_id = _safe_int(inserted_id)
+    if normalized_inserted_id is not None and newest_id == normalized_inserted_id:
+        if len(recent_rows) >= 3:
+            previous_latest = recent_rows[1]
+            previous_change = recent_rows[2]
+            if fingerprint_builder(previous_latest) == fingerprint_builder(previous_change):
+                redundant_id = _safe_int(previous_latest.get("id"))
+                if redundant_id is not None:
+                    _delete_snapshot_rows(
+                        cursor,
+                        table_name=table_name,
+                        key_value=key_value,
+                        row_ids=[redundant_id],
+                    )
+        return
+
+    # Out-of-order observations can change both neighboring comparisons. They are
+    # rare, so compact only this product/store history instead of the whole table.
+    ordered_rows = _fetch_snapshot_retention_rows(
+        cursor,
+        table_name=table_name,
+        key_value=key_value,
+        newest_first=False,
+    )
+    redundant_ids: List[int] = []
+    previous_fingerprint = None
+    last_index = len(ordered_rows) - 1
+    for index, row in enumerate(ordered_rows):
+        current_fingerprint = fingerprint_builder(row)
+        is_state_change = index == 0 or current_fingerprint != previous_fingerprint
+        is_latest = index == last_index
+        if not is_state_change and not is_latest:
+            row_id = _safe_int(row.get("id"))
+            if row_id is not None:
+                redundant_ids.append(row_id)
+        previous_fingerprint = current_fingerprint
+
+    _delete_snapshot_rows(
+        cursor,
+        table_name=table_name,
+        key_value=key_value,
+        row_ids=redundant_ids,
+    )
 
 
 def _is_unknown_column_error(exc: Exception) -> bool:
@@ -648,6 +869,23 @@ def _product_snapshot_fingerprint_from_row(row: Dict[str, Any]) -> str:
     )
 
 
+def _product_cleanup_snapshot_fingerprint_from_row(row: Dict[str, Any]) -> str:
+    return _snapshot_fingerprint(
+        {
+            "store_id": _safe_text(row.get("store_id")),
+            "sort_date": _snapshot_datetime_key(row.get("sort_date")),
+            "price_krw": _safe_int(row.get("price_krw")),
+            "title_hash": _safe_text(row.get("title_hash")),
+            "title_text_hash": _snapshot_text_hash(row.get("title")),
+            "body_hash": _safe_text(row.get("body_hash")),
+            "content_hash": _safe_text(row.get("content_hash")),
+            "source": _safe_text(row.get("source")),
+            "url_hash": _snapshot_text_hash(row.get("url")),
+            "snapshot_reason": _safe_text(row.get("snapshot_reason")),
+        }
+    )
+
+
 def _resolve_snapshot_reason(
     *,
     previous_snapshot: Optional[Dict[str, Any]],
@@ -767,7 +1005,10 @@ def _upsert_product_state_snapshots(cursor, snapshot_candidates: List[Dict[str, 
 
         if previous_snapshot is not None:
             previous_fingerprint = _product_snapshot_fingerprint_from_row(previous_snapshot)
-            if previous_fingerprint == normalized.get("fingerprint"):
+            previous_observed_at = _safe_datetime(previous_snapshot.get("observed_at"))
+            if previous_observed_at == observed_at and previous_fingerprint == normalized.get("fingerprint"):
+                # The monitor rereads the same search_results row on every pass.
+                # It is not a new observation and must remain idempotent.
                 continue
 
         snapshot_reason = _resolve_snapshot_reason(
@@ -781,7 +1022,21 @@ def _upsert_product_state_snapshots(cursor, snapshot_candidates: List[Dict[str, 
                 return inserted_count
             raise
         inserted_count += 1
-        latest_snapshot_cache[product_id] = normalized
+        inserted_snapshot = {**normalized, "snapshot_reason": snapshot_reason}
+        latest_snapshot_cache[product_id] = inserted_snapshot
+
+        try:
+            _enforce_cleanup_snapshot_retention(
+                cursor,
+                table_name="fraud_product_snapshots",
+                key_value=product_id,
+                inserted_id=getattr(cursor, "lastrowid", None),
+                fingerprint_builder=_product_cleanup_snapshot_fingerprint_from_row,
+            )
+        except Exception as exc:
+            if _is_schema_missing_error(exc):
+                return inserted_count
+            raise
     return inserted_count
 
 
@@ -840,7 +1095,7 @@ def _fetch_latest_product_snapshot_before(
     return row
 
 
-def _chunked(values: List[str], chunk_size: int) -> Iterable[List[str]]:
+def _chunked(values: List[Any], chunk_size: int) -> Iterable[List[Any]]:
     for start in range(0, len(values), chunk_size):
         yield values[start : start + chunk_size]
 
@@ -1338,45 +1593,6 @@ def _store_status_snapshot_fingerprint_from_row(row: Dict[str, Any]) -> str:
     )
 
 
-def _fetch_latest_store_status_snapshot_before(
-    cursor,
-    *,
-    store_id: str,
-    checked_at: datetime,
-) -> Optional[Dict[str, Any]]:
-    cursor.execute(
-        """
-        SELECT
-            id,
-            store_id,
-            store_seq,
-            checked_at,
-            status,
-            status_reason,
-            source,
-            is_active,
-            http_status,
-            meta_code,
-            meta_message,
-            raw_status_text,
-            raw_snippet,
-            first_seen_product_id,
-            first_seen_sort_date,
-            error_message
-        FROM fraud_store_status_snapshots
-        WHERE store_id = %s
-          AND checked_at <= %s
-        ORDER BY checked_at DESC, id DESC
-        LIMIT 1
-        """,
-        (store_id, checked_at),
-    )
-    row = cursor.fetchone() or {}
-    if not row or not isinstance(row, dict):
-        return None
-    return row
-
-
 def _insert_status_snapshot(
     cursor,
     *,
@@ -1401,39 +1617,6 @@ def _insert_status_snapshot(
             raw_json_text = json.dumps(raw_response_json, ensure_ascii=False)
         except Exception:
             raw_json_text = None
-
-    candidate_row = {
-        "store_seq": _safe_int(store_id),
-        "status": status,
-        "status_reason": raw_status_text,
-        "source": source,
-        "is_active": is_active,
-        "http_status": http_status,
-        "meta_code": meta_code,
-        "meta_message": meta_message,
-        "raw_status_text": raw_status_text,
-        "raw_snippet": raw_snippet,
-        "first_seen_product_id": first_seen_product_id,
-        "first_seen_sort_date": first_seen_sort_date,
-        "error_message": error_message,
-    }
-
-    try:
-        previous_snapshot = _fetch_latest_store_status_snapshot_before(
-            cursor,
-            store_id=store_id,
-            checked_at=checked_at,
-        )
-    except Exception as exc:
-        if not _is_schema_missing_error(exc):
-            raise
-        previous_snapshot = None
-
-    if previous_snapshot is not None:
-        previous_fingerprint = _store_status_snapshot_fingerprint_from_row(previous_snapshot)
-        current_fingerprint = _store_status_snapshot_fingerprint_from_row(candidate_row)
-        if previous_fingerprint == current_fingerprint:
-            return
 
     try:
         cursor.execute(
@@ -1477,38 +1660,49 @@ def _insert_status_snapshot(
                 error_message,
             ),
         )
-        return
     except Exception as exc:
         if not _is_schema_missing_error(exc):
             raise
-
-    cursor.execute(
-        """
-        INSERT INTO fraud_store_status_snapshots (
-            store_id,
-            checked_at,
-            status,
-            is_active,
-            raw_status_text,
-            raw_response_json,
-            first_seen_product_id,
-            first_seen_sort_date,
-            error_message
+        cursor.execute(
+            """
+            INSERT INTO fraud_store_status_snapshots (
+                store_id,
+                checked_at,
+                status,
+                is_active,
+                raw_status_text,
+                raw_response_json,
+                first_seen_product_id,
+                first_seen_sort_date,
+                error_message
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                store_id,
+                checked_at,
+                status,
+                is_active,
+                raw_status_text,
+                raw_json_text,
+                first_seen_product_id,
+                first_seen_sort_date,
+                error_message,
+            ),
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            store_id,
-            checked_at,
-            status,
-            is_active,
-            raw_status_text,
-            raw_json_text,
-            first_seen_product_id,
-            first_seen_sort_date,
-            error_message,
-        ),
-    )
+        return
+
+    try:
+        _enforce_cleanup_snapshot_retention(
+            cursor,
+            table_name="fraud_store_status_snapshots",
+            key_value=store_id,
+            inserted_id=getattr(cursor, "lastrowid", None),
+            fingerprint_builder=_store_status_snapshot_fingerprint_from_row,
+        )
+    except Exception as exc:
+        if not _is_schema_missing_error(exc):
+            raise
 
 
 def _fetch_joongna_store_profile_row(cursor, store_seq: int) -> Dict[str, Any]:
@@ -1919,62 +2113,6 @@ def _store_activity_snapshot_fingerprint_from_row(row: Dict[str, Any]) -> str:
     )
 
 
-def _fetch_latest_store_activity_snapshot_before(
-    cursor,
-    *,
-    store_id: str,
-    checked_at: datetime,
-) -> Optional[Dict[str, Any]]:
-    cursor.execute(
-        """
-        SELECT
-            id,
-            store_id,
-            store_seq,
-            checked_at,
-            posts_last_1h,
-            posts_last_6h,
-            posts_last_24h,
-            posts_last_7d,
-            visible_product_count,
-            store_name_fingerprint,
-            profile_fingerprint,
-            profile_image_url,
-            has_default_profile_image,
-            store_level,
-            store_level_number,
-            review_count,
-            reliability_score,
-            activity_score,
-            notified_score,
-            safe_trade_count,
-            trust_score,
-            chat_response_ratio,
-            chat_response_time,
-            chat_response_time_text,
-            visit_today_count,
-            visit_total_count,
-            store_grade,
-            user_type,
-            partner_center_seller_yn,
-            is_official_account,
-            store_desc,
-            first_seen_product_id,
-            first_seen_sort_date
-        FROM fraud_store_activity_snapshots
-        WHERE store_id = %s
-          AND checked_at <= %s
-        ORDER BY checked_at DESC, id DESC
-        LIMIT 1
-        """,
-        (store_id, checked_at),
-    )
-    row = cursor.fetchone() or {}
-    if not row or not isinstance(row, dict):
-        return None
-    return row
-
-
 def _insert_activity_snapshot(
     cursor,
     *,
@@ -2003,56 +2141,6 @@ def _insert_activity_snapshot(
             raw_json_text = json.dumps(profile.get("raw_json"), ensure_ascii=False)
         except Exception:
             raw_json_text = None
-
-    candidate_row = {
-        "store_seq": _safe_int(store_id),
-        "posts_last_1h": int(activity.get("posts_last_1h") or 0),
-        "posts_last_6h": int(activity.get("posts_last_6h") or 0),
-        "posts_last_24h": int(activity.get("posts_last_24h") or 0),
-        "posts_last_7d": int(activity.get("posts_last_7d") or 0),
-        "visible_product_count": _safe_int(activity.get("visible_product_count")),
-        "store_name_fingerprint": store_name_fingerprint,
-        "profile_fingerprint": profile_fingerprint,
-        "profile_image_url": _safe_text((profile or {}).get("profile_image_url")),
-        "has_default_profile_image": _safe_int((profile or {}).get("has_default_profile_image")),
-        "store_level": _safe_text((profile or {}).get("store_level")),
-        "store_level_number": _safe_int((profile or {}).get("store_level_number")),
-        "review_count": _safe_int((profile or {}).get("review_count")),
-        "reliability_score": _safe_int((profile or {}).get("reliability_score")),
-        "activity_score": _safe_int((profile or {}).get("activity_score")),
-        "notified_score": _safe_int((profile or {}).get("notified_score")),
-        "safe_trade_count": _safe_int((profile or {}).get("safe_trade_count")),
-        "trust_score": _safe_int((profile or {}).get("trust_score")),
-        "chat_response_ratio": _safe_text((profile or {}).get("chat_response_ratio")),
-        "chat_response_time": _safe_int((profile or {}).get("chat_response_time")),
-        "chat_response_time_text": _safe_text((profile or {}).get("chat_response_time_text")),
-        "visit_today_count": _safe_int((profile or {}).get("visit_today_count")),
-        "visit_total_count": _safe_int((profile or {}).get("visit_total_count")),
-        "store_grade": _safe_float((profile or {}).get("store_grade")),
-        "user_type": _safe_int((profile or {}).get("user_type")),
-        "partner_center_seller_yn": _safe_bool_int((profile or {}).get("partner_center_seller_yn")),
-        "is_official_account": _safe_bool_int((profile or {}).get("is_official_account")),
-        "store_desc": store_desc,
-        "first_seen_product_id": first_seen_product_id,
-        "first_seen_sort_date": first_seen_sort_date,
-    }
-
-    try:
-        previous_snapshot = _fetch_latest_store_activity_snapshot_before(
-            cursor,
-            store_id=store_id,
-            checked_at=checked_at,
-        )
-    except Exception as exc:
-        if not _is_schema_missing_error(exc):
-            raise
-        previous_snapshot = None
-
-    if previous_snapshot is not None:
-        previous_fingerprint = _store_activity_snapshot_fingerprint_from_row(previous_snapshot)
-        current_fingerprint = _store_activity_snapshot_fingerprint_from_row(candidate_row)
-        if previous_fingerprint == current_fingerprint:
-            return False
 
     try:
         cursor.execute(
@@ -2139,38 +2227,49 @@ def _insert_activity_snapshot(
                 first_seen_sort_date,
             ),
         )
-        return True
     except Exception as exc:
         if not _is_schema_missing_error(exc):
             raise
-
-    cursor.execute(
-        """
-        INSERT INTO fraud_store_activity_snapshots (
-            store_id,
-            checked_at,
-            posts_last_1h,
-            posts_last_6h,
-            posts_last_24h,
-            posts_last_7d,
-            visible_product_count,
-            first_seen_product_id,
-            first_seen_sort_date
+        cursor.execute(
+            """
+            INSERT INTO fraud_store_activity_snapshots (
+                store_id,
+                checked_at,
+                posts_last_1h,
+                posts_last_6h,
+                posts_last_24h,
+                posts_last_7d,
+                visible_product_count,
+                first_seen_product_id,
+                first_seen_sort_date
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                store_id,
+                checked_at,
+                int(activity.get("posts_last_1h") or 0),
+                int(activity.get("posts_last_6h") or 0),
+                int(activity.get("posts_last_24h") or 0),
+                int(activity.get("posts_last_7d") or 0),
+                activity.get("visible_product_count"),
+                first_seen_product_id,
+                first_seen_sort_date,
+            ),
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
-        (
-            store_id,
-            checked_at,
-            int(activity.get("posts_last_1h") or 0),
-            int(activity.get("posts_last_6h") or 0),
-            int(activity.get("posts_last_24h") or 0),
-            int(activity.get("posts_last_7d") or 0),
-            activity.get("visible_product_count"),
-            first_seen_product_id,
-            first_seen_sort_date,
-        ),
-    )
+        return True
+
+    try:
+        _enforce_cleanup_snapshot_retention(
+            cursor,
+            table_name="fraud_store_activity_snapshots",
+            key_value=store_id,
+            inserted_id=getattr(cursor, "lastrowid", None),
+            fingerprint_builder=_store_activity_snapshot_fingerprint_from_row,
+        )
+    except Exception as exc:
+        if not _is_schema_missing_error(exc):
+            raise
     return True
 
 
@@ -2195,46 +2294,6 @@ def _store_profile_field_snapshot_fingerprint_from_row(row: Dict[str, Any]) -> s
     )
 
 
-def _fetch_latest_store_profile_field_snapshot_before(
-    cursor,
-    *,
-    store_id: str,
-    checked_at: datetime,
-) -> Optional[Dict[str, Any]]:
-    cursor.execute(
-        """
-        SELECT
-            id,
-            store_id,
-            store_seq,
-            checked_at,
-            status,
-            source,
-            trust_score,
-            review_count,
-            store_level,
-            store_level_number,
-            safe_trade_count,
-            reliability_score,
-            activity_score,
-            notified_score,
-            visit_today_count,
-            visit_total_count,
-            is_official_account
-        FROM fraud_store_profile_field_snapshots
-        WHERE store_id = %s
-          AND checked_at <= %s
-        ORDER BY checked_at DESC, id DESC
-        LIMIT 1
-        """,
-        (store_id, checked_at),
-    )
-    row = cursor.fetchone() or {}
-    if not row or not isinstance(row, dict):
-        return None
-    return row
-
-
 def _insert_store_profile_field_snapshot(
     cursor,
     *,
@@ -2249,40 +2308,6 @@ def _insert_store_profile_field_snapshot(
         raw_profile_json_text = json.dumps(profile.get("raw_json"), ensure_ascii=False)
     except Exception:
         raw_profile_json_text = None
-
-    candidate_row = {
-        "store_seq": _safe_int(store_id),
-        "status": status,
-        "source": source,
-        "trust_score": _safe_int(profile.get("trust_score")),
-        "review_count": _safe_int(profile.get("review_count")),
-        "store_level": _safe_text(profile.get("store_level")),
-        "store_level_number": _safe_int(profile.get("store_level_number")),
-        "safe_trade_count": _safe_int(profile.get("safe_trade_count")),
-        "reliability_score": _safe_int(profile.get("reliability_score")),
-        "activity_score": _safe_int(profile.get("activity_score")),
-        "notified_score": _safe_int(profile.get("notified_score")),
-        "visit_today_count": _safe_int(profile.get("visit_today_count")),
-        "visit_total_count": _safe_int(profile.get("visit_total_count")),
-        "is_official_account": _safe_bool_int(profile.get("is_official_account")),
-    }
-
-    try:
-        previous_snapshot = _fetch_latest_store_profile_field_snapshot_before(
-            cursor,
-            store_id=store_id,
-            checked_at=checked_at,
-        )
-    except Exception as exc:
-        if not _is_schema_missing_error(exc):
-            raise
-        previous_snapshot = None
-
-    if previous_snapshot is not None:
-        previous_fingerprint = _store_profile_field_snapshot_fingerprint_from_row(previous_snapshot)
-        current_fingerprint = _store_profile_field_snapshot_fingerprint_from_row(candidate_row)
-        if previous_fingerprint == current_fingerprint:
-            return False
 
     try:
         cursor.execute(
@@ -2328,11 +2353,23 @@ def _insert_store_profile_field_snapshot(
                 raw_profile_json_text,
             ),
         )
-        return True
     except Exception as exc:
         if _is_schema_missing_error(exc):
             return False
         raise
+
+    try:
+        _enforce_cleanup_snapshot_retention(
+            cursor,
+            table_name="fraud_store_profile_field_snapshots",
+            key_value=store_id,
+            inserted_id=getattr(cursor, "lastrowid", None),
+            fingerprint_builder=_store_profile_field_snapshot_fingerprint_from_row,
+        )
+    except Exception as exc:
+        if not _is_schema_missing_error(exc):
+            raise
+    return True
 
 
 def _upsert_training_label_candidates(cursor, listing_candidates: List[Dict[str, Any]]) -> int:

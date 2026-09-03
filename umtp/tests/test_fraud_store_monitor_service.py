@@ -13,7 +13,11 @@ if PROJECT_ROOT not in sys.path:
 
 from src.fraud_store_monitor_service import (  # noqa: E402
     ensure_store_snapshots_for_fraud_scoring,
+    _enforce_cleanup_snapshot_retention,
     _fetch_latest_product_snapshot_before,
+    _insert_activity_snapshot,
+    _insert_status_snapshot,
+    _insert_store_profile_field_snapshot,
     _probe_store_status,
     _refresh_training_labels_for_candidates,
     _upsert_product_state_snapshots,
@@ -104,7 +108,9 @@ class _ProductSnapshotCursor:
     def __init__(self):
         self.snapshots = []
         self._fetchone_row = None
+        self._fetchall_rows = []
         self._next_id = 1
+        self.lastrowid = None
 
     def execute(self, query, params):
         normalized = " ".join(query.lower().split())
@@ -142,8 +148,22 @@ class _ProductSnapshotCursor:
                     "raw_payload_json": raw_payload_json,
                 }
             )
+            self.lastrowid = self._next_id
             self._next_id += 1
             self._fetchone_row = None
+            self._fetchall_rows = []
+            return
+
+        if "delete from fraud_product_snapshots" in normalized:
+            product_id = params[0]
+            deleted_ids = set(params[1:])
+            self.snapshots = [
+                row
+                for row in self.snapshots
+                if row.get("product_id") != product_id or row.get("id") not in deleted_ids
+            ]
+            self._fetchone_row = None
+            self._fetchall_rows = []
             return
 
         if "from fraud_product_snapshots" in normalized and "observed_at <=" in normalized:
@@ -155,6 +175,21 @@ class _ProductSnapshotCursor:
             ]
             matched.sort(key=lambda row: (row.get("observed_at"), row.get("id")), reverse=True)
             self._fetchone_row = dict(matched[0]) if matched else {}
+            self._fetchall_rows = []
+            return
+
+        if "from fraud_product_snapshots" in normalized and "for update" in normalized:
+            product_id = params[0]
+            matched = [row for row in self.snapshots if row.get("product_id") == product_id]
+            newest_first = "observed_at desc" in normalized
+            matched.sort(
+                key=lambda row: (row.get("observed_at"), row.get("id")),
+                reverse=newest_first,
+            )
+            if "limit 3" in normalized:
+                matched = matched[:3]
+            self._fetchall_rows = [dict(row) for row in matched]
+            self._fetchone_row = None
             return
 
         if "from fraud_product_snapshots" in normalized and "where product_id = %s" in normalized:
@@ -162,12 +197,52 @@ class _ProductSnapshotCursor:
             matched = [row for row in self.snapshots if row.get("product_id") == product_id]
             matched.sort(key=lambda row: (row.get("observed_at"), row.get("id")), reverse=True)
             self._fetchone_row = dict(matched[0]) if matched else {}
+            self._fetchall_rows = []
             return
 
         raise AssertionError(f"unexpected query: {query}")
 
     def fetchone(self):
         return self._fetchone_row
+
+    def fetchall(self):
+        return self._fetchall_rows
+
+
+class _RetentionCursor:
+    def __init__(self, rows):
+        self.rows = [dict(row) for row in rows]
+        self._fetchall_rows = []
+
+    def execute(self, query, params):
+        normalized = " ".join(query.lower().split())
+        if normalized.startswith("select"):
+            newest_first = "checked_at desc" in normalized
+            ordered = sorted(
+                self.rows,
+                key=lambda row: (row.get("checked_at"), row.get("id")),
+                reverse=newest_first,
+            )
+            self._fetchall_rows = ordered[:3] if "limit 3" in normalized else ordered
+            return
+        if normalized.startswith("delete from fraud_store_status_snapshots"):
+            deleted_ids = set(params[1:])
+            self.rows = [row for row in self.rows if row.get("id") not in deleted_ids]
+            self._fetchall_rows = []
+            return
+        raise AssertionError(f"unexpected query: {query}")
+
+    def fetchall(self):
+        return self._fetchall_rows
+
+
+class _InsertCursor:
+    def __init__(self):
+        self.lastrowid = 0
+
+    def execute(self, query, params):
+        _ = query, params
+        self.lastrowid += 1
 
 
 class FraudStoreMonitorServiceTest(unittest.TestCase):
@@ -437,7 +512,7 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
         self.assertEqual(len(cursor.snapshots), 2)
         self.assertEqual(cursor.snapshots[1]["snapshot_reason"], "sort_date_changed")
 
-    def test_product_snapshot_skips_insert_when_fingerprint_unchanged(self):
+    def test_product_snapshot_keeps_change_start_and_latest_when_state_is_unchanged(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
         cursor = _ProductSnapshotCursor()
         inserted = _upsert_product_state_snapshots(
@@ -468,9 +543,11 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(inserted, 1)
-        self.assertEqual(len(cursor.snapshots), 1)
+        self.assertEqual(inserted, 2)
+        self.assertEqual(len(cursor.snapshots), 2)
         self.assertEqual(cursor.snapshots[0]["snapshot_reason"], "first_seen")
+        self.assertEqual(cursor.snapshots[1]["snapshot_reason"], "periodic")
+        self.assertEqual(cursor.snapshots[1]["observed_at"], now + timedelta(hours=1))
 
     def test_product_snapshot_skips_reprocessed_older_unchanged_snapshot(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
@@ -500,6 +577,164 @@ class FraudStoreMonitorServiceTest(unittest.TestCase):
 
         self.assertEqual(reprocessed, 0)
         self.assertEqual(len(cursor.snapshots), 2)
+
+    def test_product_snapshot_replaces_only_redundant_middle_observation(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        cursor = _ProductSnapshotCursor()
+        candidates = []
+        for hour in range(4):
+            candidates.append(
+                {
+                    "product_id": "P-105",
+                    "store_id": "205",
+                    "observed_at": now + timedelta(hours=hour),
+                    "sort_date": now - timedelta(days=1),
+                    "price_krw": 600000,
+                    "title": "맥북 에어",
+                    "url": "https://web.joongna.com/product/105",
+                    "source": "search_results",
+                    "raw_payload_json": {"content": "동일 본문"},
+                }
+            )
+
+        inserted = _upsert_product_state_snapshots(cursor, candidates)
+
+        self.assertEqual(inserted, 4)
+        self.assertEqual(len(cursor.snapshots), 3)
+        self.assertEqual(
+            [row["observed_at"] for row in cursor.snapshots],
+            [now, now + timedelta(hours=1), now + timedelta(hours=3)],
+        )
+
+    def test_retention_helper_keeps_state_changes_and_latest_row(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        cursor = _RetentionCursor(
+            [
+                {"id": 1, "store_id": "300", "checked_at": now, "state": "A"},
+                {"id": 2, "store_id": "300", "checked_at": now + timedelta(hours=1), "state": "A"},
+                {"id": 3, "store_id": "300", "checked_at": now + timedelta(hours=2), "state": "A"},
+            ]
+        )
+
+        _enforce_cleanup_snapshot_retention(
+            cursor,
+            table_name="fraud_store_status_snapshots",
+            key_value="300",
+            inserted_id=3,
+            fingerprint_builder=lambda row: row.get("state"),
+        )
+
+        self.assertEqual([row["id"] for row in cursor.rows], [1, 3])
+
+    def test_retention_helper_removes_old_latest_before_state_change(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        cursor = _RetentionCursor(
+            [
+                {"id": 1, "store_id": "301", "checked_at": now, "state": "A"},
+                {"id": 2, "store_id": "301", "checked_at": now + timedelta(hours=1), "state": "A"},
+                {"id": 3, "store_id": "301", "checked_at": now + timedelta(hours=2), "state": "B"},
+            ]
+        )
+
+        _enforce_cleanup_snapshot_retention(
+            cursor,
+            table_name="fraud_store_status_snapshots",
+            key_value="301",
+            inserted_id=3,
+            fingerprint_builder=lambda row: row.get("state"),
+        )
+
+        self.assertEqual([row["id"] for row in cursor.rows], [1, 3])
+
+    def test_retention_helper_preserves_return_to_previous_state(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        cursor = _RetentionCursor(
+            [
+                {"id": 1, "store_id": "303", "checked_at": now, "state": "A"},
+                {"id": 2, "store_id": "303", "checked_at": now + timedelta(hours=1), "state": "B"},
+                {"id": 3, "store_id": "303", "checked_at": now + timedelta(hours=2), "state": "A"},
+            ]
+        )
+
+        _enforce_cleanup_snapshot_retention(
+            cursor,
+            table_name="fraud_store_status_snapshots",
+            key_value="303",
+            inserted_id=3,
+            fingerprint_builder=lambda row: row.get("state"),
+        )
+
+        self.assertEqual([row["id"] for row in cursor.rows], [1, 2, 3])
+
+    def test_retention_helper_compacts_out_of_order_insert(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        cursor = _RetentionCursor(
+            [
+                {"id": 1, "store_id": "302", "checked_at": now, "state": "A"},
+                {"id": 3, "store_id": "302", "checked_at": now + timedelta(hours=1), "state": "A"},
+                {"id": 2, "store_id": "302", "checked_at": now + timedelta(hours=2), "state": "B"},
+            ]
+        )
+
+        _enforce_cleanup_snapshot_retention(
+            cursor,
+            table_name="fraud_store_status_snapshots",
+            key_value="302",
+            inserted_id=3,
+            fingerprint_builder=lambda row: row.get("state"),
+        )
+
+        self.assertEqual([row["id"] for row in cursor.rows], [1, 2])
+
+    def test_all_store_snapshot_inserts_apply_cleanup_retention(self):
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        cursor = _InsertCursor()
+        with patch("src.fraud_store_monitor_service._enforce_cleanup_snapshot_retention") as enforce:
+            _insert_status_snapshot(
+                cursor,
+                store_id="400",
+                checked_at=now,
+                status="active",
+                is_active=1,
+                raw_status_text="ok",
+                raw_response_json={"ok": True},
+                first_seen_product_id="P-400",
+                first_seen_sort_date=now,
+                error_message=None,
+                source="test",
+            )
+            _insert_activity_snapshot(
+                cursor,
+                store_id="400",
+                checked_at=now,
+                activity={
+                    "posts_last_1h": 1,
+                    "posts_last_6h": 2,
+                    "posts_last_24h": 3,
+                    "posts_last_7d": 4,
+                    "visible_product_count": 5,
+                },
+                first_seen_product_id="P-400",
+                first_seen_sort_date=now,
+                profile={"store_name": "테스트 상점", "raw_json": {}},
+            )
+            _insert_store_profile_field_snapshot(
+                cursor,
+                store_id="400",
+                checked_at=now,
+                status="active",
+                source="test",
+                profile={"trust_score": 100, "raw_json": {}},
+            )
+
+        self.assertEqual(
+            [call.kwargs["table_name"] for call in enforce.call_args_list],
+            [
+                "fraud_store_status_snapshots",
+                "fraud_store_activity_snapshots",
+                "fraud_store_profile_field_snapshots",
+            ],
+        )
 
     def test_fetch_latest_product_snapshot_before_returns_price_before_suspend(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
