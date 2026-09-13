@@ -112,61 +112,75 @@ class FraudProbabilityServiceTest(unittest.TestCase):
         self.assertEqual(model.features["seller_seen_product_count_7d"], 4.0)
         mock_history.assert_called_once()
 
-    def test_score_alert_comparison_scores_v1_and_v2_models(self):
+    def test_score_alert_comparison_scores_v1_v2_and_v3_models(self):
         v1_model = _CapturingModel(0.31)
         v2_model = _CapturingModel(0.82)
+        v3_model = _CapturingModel(0.91)
         feature_time = datetime(2026, 7, 5, 13, 30)
 
         with patch.object(service, "_load_v1_model_artifact", return_value={
             "model": v1_model,
             "model_version": "fraud-logreg-v1",
         }):
-            with patch.object(service, "_load_v2_model_artifact", return_value={
-                "model": v2_model,
-                "model_version": "fraud-logreg-tfidf-v2",
-            }):
+            with patch.object(
+                service,
+                "_load_v2_model_artifact",
+                return_value={"model": v2_model, "model_version": "fraud-logreg-tfidf-v2"},
+            ):
                 with patch.object(
                     service,
-                    "_fetch_first_search_result",
+                    "_load_v3_model_artifact",
                     return_value={
-                        "title": "검색 제목",
-                        "body_text": "검색 본문",
-                        "price": 700000,
-                        "sort_date": feature_time,
-                        "seller_store_seq": "s1",
-                        "seller_store_name": "상점",
-                        "seller_profile_image_url": "",
-                        "seller_review_count": 0,
-                        "fetched_at": feature_time,
+                        "model": v3_model,
+                        "model_version": "fraud-logreg-tfidf-v3-20260913",
                     },
                 ):
-                    with patch.object(service, "_fetch_latest_activity", return_value={}):
-                        with patch.object(service, "_fetch_latest_profile", return_value={}):
-                            with patch.object(service, "_fetch_seller_history", return_value={}):
-                                result = service.score_alert_fraud_probability_comparison(
-                                    object(),
-                                    product_id="p1",
-                                    store_id="s1",
-                                    alert_context={
-                                        "title": "알림 제목",
-                                        "body_text": "알림 본문",
-                                        "price_krw": 700000,
-                                        "risk_level": "high",
-                                        "trade_type": "sale",
-                                    },
-                                )
+                    with patch.object(
+                        service,
+                        "_fetch_first_search_result",
+                        return_value={
+                            "title": "검색 제목",
+                            "body_text": "검색 본문",
+                            "price": 700000,
+                            "sort_date": feature_time,
+                            "seller_store_seq": "s1",
+                            "seller_store_name": "상점",
+                            "seller_profile_image_url": "",
+                            "seller_review_count": 0,
+                            "fetched_at": feature_time,
+                        },
+                    ):
+                        with patch.object(service, "_fetch_latest_activity", return_value={}):
+                            with patch.object(service, "_fetch_latest_profile", return_value={}):
+                                with patch.object(service, "_fetch_seller_history", return_value={}):
+                                    result = service.score_alert_fraud_probability_comparison(
+                                        object(),
+                                        product_id="p1",
+                                        store_id="s1",
+                                        alert_context={
+                                            "title": "알림 제목",
+                                            "body_text": "알림 본문",
+                                            "price_krw": 700000,
+                                            "risk_level": "high",
+                                            "trade_type": "sale",
+                                        },
+                                    )
 
-        self.assertEqual(result["fraud_probability"], 0.82)
+        self.assertEqual(result["fraud_probability"], 0.91)
         self.assertEqual(result["fraud_probability_label"], "HIGH")
-        self.assertEqual(result["fraud_model_version"], "fraud-logreg-tfidf-v2")
+        self.assertEqual(result["fraud_model_version"], "fraud-logreg-tfidf-v3-20260913")
         self.assertEqual(result["fraud_probability_v1"], 0.31)
         self.assertEqual(result["fraud_probability_label_v1"], "MEDIUM")
         self.assertEqual(result["fraud_model_version_v1"], "fraud-logreg-v1")
         self.assertEqual(result["fraud_probability_v2"], 0.82)
         self.assertEqual(result["fraud_probability_label_v2"], "HIGH")
         self.assertEqual(result["fraud_model_version_v2"], "fraud-logreg-tfidf-v2")
+        self.assertEqual(result["fraud_probability_v3"], 0.91)
+        self.assertEqual(result["fraud_probability_label_v3"], "HIGH")
+        self.assertEqual(result["fraud_model_version_v3"], "fraud-logreg-tfidf-v3-20260913")
         self.assertEqual(v1_model.features["title_text"], "알림 제목")
         self.assertEqual(v2_model.features["body_text"], "알림 본문")
+        self.assertEqual(v3_model.features["body_text"], "알림 본문")
 
 
 if __name__ == "__main__":

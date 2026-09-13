@@ -1011,6 +1011,10 @@ def _insert_condition_change_candidate_notice_alert_event(
                 fraud_probability_label_v2,
                 fraud_model_version_v2,
                 fraud_scored_at_v2,
+                fraud_probability_v3,
+                fraud_probability_label_v3,
+                fraud_model_version_v3,
+                fraud_scored_at_v3,
                 risk_keywords,
                 is_exchange_post,
                 trade_type,
@@ -1029,7 +1033,7 @@ def _insert_condition_change_candidate_notice_alert_event(
                 %s, %s, %s, %s, %s, %s, NULL, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, 'pending', 0, 0, NULL
+                %s, %s, %s, %s, %s, 'pending', 0, 0, NULL
             )
             """,
             (
@@ -1064,6 +1068,10 @@ def _insert_condition_change_candidate_notice_alert_event(
                 _safe_text(fraud_score.get("fraud_probability_label_v2")),
                 _safe_text(fraud_score.get("fraud_model_version_v2")),
                 fraud_score.get("fraud_scored_at_v2"),
+                _safe_float(fraud_score.get("fraud_probability_v3")),
+                _safe_text(fraud_score.get("fraud_probability_label_v3")),
+                _safe_text(fraud_score.get("fraud_model_version_v3")),
+                fraud_score.get("fraud_scored_at_v3"),
                 risk_keywords,
                 bool(is_exchange_post),
                 trade_type,

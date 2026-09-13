@@ -315,10 +315,10 @@ class NotificationWorkerTest(unittest.TestCase):
                 pass
 
         score = {
-            "fraud_probability": 0.755,
+            "fraud_probability": 0.81,
             "fraud_probability_label": "HIGH",
-            "fraud_model_version": "fraud-logreg-tfidf-v2",
-            "fraud_scored_at": "2026-07-04 08:30:00",
+            "fraud_model_version": "fraud-logreg-tfidf-v3-20260913",
+            "fraud_scored_at": "2026-09-13 20:00:00",
             "fraud_probability_v1": 0.455,
             "fraud_probability_label_v1": "MEDIUM",
             "fraud_model_version_v1": "fraud-logreg-v1",
@@ -327,6 +327,10 @@ class NotificationWorkerTest(unittest.TestCase):
             "fraud_probability_label_v2": "HIGH",
             "fraud_model_version_v2": "fraud-logreg-tfidf-v2",
             "fraud_scored_at_v2": "2026-07-04 08:30:00",
+            "fraud_probability_v3": 0.81,
+            "fraud_probability_label_v3": "HIGH",
+            "fraud_model_version_v3": "fraud-logreg-tfidf-v3-20260913",
+            "fraud_scored_at_v3": "2026-09-13 20:00:00",
         }
 
         with patch(
@@ -362,7 +366,11 @@ class NotificationWorkerTest(unittest.TestCase):
         self.assertEqual(mock_send_fcm.call_args.args[1].get("fraud_probability_label"), "HIGH")
         self.assertEqual(mock_send_fcm.call_args.args[1].get("fraud_probability_label_v1"), "MEDIUM")
         self.assertEqual(mock_send_fcm.call_args.args[1].get("fraud_probability_label_v2"), "HIGH")
-        self.assertIn("사기 가능성\n높음 (76%)", mock_send_telegram.call_args.args[0])
+        self.assertEqual(mock_send_fcm.call_args.args[1].get("fraud_probability_label_v3"), "HIGH")
+        self.assertIn(
+            "사기 가능성\nv1 주의 (46%) · v2 높음 (76%) · v3 높음 (81%) · v3-v2 차이 +6%p",
+            mock_send_telegram.call_args.args[0],
+        )
 
     def test_push_payload_uses_comparison_text_for_existing_app_field(self):
         _title, body, data = _build_push_notification_payload(
@@ -370,20 +378,25 @@ class NotificationWorkerTest(unittest.TestCase):
                 "id": 41,
                 "title": "사기 확률 비교 테스트",
                 "body_excerpt": "본문",
-                "fraud_probability": 0.755,
+                "fraud_probability": 0.81,
                 "fraud_probability_label": "HIGH",
                 "fraud_probability_v1": 0.455,
                 "fraud_probability_label_v1": "MEDIUM",
                 "fraud_probability_v2": 0.755,
                 "fraud_probability_label_v2": "HIGH",
+                "fraud_probability_v3": 0.81,
+                "fraud_probability_label_v3": "HIGH",
             }
         )
 
         self.assertEqual(
             data.get("fraud_probability_text"),
-            "v1 주의 (46%) · v2 높음 (76%) · 차이 +30%p",
+            "v1 주의 (46%) · v2 높음 (76%) · v3 높음 (81%) · v3-v2 차이 +6%p",
         )
-        self.assertIn("사기 가능성 v1 주의 (46%) · v2 높음 (76%) · 차이 +30%p", body)
+        self.assertIn(
+            "사기 가능성 v1 주의 (46%) · v2 높음 (76%) · v3 높음 (81%) · v3-v2 차이 +6%p",
+            body,
+        )
 
     def test_send_alert_event_passes_listing_image_url_to_telegram(self):
         with patch(

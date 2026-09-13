@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 MODEL_VERSION_UNKNOWN = "unknown"
 V1_MODEL_VERSION_KEY = "v1"
 V2_MODEL_VERSION_KEY = "v2"
+V3_MODEL_VERSION_KEY = "v3"
 LOW_LABEL = "LOW"
 MEDIUM_LABEL = "MEDIUM"
 HIGH_LABEL = "HIGH"
@@ -54,6 +55,15 @@ def _default_v1_model_path() -> str:
 
 def _default_v2_model_path() -> str:
     return os.path.join(_project_root(), "models", "fraud_probability", "fraud-logreg-tfidf-v2.joblib")
+
+
+def _default_v3_model_path() -> str:
+    return os.path.join(
+        _project_root(),
+        "models",
+        "fraud_probability",
+        "fraud-logreg-tfidf-v3-20260913.joblib",
+    )
 
 
 def _utc_now_naive() -> datetime:
@@ -186,6 +196,12 @@ def _load_v1_model_artifact() -> Optional[Dict[str, Any]]:
 def _load_v2_model_artifact() -> Optional[Dict[str, Any]]:
     return _load_model_artifact(
         os.getenv("FRAUD_PROBABILITY_V2_MODEL_PATH") or _default_v2_model_path()
+    )
+
+
+def _load_v3_model_artifact() -> Optional[Dict[str, Any]]:
+    return _load_model_artifact(
+        os.getenv("FRAUD_PROBABILITY_V3_MODEL_PATH") or _default_v3_model_path()
     )
 
 
@@ -707,7 +723,7 @@ def score_alert_fraud_probability_comparison(
     store_id: Any = None,
     alert_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Score one alert with both the frozen v1 model and the current v2 model."""
+    """Score one alert with the frozen v1/v2 models and the current v3 model."""
     try:
         features = _build_alert_fraud_features(
             cursor,
@@ -729,14 +745,20 @@ def score_alert_fraud_probability_comparison(
             features,
             scored_at=scored_at,
         )
+        v3_score = _score_features_with_artifact(
+            _load_v3_model_artifact(),
+            features,
+            scored_at=scored_at,
+        )
     except Exception:
         return {}
 
-    primary_score = v2_score or v1_score
+    primary_score = v3_score or v2_score or v1_score
     if not primary_score:
         return {}
 
     result = dict(primary_score)
     _add_versioned_score(result, v1_score, version_key=V1_MODEL_VERSION_KEY)
     _add_versioned_score(result, v2_score, version_key=V2_MODEL_VERSION_KEY)
+    _add_versioned_score(result, v3_score, version_key=V3_MODEL_VERSION_KEY)
     return result

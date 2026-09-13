@@ -1,0 +1,104 @@
+{
+  "evaluated_at": "2026-09-13",
+  "baseline": {
+    "path": "models/fraud_probability/current.joblib",
+    "model_version": "fraud-logreg-tfidf-v2",
+    "trained_at": "2026-07-05T04:40:48Z",
+    "training_row_count": 1561
+  },
+  "candidate": {
+    "deployment_path": "models/fraud_probability/fraud-logreg-tfidf-v3-20260913.joblib",
+    "model_version": "fraud-logreg-tfidf-v3-20260913",
+    "training_source_row_count": 4015,
+    "evaluation_training_row_count": 3212,
+    "deployment_training_row_count": 4015,
+    "training_period_end": "2026-08-16T18:22:05"
+  },
+  "label_counts": {
+    "total_candidates": 6345,
+    "labeled": 4015,
+    "positive_store_inactive_within_7d": 1385,
+    "negative_store_active_after_14d": 2630,
+    "unlabeled_inactive_after_7d": 555,
+    "unlabeled_pending_observation": 1775
+  },
+  "latest_temporal_holdout": {
+    "period_start": "2026-08-16T18:24:21",
+    "period_end": "2026-09-12T14:32:21",
+    "row_count": 803,
+    "positive_count": 324,
+    "negative_count": 479,
+    "baseline": {
+      "average_precision": 0.6133978695947165,
+      "roc_auc": 0.7645751179154101,
+      "brier_score": 0.19454372643821322,
+      "log_loss": 0.5687862957795646,
+      "threshold_0_5": {
+        "accuracy": 0.6811955168119551,
+        "precision": 0.6240875912408759,
+        "recall": 0.5277777777777778,
+        "f1": 0.5719063545150501,
+        "true_positive": 171,
+        "false_positive": 103,
+        "false_negative": 153,
+        "true_negative": 376
+      }
+    },
+    "candidate": {
+      "average_precision": 0.6991194342873551,
+      "roc_auc": 0.8292481764993944,
+      "brier_score": 0.16816770905936002,
+      "log_loss": 0.5040151226648886,
+      "threshold_0_5": {
+        "accuracy": 0.7471980074719801,
+        "precision": 0.7184115523465704,
+        "recall": 0.6141975308641975,
+        "f1": 0.6622296173044925,
+        "true_positive": 199,
+        "false_positive": 78,
+        "false_negative": 125,
+        "true_negative": 401
+      }
+    }
+  },
+  "latest_unseen_store_holdout": {
+    "description": "Latest temporal holdout rows whose store_id appears in neither model's recorded training rows",
+    "row_count": 642,
+    "unique_store_count": 530,
+    "positive_count": 306,
+    "negative_count": 336,
+    "baseline": {
+      "average_precision": 0.6113282973079525,
+      "roc_auc": 0.6854964207905385,
+      "brier_score": 0.2283798633830131,
+      "log_loss": 0.649693725786277,
+      "threshold_0_5": {
+        "accuracy": 0.618380062305296,
+        "precision": 0.6159695817490495,
+        "recall": 0.5294117647058824,
+        "f1": 0.5694200351493849,
+        "true_positive": 162,
+        "false_positive": 101,
+        "false_negative": 144,
+        "true_negative": 235
+      }
+    },
+    "candidate": {
+      "average_precision": 0.68967179792598,
+      "roc_auc": 0.7722436196700901,
+      "brier_score": 0.19763285120666704,
+      "log_loss": 0.5786070958708124,
+      "threshold_0_5": {
+        "accuracy": 0.6947040498442367,
+        "precision": 0.7115384615384616,
+        "recall": 0.6045751633986928,
+        "f1": 0.6537102473498233,
+        "true_positive": 185,
+        "false_positive": 75,
+        "false_negative": 121,
+        "true_negative": 261
+      }
+    }
+  },
+  "decision": "v3_20260913_improves_ranking_calibration_and_threshold_0_5_results_on_both_latest_temporal_and_unseen_store_holdouts"
+}

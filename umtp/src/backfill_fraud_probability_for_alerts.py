@@ -43,7 +43,8 @@ def _fetch_alert_rows(
     where_tokens = []
     if not force:
         where_tokens.append(
-            "(fraud_probability IS NULL OR fraud_probability_v1 IS NULL OR fraud_probability_v2 IS NULL)"
+            "(fraud_probability IS NULL OR fraud_probability_v1 IS NULL OR "
+            "fraud_probability_v2 IS NULL OR fraud_probability_v3 IS NULL)"
         )
     where_tokens.extend(
         [
@@ -147,7 +148,8 @@ def backfill_fraud_probability(
                     f"probability={_format_probability_for_log(score.get('fraud_probability'))} "
                     f"label={score.get('fraud_probability_label')} "
                     f"v1={_format_probability_for_log(score.get('fraud_probability_v1'))} "
-                    f"v2={_format_probability_for_log(score.get('fraud_probability_v2'))}"
+                    f"v2={_format_probability_for_log(score.get('fraud_probability_v2'))} "
+                    f"v3={_format_probability_for_log(score.get('fraud_probability_v3'))}"
                 )
                 continue
 
@@ -166,7 +168,11 @@ def backfill_fraud_probability(
                     fraud_probability_v2 = %s,
                     fraud_probability_label_v2 = %s,
                     fraud_model_version_v2 = %s,
-                    fraud_scored_at_v2 = %s
+                    fraud_scored_at_v2 = %s,
+                    fraud_probability_v3 = %s,
+                    fraud_probability_label_v3 = %s,
+                    fraud_model_version_v3 = %s,
+                    fraud_scored_at_v3 = %s
                 WHERE id = %s
                 """,
                 (
@@ -182,6 +188,10 @@ def backfill_fraud_probability(
                     score.get("fraud_probability_label_v2"),
                     score.get("fraud_model_version_v2"),
                     score.get("fraud_scored_at_v2"),
+                    score.get("fraud_probability_v3"),
+                    score.get("fraud_probability_label_v3"),
+                    score.get("fraud_model_version_v3"),
+                    score.get("fraud_scored_at_v3"),
                     row.get("id"),
                 ),
             )
