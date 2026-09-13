@@ -1,0 +1,9 @@
+.DS_Store
+.gjc/
+**/xcuserdata/
+umtp/logs/
+
+# Superseded 20260913 training intermediates; the chronological dataset and v3 model are versioned.
+umtp/data/fraud_probability/training_features_20260913.csv
+umtp/models/fraud_probability/fraud-logreg-tfidf-v2-20260913-full.joblib
+umtp/models/fraud_probability/v2_candidate_20260913*
