@@ -10,6 +10,7 @@ struct SettingsView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var viewModel = SettingsViewModel()
     @State private var path: [SettingsDestination] = []
+    @State private var navigationUserID: String?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -68,7 +69,12 @@ struct SettingsView: View {
             }
         }
         .task(id: appState.userId) {
-            path = []
+            // Tab reappearance restarts this task. Keep the current destination
+            // and its bulk draft until the account actually changes.
+            if navigationUserID != appState.userId {
+                path = []
+                navigationUserID = appState.userId
+            }
             if let userID = appState.userId { await viewModel.load(userID: userID) }
         }
         .alert("설정", isPresented: Binding(get: { viewModel.message != nil }, set: { if !$0 { viewModel.message = nil } })) {
@@ -127,6 +133,7 @@ private struct SettingsCombinationsView: View {
     let chip: String
     let screen: Int
     @State private var productScope = false
+    @State private var initializedBulkDefaults = false
     @State private var bulkPriority = WatchPriority.normal
     @State private var gapInput = ""
     @State private var minimumInput = ""
@@ -180,7 +187,11 @@ private struct SettingsCombinationsView: View {
         .scrollDismissesKeyboard(.interactively)
         .navigationTitle(scopeTitle)
         .modifier(SettingsRefreshModifier(viewModel: viewModel))
-        .onAppear { updateBulkDefaults() }
+        .onAppear {
+            guard !initializedBulkDefaults else { return }
+            initializedBulkDefaults = true
+            updateBulkDefaults()
+        }
         .onChange(of: productScope) { _, _ in updateBulkDefaults() }
         // Only the changed server aggregate resets its matching bulk input.
         // Saving a keyword or refreshing an unchanged scope must not erase
@@ -223,6 +234,7 @@ private struct SettingsCombinationsView: View {
             Picker("알림 속도", selection: $bulkPriority) {
                 ForEach(WatchPriority.allCases, id: \.self) { Text($0.label).tag($0) }
             }.pickerStyle(.segmented)
+                .accessibilityIdentifier("settings.bulk.priority")
             Text(bulkPriority.explanation).font(.caption).foregroundStyle(.secondary)
             Button("전체 알림 속도 적용") { pendingChange = .priority(bulkPriority) }
             HStack {
