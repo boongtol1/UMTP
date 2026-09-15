@@ -9,15 +9,19 @@ it does not contact APNs, Firebase, or the production server.
 import copy
 import json
 import os
+import plistlib
 import subprocess
 import threading
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
+from xml.parsers.expat import ExpatError
 
 LOCK = threading.RLock()
 PUSH_TITLE = "UMTP 검증 알림"
+COLD_LAUNCH_BUNDLE_ID = "boongtol.UMTP-IOS"
+COLD_LAUNCH_FIXTURE_URL = "http://127.0.0.1:18765"
 
 
 def simulator_id():
@@ -63,6 +67,53 @@ def simulator_clipboard():
     if result.returncode != 0:
         return 503, {"ok": False, "reason": "simulator_clipboard_failed"}
     return 200, {"text": result.stdout}
+
+
+def cold_launch_status():
+    target = simulator_id()
+    status = dict(ready=False, simulator_configured=target is not None,
+                  app_installed=False, bundle_identifier_matches=False,
+                  simulator_platform_matches=False, fixture_url_matches=False,
+                  debug_build_matches=False,
+                  reason="simulator_not_configured")
+    if target is None:
+        return status
+    try:
+        result = subprocess.run(
+            ["/usr/bin/xcrun", "simctl", "get_app_container", target, COLD_LAUNCH_BUNDLE_ID, "app"],
+            text=True, capture_output=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        status["reason"] = "simulator_query_unavailable"
+        return status
+    if result.returncode != 0:
+        status["reason"] = "app_not_installed"
+        return status
+    bundle_path = result.stdout.strip()
+    if not os.path.isabs(bundle_path):
+        status["reason"] = "installed_app_metadata_unavailable"
+        return status
+    status["app_installed"] = True
+    try:
+        # Inspect only the installed bundle's metadata. Do not return paths or plist contents.
+        with open(os.path.join(bundle_path, "Info.plist"), "rb") as plist_file:
+            info = plistlib.load(plist_file)
+    except (OSError, ValueError, plistlib.InvalidFileException, ExpatError):
+        status["reason"] = "installed_app_metadata_unavailable"
+        return status
+    if not isinstance(info, dict):
+        status["reason"] = "installed_app_metadata_unavailable"
+        return status
+    status["bundle_identifier_matches"] = info.get("CFBundleIdentifier") == COLD_LAUNCH_BUNDLE_ID
+    status["simulator_platform_matches"] = info.get("DTPlatformName") == "iphonesimulator"
+    status["fixture_url_matches"] = info.get("UMTPParityFixtureURL") == COLD_LAUNCH_FIXTURE_URL
+    conditions = info.get("UMTPParityCompilationConditions")
+    status["debug_build_matches"] = isinstance(conditions, str) and "DEBUG" in conditions.split()
+    status["ready"] = all(status[key] for key in (
+        "bundle_identifier_matches", "simulator_platform_matches", "fixture_url_matches",
+        "debug_build_matches"))
+    status["reason"] = "ready" if status["ready"] else "fixture_build_required"
+    return status
 
 
 UNITS = [dict(product_type="MacBook Air", chip="M1", screen_inch=13, ram_gb=8, ssd_gb=256),
@@ -174,6 +225,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(405, {"ok": False})
             status, payload = simulator_clipboard()
             return self.reply(status, payload)
+        if path == "/__cold-launch-status":
+            if self.command != "GET" or self.client_address[0] not in {"127.0.0.1", "::1"}:
+                return self.reply(405, {"ok": False})
+            return self.reply(200, cold_launch_status())
         with LOCK:
             if path == "/__reset":
                 reset()

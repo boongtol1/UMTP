@@ -4,6 +4,9 @@ import XCTest
 @MainActor
 final class DNSParityTests: XCTestCase {
     private struct Reply: Decodable { let ok: Bool }
+    // Recovery requires HTTPS. Keep these mocked requests independent of the
+    // app's optional HTTP loopback build setting; no transport contacts this host.
+    private let baseURL = "https://api.example.invalid"
 
     private func success(_ request: URLRequest, status: Int = 200) -> (Data, URLResponse) {
         (Data(#"{"ok":true}"#.utf8),
@@ -14,7 +17,7 @@ final class DNSParityTests: XCTestCase {
         var configured: [DNSRecovery.Resolver] = []
         let recovery = DNSRecovery(configure: { configured.append($0) })
         var requests = 0
-        let client = APIClient(dnsRecovery: recovery, transport: { request in
+        let client = APIClient(baseURLString: baseURL, dnsRecovery: recovery, transport: { request in
             requests += 1
             return self.success(request)
         })
@@ -52,7 +55,7 @@ final class DNSParityTests: XCTestCase {
         var configured: [DNSRecovery.Resolver] = []
         let recovery = DNSRecovery(configure: { configured.append($0) })
         var calls = 0
-        let client = APIClient(dnsRecovery: recovery, transport: { request in
+        let client = APIClient(baseURLString: baseURL, dnsRecovery: recovery, transport: { request in
             calls += 1
             if calls < 3 { throw URLError(.dnsLookupFailed) }
             return self.success(request)
@@ -69,7 +72,7 @@ final class DNSParityTests: XCTestCase {
         var configured: [DNSRecovery.Resolver] = []
         let recovery = DNSRecovery(configure: { configured.append($0) })
         var calls = 0
-        let client = APIClient(dnsRecovery: recovery, transport: { _ in
+        let client = APIClient(baseURLString: baseURL, dnsRecovery: recovery, transport: { _ in
             calls += 1
             throw URLError(.cannotFindHost)
         })
@@ -104,7 +107,7 @@ final class DNSParityTests: XCTestCase {
                      .notConnectedToInternet, .secureConnectionFailed, .serverCertificateUntrusted] {
             var calls = 0
             let recovery = DNSRecovery(configure: { _ in XCTFail("Must not change DNS for \(code)") })
-            let client = APIClient(dnsRecovery: recovery, transport: { _ in
+            let client = APIClient(baseURLString: baseURL, dnsRecovery: recovery, transport: { _ in
                 calls += 1
                 throw DNSTransportFailure(underlying: URLError(code), progress: .notStarted)
             })
@@ -114,7 +117,7 @@ final class DNSParityTests: XCTestCase {
         }
         var calls = 0
         let recovery = DNSRecovery(configure: { _ in XCTFail("HTTP errors must not configure DNS") })
-        let client = APIClient(dnsRecovery: recovery, transport: { request in
+        let client = APIClient(baseURLString: baseURL, dnsRecovery: recovery, transport: { request in
             calls += 1
             return self.success(request, status: 503)
         })
@@ -127,7 +130,7 @@ final class DNSParityTests: XCTestCase {
         for progress in [DNSRequestProgress.started, .unknown] {
             var calls = 0
             let recovery = DNSRecovery(configure: { _ in XCTFail("Must not replay a possibly sent mutation") })
-            let client = APIClient(dnsRecovery: recovery, transport: { _ in
+            let client = APIClient(baseURLString: baseURL, dnsRecovery: recovery, transport: { _ in
                 calls += 1
                 throw DNSTransportFailure(underlying: URLError(.cannotFindHost), progress: progress)
             })
@@ -151,7 +154,7 @@ final class DNSParityTests: XCTestCase {
     func testCancellationDoesNotConfigureFallbackOrRetry() async {
         var calls = 0
         let recovery = DNSRecovery(configure: { _ in XCTFail("Cancellation must not configure DNS") })
-        let client = APIClient(dnsRecovery: recovery, transport: { _ in
+        let client = APIClient(baseURLString: baseURL, dnsRecovery: recovery, transport: { _ in
             calls += 1
             throw URLError(.cancelled)
         })

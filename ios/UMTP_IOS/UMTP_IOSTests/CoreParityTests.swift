@@ -26,6 +26,24 @@ final class CoreParityTests: XCTestCase {
         return APIClient(baseURLString: "https://example.invalid/api/", session: URLSession(configuration: config))
     }
 
+    func testFixtureURLAcceptsOnlyHTTPOrHTTPSLoopbackHosts() {
+        for value in ["http://127.0.0.1:18765", "https://localhost:18765/", "http://[::1]:18765/api"] {
+            XCTAssertEqual(AppConfig.loopbackFixtureURL(value), value)
+        }
+    }
+
+    func testFixtureURLRejectsUnconfiguredRemoteAndAmbiguousValues() {
+        XCTAssertNil(AppConfig.loopbackFixtureURL(nil))
+        for value in ["", "$(UMTP_PARITY_FIXTURE_URL)", "https://umtp.duckdns.org",
+                      "http://localhost.example.invalid:18765", "//127.0.0.1:18765",
+                      "file://localhost/tmp/fixture", "ftp://127.0.0.1:18765",
+                      "http://localhost@remote.invalid:18765", "http://user:password@127.0.0.1:18765",
+                      "http://127.0.0.1:18765?redirect=remote", "http://127.0.0.1:18765#fragment",
+                      "http://127.0.0.1:0", "http://127.0.0.1:65536", " http://127.0.0.1:18765"] {
+            XCTAssertNil(AppConfig.loopbackFixtureURL(value), value)
+        }
+    }
+
     func testQueryAndIdentifierAreEncodedWithoutChangingEndpoint() async throws {
         CoreURLProtocol.handler = { request in
             XCTAssertEqual(request.httpMethod, "GET")
