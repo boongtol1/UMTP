@@ -1,9 +1,9 @@
 # 기존 iOS 구현 조사 (변경 전 기준)
 
-이 문서는 이식 전 iOS 상태를 고정해서 기록한다. 이식 진행 상태와 최종 검증은 `android-ios-parity.md`를 기준으로 한다.
+이 문서는 이식 전 iOS 상태를 고정해서 기록한다. 아래 “없음”, “현재”, “필요한 작업”은 별도 명시가 없으면 시작 기준이며 현재 앱의 누락을 뜻하지 않는다. 최신 구현·검증은 [기능 대응표](android-ios-parity.md)를 기준으로 한다. 현재 앱은 C15 commit 후 전체106개(단위86+UI20)를 실패0·skip0·exit0으로 통과했으며 로컬 구현·검증을 완료했다. 실서비스/APNs·서명된 실기기·Android 실행 검증은 별도다.
 
 - 조사 기준 Android/iOS 공통 HEAD: `da769c31ba4afdfa5d3b07ad9ecca2c39d7cbb04`.
-- 읽기 조사: iOS의 모든 Swift 21개 경로, Xcode project 전체 설정, README, Android MainActivity/등록/API/알림/푸시/저장 코드.
+- 읽기 조사: iOS의 모든 Swift 20개 경로, Xcode project 전체 설정, README, Android MainActivity/등록/API/알림/푸시/저장 코드.
 - 기존 사용자 변경: `umtp/sql/seed_silicon_macbook_pro_fair_prices.sql` untracked. 본 조사에서는 열거나 변경하지 않았다.
 - 코드에서 확인한 사실이며, 이 문서 작성 담당은 빌드·실행을 수행하지 않았다. 빌드·실행 검증을 이 조사 완료와 혼동하면 안 된다.
 
@@ -85,19 +85,19 @@ Android의 실제 앱 진입 경로는 `MainActivity.onCreate` → `MainTabScree
 | 메인 이동 | `MainActivity.kt::MainTabScreen`, 알림/읽음 보관함/거래 입력/설정 | 2탭 stub마저 도달 불가 | 기존 MainTabView 4탭 연결. 기능 VM을 사용자 세션에 종속시키고 alert→거래 이동 공유 |
 | 알림 갱신 | `ui/MacBookAirSettingsViewModel.kt::fetchAlerts/startAlertPolling`, onResume | 요청/로딩/오류/갱신 시각 없음 | GET alerts, 10초 foreground polling, 중복 요청 guard, 오류 시 이전 데이터 보존, 재시도 |
 | 알림 목록·상세 | `ui/AlertFeedScreen.kt`, `network/AlertModels.kt` | title/message 외 모든 필드 없음 | 제품 이미지/링크/스펙/가격/조건/사기 V1·V2·V3/리스크/본문/시각/조건 변경 후보 전체 표시, 탐색/정렬/필터 |
-| 읽음 처리 | `markAlertAsRead/markAllAlertsAsRead`, `markAlertEventReadWithFallback` | 없음 | 단건/전체 처리 및 PATCH 404/405 POST 호환, 서버 성공 후 UI 반영 |
+| 읽음 처리 | `markAlertAsRead/markAllAlertsAsRead`, `markAlertEventReadWithFallback` | 없음 | 단건/전체 처리 및 PATCH 404/405/501만 POST 호환, 서버 성공 후 UI 반영 |
 | 읽음 보관함 | `ui/ReadAlertArchiveScreen.kt`, `fetchReadGroupedAlerts/clearAllReadArchive/clearSelectedReadArchive` | 화면/모델/API 없음 | 제품별/칩별 group 탐색, 상세, 선택/전체 삭제, 확인/상태/거래 이동 |
 | 거래 시작 | `ui/ResaleTradeInputScreen.kt`, `startTradeJourneyFromUrl/FromAlert/FromReadArchive` | 없음 | URL/상품 참조 및 alert/archive 출발, prefill/identity/fallback 처리 |
-| 거래 수정 | `patchSelectedResaleJourneyPurchase/Resale/Sold`, `network/ResaleTradeModels.kt` | 없음 | 구매/판매 준비/판매 완료 전체 입력, sparse update, 시각·금액 검증, 서버 반영 |
+| 거래 수정 | `patchSelectedResaleJourneyPurchase/Resale`, `network/ResaleTradeModels.kt` | 없음 | 구매 후/되팔이 후 2모드 전체 입력, sparse update, 시각·금액 검증, 서버 반영. Sold callback은 선언만 있고 화면에서 호출하지 않음 |
 | 거래 이력 | `loadResaleJourneyHistory/deleteSelectedCompletedResaleJourneys/deleteAllCompletedResaleJourneys` | 없음 | 구매 완료/판매 완료 목록, 선택 복원, 최대 200개, 완료 이력 삭제 |
 | 설정 탐색 | `MainActivity.kt::SettingsNavigator/Screen`, ProductTypeList→ChipList→ScreenSizeList→RamSsdSettings | placeholder fairPrice 모델부터 불일치 | 제품/chip/screen/RAM/SSD 계층, Mac mini 화면크기 단계 생략, Android 순서 |
 | 개별 감시 조건 | `MacBookAirSettingCard`, `upsertItem`, `AlertBoundMapper`, `FriendlyPriceText` | 없음 | 내 시세/목표가격/이상·이하/가격 bound/키워드/알림/후보알림/priority/금액 설명 및 서버 저장 |
 | 일괄 조건 | `RamSsdSettingsScreen`, `bulkSet*`, `applyBulkUpsertFallback` | 없음 | 현재 chip/screen 또는 전체 제품 범위, enabled/notice/priority/drop rate/min/max/reset, 부분 실패 보고 |
 | 조건 refresh | `refreshSettings/refreshSingleRuleSavedAt` | 없음 | 단순 재조회와 서버 규칙 saved_at 갱신 부작용 구분; 단건/전체 갱신 결과와 시각 |
-| 추천 키워드 | `RamSsdSettingsScreen` 직접 `getRecommendedKeywords` API | 없음 | 제품/chip/RAM/SSD 입력으로 서버 추천 목록과 선택 반영 |
+| 추천 키워드 | `MacBookAirSettingCard`가 API03 응답의 `recommended_search_keyword` 표시 | 없음 | custom/effective/recommended 검색어 구분. 별도 `getRecommendedKeywords` API33은 선언만 존재 |
 | 알림 권한·push | `MainActivity` POST_NOTIFICATIONS, `fcm/PushTokenManager`, `UMTPFirebaseMessagingService` | entitlement/delegate/SDK/권한/token/API 전부 없음 | iOS notification 허가 및 APNs/FCM 계약 확인, token 갱신/로그인/오류 재시도, foreground 처리 |
 | 알림 클릭 이동 | `MainActivity.handleIntent/onNewIntent`, `initialTargetAlertId` | 없음 | cold/warm launch `alert_id` 큐를 유지하고 로그인 후 알림 탭/해당 항목 이동 |
-| 외부 앱/공유 | Alert/Archive 화면 `ACTION_VIEW`, `ACTION_SEND` 여부는 Android 전수 문서 참조 | 없음 | Safari/openURL/ShareLink 등 실제 사용자 결과에 맞는 대응 |
+| 외부 앱/복사 | Alert/Archive 화면 `ACTION_VIEW` 및 클립보드 복사 | 없음 | HTTP(S) 검증·Safari/openURL·클립보드·실패 안내. ACTION_SEND/공유 확장은 활성 기능이 아님 |
 | 생명주기 | Android onResume 갱신, 10초 ViewModel coroutine | iOS scenePhase 관찰 없음 | active refresh/polling, inactive/background task 취소, 사용자 교체 시 이전 요청 결과 격리 |
 
 Android `UmtpUrlAnalyzeScreen`/`WatchRuleSettingsScreen`는 `MainActivity`의 실제 탭 또는 `SettingsNavigator`에서 호출되지 않는다. 이 둘과 사용하지 않는 API 선언은 별도 Android call-site 조사로 활성 여부를 확정해야 하며, 존재하는 파일만 근거로 활성 메뉴로 추가하지 않는다. Android Manifest에는 MAIN/LAUNCHER만 있고 VIEW URL scheme/App Link intent-filter는 없다. 따라서 현재 active deep link는 push extra `alert_id`다. iOS Universal Link 지원을 Android의 기존 기능이라고 잘못 주장해서는 안 된다.
@@ -130,4 +130,4 @@ Android `UmtpUrlAnalyzeScreen`/`WatchRuleSettingsScreen`는 `MainActivity`의 �
 4. 거래 묶음: 신규 TradeModels/TradeAPI/TradeViewModel/TradeViews. alert/archive 시작과 메인 탭 선택 callback 계약 공유.
 5. 푸시 묶음: 앱 entrypoint/project를 주 에이전트가 소유한다면 신규 NotificationService/delegate 코드와 설정 제안을 별도로 전달. 서비스 백엔드와 FCM/APNs token 형식 확인 후 통합.
 
-현재 iOS는 작은 Stage1 앱이므로 기능 묶음별 분리보다 파일 동시 수정 충돌이 더 큰 위험이다. SwiftUI/Combine/URLSession 및 기존 등록 흐름은 그대로 활용할 수 있다. 본 문서 작성만으로 어떠한 이식 기능도 구현/검증 완료로 표시하지 않는다.
+조사 기준의 iOS는 작은 Stage1 앱이었으므로 파일 동시 수정 충돌을 피하는 분할이 필요했다. 현재 구현도 SwiftUI/Combine/URLSession 및 기존 등록 흐름을 확장했다. 이 baseline 목록 자체를 구현·실행 검증 완료의 증거로 사용하지 않는다.

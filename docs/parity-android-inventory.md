@@ -1,6 +1,8 @@
 # Android 활성 기능 조사
 
-조사 기준: `da769c31ba4afdfa5d3b07ad9ecca2c39d7cbb04`, 2026-09-15. 이 문서는 코드 조사 증거이며 기능 실행 성공을 의미하지 않는다. 통합 상태와 iOS 구현/검증/커밋은 `android-ios-parity.md`를 따른다.
+조사 기준: `da769c31ba4afdfa5d3b07ad9ecca2c39d7cbb04`, 2026-09-15. 이 문서는 Android 기준 코드 조사 증거이며 기능 실행 성공을 의미하지 않는다. 통합 상태와 iOS 구현/검증/커밋은 [기능 대응표](android-ios-parity.md)를 따른다.
+
+최종 인계: Android 활성28개 ID를 현재 도달 가능한 iOS 기능과 독립 재대조했고 추가 확정 누락은 없었다. C15 commit 후 전체106개(단위86+UI20)가 실패0·skip0·exit0으로 통과했으며 로컬 구현·검증을 완료했다. Android 실제 화면·실서비스 쓰기·원격 APNs 검증을 대신하지 않는다. 아래 구현 인계 문단은 당시 기록으로 보존한다. 재시작 전 `/tmp/umtp-parity.PKH6ia/` 원본은 소실됐고 최신 실행 자료는 `/Users/boongtol_air/Library/Developer/UMTPParity/20260915-resume/`에 있다.
 
 ## 조사 범위와 구조
 
@@ -16,7 +18,7 @@
 | AUTH-01 | 최초 사용자 등록 | `A/MainActivity.kt:onCreate`, `ui/UserSetupScreen.kt`, `MacBookAirSettingsViewModel.registerUser` | trim ID 2자 이상 + ANDROID_ID → POST users/register; 서버 반환 user_id 우선 저장 후 메인 진입 | 중복 클릭 UI disabled, loading, ID/device 누락 설명, HTTP/서버 ok=false 실패; 암호/토큰 로그인·계정 편집·탈퇴 없음 |
 | AUTH-02 | 재시작 세션 복구 | `user/UserPreferences.kt`, ViewModel init | `umtp_prefs/user_id` 읽어서 등록 생략; units/settings/alerts/archive 조회; FCM 등록 | 서버 읽기 실패가 저장 ID를 삭제하지 않음. 만료 토큰/refresh token 개념 없음 |
 | NAV-01 | 4탭 및 뒤로 | `MainActivity.kt:MainTabScreen`, `SettingsNavigator`, `Screen` | 알림 / 읽음 보관함 / 거래 입력 / 설정; 설정 product→chip→inch→RAM/SSD; Mac mini는 inch 생략 | 다른 탭 Android Back→알림; 설정 하위 Back→상위. Compose remember UI는 탭 이탈/프로세스 종료 시 재생성될 수 있음 |
-| ALERT-01 | 미읽음 피드 | `ui/AlertFeedScreen.kt`, VM `fetchAlerts/startAlertPolling` | GET alerts?user_id=&is_read=0; created_at 내림차순; 30초 polling 및 ON_RESUME; 수동 새로고침 시 시각/상태 | 빈 “알림이 없습니다.”; 중복 조회 억제; 실패 기존 목록 보존; 자동 실패는 조용함; 페이지네이션 없음 |
+| ALERT-01 | 미읽음 피드 | `ui/AlertFeedScreen.kt`, VM `fetchAlerts/startAlertPolling` / `ALERT_POLL_INTERVAL_MS` | GET alerts?user_id=&is_read=0; created_at 내림차순; **10초** polling 및 ON_RESUME; 수동 새로고침 시 시각/상태 | README는30초라 기술 불일치. 실제 상수 `10_000L`이 기준; 빈 “알림이 없습니다.”; 중복 조회 억제; 실패 기존 목록 보존; 자동 실패는 조용함; 페이지네이션 없음 |
 | ALERT-02 | 카드 전체 표시 | `AlertFeedScreen.kt:AlertCard`, resolve helpers | 사기 가능성, 이미지, 제목, 참고/내용변경/위험/조건 badges, 가격, 스펙, 기준가격, 차이%, 출처, URL 유무, 본문 요약, 시각, 상세 보기 | title→message→제목 없음; product_url→url; listing price→target; gap→diff_ratio→drop; fraud explicit text→probability/label; 0.25/0.65 경계; 후보/끌올 문구 |
 | ALERT-03 | 상세 | `AlertFeedScreen.kt:AlertDetailScreen/buildAlertDetailRows` | 26 필드: 알림 유형/참고/출처/URL/이미지/제품/칩/인치/RAM/SSD/등록가격/시장가/기준가격/차이/설정차이/조건/사기/위험/점수/키워드/본문/등록·생성·분석 시각/거래유형/특이사항; 검토 완료·매물 열기 | 상세 진입만으로 읽음 변경하지 않음. “검토 완료” 서버 성공 후 목록 복귀·refresh |
 | ALERT-04 | 선택·전체 읽음 | `AlertFeedScreen.kt`, VM `markAlertAsRead/markAllAlertsAsRead` | 선택모드/전체선택/해제/선택읽음 순차 호출; 전체읽음 endpoint; 성공 수·목록 갱신 | id>0만 선택; 실패도 다음 선택 진행; PATCH 404/405/501만 POST fallback; 실패 로컬 성공 처리 금지 |
@@ -49,7 +51,7 @@
 - bulk 전용 API 3개는 interface에 있으나 활성 ViewModel은 항상 개별 upsert fallback을 사용. iOS도 scope/full값 보존 위해 개별 upsert 필요.
 - create-from-product, getResaleTradePrefill, legacy upsert public entry, loadCompleted wrapper는 MainActivity에서 호출하지 않음. after-purchase/after-resale API 자체는 활성 save의 id 없는 fallback에 사용됨.
 - Manifest: launcher activity + FCM service만. NotificationListener, 외부 알림 읽기, 자동 URL 추출/전송, share extension/ACTION_SEND, URL Scheme/App Links, Widget, 검색 UI, camera/photos/location 권한, WorkManager, background service, feature flag 없음. README MVP-B..F는 미구현 미래 작업이다.
-- iOS는 타 앱 알림읽기 대신 별도 구현할 대상 없음. Android 30초 polling도 앱 프로세스 메모리 scope일 뿐 OS guaranteed background job 아님. iOS foreground polling + resume refresh + remote push로 대응.
+- iOS는 타 앱 알림읽기 대신 별도 구현할 대상 없음. Android 10초 polling도 앱 프로세스 메모리 scope일 뿐 OS guaranteed background job 아님. iOS foreground polling + resume refresh + remote push로 대응. README의30초를 최초 조사에 잘못 적었으나 ViewModel 실제 상수 재확인으로 정정했다.
 - Android `usesCleartextTraffic=true`, release에도 BODY logging/raw 거래응답 및 사용자 입력 로그를 남김. 이를 iOS에 복제하지 않는다. 백엔드 인증헤더 부재는 서비스 계약상 한계이며 임의 토큰 인증 추가로 기존 사용자 데이터 접근을 끊지 않는다.
 - Android `upsertItem` savingKey는 product_type 빠짐(화면 비교키엔 포함) → 저장버튼 loading/중복 차단 실패. iOS는 전체 복합키를 사용한다.
 - Android 카드 invalid 가격 누르면 아무피드백 없고 스펙 수정이 save에서 누락된다. 데이터손실/침묵실패 동등성으로 복제하지 않는다.
@@ -57,3 +59,23 @@
 ## 테스트 현황(코드 목록)
 
 `FriendlyPriceTextTest`(ID label·숫자/반올림), `AlertBoundMapperTest`(방향별 bound), `WatchPriorityUiTest`(속도 정상화·request), `SafeErrorMessageTest`(민감정보·네트워크/JSON 구분), ExampleUnitTest 단순 덧셈, ExampleInstrumentedTest 앱 package 확인. UI flow/VM/API 통합 테스트는 기존 Android에 없음. 본 조사 에이전트는 빌드·실기기 실행을 하지 않았으며 루트 검증기록이 실제 실행 여부의 근거이다.
+
+## 당시 iOS 설정 이식 인계 (2026-09-15)
+
+설정 담당이 `Models/UserFairPriceModels.swift`, 신규 `Services/SettingsAPI.swift`, `ViewModels/SettingsViewModel.swift`, `Views/SettingsView.swift`를 구현했다. 기존 SwiftUI/ObservableObject/NavigationStack/APIClient/AppState 구조를 활용한다. 설정 테스트는 `ios/UMTP_IOS/UMTP_IOSTests/SettingsParityTests.swift`에 추가했으며 실행 결과는 주 에이전트의 통합 검증 기록을 따른다.
+
+- SETTINGS-01..07: 카탈로그 트리, 개별 카드 전체 필드/서버 저장, 계산/방향/bounds, 검색/속도/후보, 전체/개별 saved_at refresh, 제품 전체/현재 칩·인치 scope, 7종 bulk와 확인, 실제 API 연결까지 구현. 성공 toast만 있는 임시 서버를 사용하지 않는다.
+- 백엔드 계약 재확인: `umtp/src/api_server.py:UserFairPriceUpsertRequest`, `umtp/src/user_settings_service.py:get_user_fair_price_settings/upsert_user_fair_price_setting`; 숫자 범위 -100..100, market>0, bounds≥0, keyword≤255 및 서버 필드 매칭.
+- 기존 설정 화면 로그아웃은 `AppState.logout()`으로 유지한다. 신규 영구 저장키를 만들지 않고 사용자 식별/서버 설정은 기존 체계 유지. 편집 초안은 ViewModel에서 단위 복합키로 관리해 탭 이동·새로고침 중 보존하며 프로세스 종료 뒤 저장하지 않은 초안까지 복구하지는 않는다.
+- 의도한 버그 수정: 전체 제품 포함 saving key, 음수/잘못된 가격에 명시 오류, 개별 요청 중복 차단, 서버 ok 검사, bulk 부분 성공/skip 수와 실패 뒤 재조회, 시스템 시장가 없는 reset의 무적용 안내, 반대방향 bound 제거.
+- Android와 의도적 차이: 개별 저장은 기존 `poll_interval_seconds`를 보존(없는 경우60); bulk 최소/최대는 반대방향 행을 아예 건너뛰어 그 행의 saved_at를 바꾸지 않는다. Android의 동일값 재저장은 불필요한 알림기준시간 변경이므로 복제하지 않는다.
+- 기준가격 초기값은 서버 `user_target_buy_price_krw` → `effective_target_buy_price_krw` → 차이율 계산 순으로 사용한다. Android는 차이율로만 재계산하므로 이미 반올림된 차이율을 다시 원단위 금액으로 바꿀 때 생기는 드리프트 위험이 있어 개선했다.
+- 새로고침은 저장기준시각 변경이라고 화면에 명시한다. 알림/보관함에 `.umtpSettingsDidChange`를 전달하여 설정 변경 후 데이터 재조회한다.
+- 작성된 테스트: 양/음 차이율 및 반올림, 최근편집 필드에 따른 연동, 잘못된 입력/범위, 방향별 bound 전송, priority/candidate/검색, 레거시 bool/숫자 문자열 decode, 범위 격리, reset 필드 보존·skip, refresh/dirty 초안, 실패목록/실패draft 보존, 부분실패 재조회/수, 중복저장, HTTP method 및 한글·슬래시 ID 인코딩.
+- 당시 조사 상태: 완료. 구현 상태: 코드 연결 완료, 통합 검증 전 인계. 담당의 점검과 주 에이전트의 실제 실행 결과를 구분한다. 이후 C12 탐색/일괄 초안 보존 및 C14 안내 줄바꿈 회귀를 포함한 Settings UI3개는 전체103개 실행에서 통과했으며 최신 결과는 주 대응표를 따른다.
+
+## 당시 독립 알림 검토 및 UI 검증 인계
+
+- Alerts/Archive/Detail을 별도로 Android 화면·helper·API에 재대조했다. 피드 카드에 누락됐던 알림 기준가격/시장가와의 차이/출처/링크 상태를 `AlertDetailView.swift:AlertCardView`에 추가했다. 기존 상세26개 필드와 보관함 읽음시각, 명시적 검토 후 읽음, archive ID와 alert event ID 구분을 확인했다. 알림 클릭 시 새 unread 조회 전에 이전 목록에서 대상없음으로 끝나는 경로는 주 에이전트에 전달해 push 라우팅 수정에 포함했다.
+- 최초 통합 UI 결과 `/tmp/umtp-parity.PKH6ia/ui-tests-1.log`에서 설정3개 흐름은 통과했다. 알림 초기3개 실패는 API 장애가 아니라 제목을 StaticText로 찾은 테스트 오류였다. Simulator 시스템 로그는 `/alerts` HTTP200·1105bytes 및 실제 제목의 `Button` 접근성 타입을 보여줬다. 주 에이전트가 추출한 xcresult 첨부 `ui-attachments/DD22D5A2-5215-4988-AB70-3BD703612150.txt`도 동일하다. 카드 tappable 정보영역에 `alert.card.<eventID>`와 하나로 결합한 접근성 버튼을 적용했고, AlertFlow UI4개 테스트의 카드·거래 상세 locator를 분리했다. 이 수정 뒤 통합 재실행 결과는 주 문서에서 관리한다.
+- 설정 개별 저장/refresh 뒤 현재 scope의 일괄 priority/min/max 기본값이 갱신되지 않는 후속 검토 지적을 수정했다. 각 집계값에만 `onChange`를 적용해 바뀐 항목만 동기화하며 무관한 일괄 입력은 보존한다. 설정 개별 저장 UI 테스트에 미적용 최소입력 보존 및 변경된 최대가격 집계 반영을 추가했으므로 최초 통과3개와 후속 테스트 상태는 구분해야 한다.
