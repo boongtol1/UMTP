@@ -5,6 +5,29 @@
 	};
 	objectVersion = 77;
 	objects = {
+A10000000000000000000001 = {isa = PBXNativeTarget; buildConfigurationList = A10000000000000000000008; buildPhases = (A10000000000000000000004, A10000000000000000000005, A10000000000000000000006,); buildRules = (); dependencies = (A10000000000000000000010,); fileSystemSynchronizedGroups = (A10000000000000000000002,); name = UMTP_IOSTests; productName = UMTP_IOSTests; productReference = A10000000000000000000003; productType = "com.apple.product-type.bundle.unit-test"; };
+A10000000000000000000002 = {isa = PBXFileSystemSynchronizedRootGroup; path = UMTP_IOSTests; sourceTree = "<group>"; };
+A10000000000000000000003 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = UMTP_IOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+A10000000000000000000004 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+A10000000000000000000005 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+A10000000000000000000006 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+A10000000000000000000008 = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000011, A10000000000000000000012,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+A10000000000000000000009 = {isa = PBXContainerItemProxy; containerPortal = 54E986822FB724BA0062F4A0; proxyType = 1; remoteGlobalIDString = 54E986892FB724BA0062F4A0; remoteInfo = UMTP_IOS; };
+A10000000000000000000010 = {isa = PBXTargetDependency; target = 54E986892FB724BA0062F4A0; targetProxy = A10000000000000000000009; };
+A10000000000000000000011 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; CODE_SIGN_STYLE = Automatic; PRODUCT_BUNDLE_IDENTIFIER = "boongtol.UMTP-IOS.tests"; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; IPHONEOS_DEPLOYMENT_TARGET = 17.0; TARGETED_DEVICE_FAMILY = "1,2"; BUNDLE_LOADER = "$(TEST_HOST)"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/UMTP_IOS.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/UMTP_IOS"; }; name = Debug; };
+A10000000000000000000012 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; CODE_SIGN_STYLE = Automatic; PRODUCT_BUNDLE_IDENTIFIER = "boongtol.UMTP-IOS.tests"; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; IPHONEOS_DEPLOYMENT_TARGET = 17.0; TARGETED_DEVICE_FAMILY = "1,2"; BUNDLE_LOADER = "$(TEST_HOST)"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/UMTP_IOS.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/UMTP_IOS"; }; name = Release; };
+
+A20000000000000000000001 = {isa = PBXNativeTarget; buildConfigurationList = A20000000000000000000008; buildPhases = (A20000000000000000000004, A20000000000000000000005, A20000000000000000000006,); buildRules = (); dependencies = (A20000000000000000000010,); fileSystemSynchronizedGroups = (A20000000000000000000002,); name = UMTP_IOSUITests; productName = UMTP_IOSUITests; productReference = A20000000000000000000003; productType = "com.apple.product-type.bundle.ui-testing"; };
+A20000000000000000000002 = {isa = PBXFileSystemSynchronizedRootGroup; path = UMTP_IOSUITests; sourceTree = "<group>"; };
+A20000000000000000000003 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = UMTP_IOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+A20000000000000000000004 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+A20000000000000000000005 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+A20000000000000000000006 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+A20000000000000000000008 = {isa = XCConfigurationList; buildConfigurations = (A20000000000000000000011, A20000000000000000000012,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+A20000000000000000000009 = {isa = PBXContainerItemProxy; containerPortal = 54E986822FB724BA0062F4A0; proxyType = 1; remoteGlobalIDString = 54E986892FB724BA0062F4A0; remoteInfo = UMTP_IOS; };
+A20000000000000000000010 = {isa = PBXTargetDependency; target = 54E986892FB724BA0062F4A0; targetProxy = A20000000000000000000009; };
+A20000000000000000000011 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; CODE_SIGN_STYLE = Automatic; PRODUCT_BUNDLE_IDENTIFIER = "boongtol.UMTP-IOS.uitests"; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; IPHONEOS_DEPLOYMENT_TARGET = 17.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = UMTP_IOS; }; name = Debug; };
+A20000000000000000000012 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; CODE_SIGN_STYLE = Automatic; PRODUCT_BUNDLE_IDENTIFIER = "boongtol.UMTP-IOS.uitests"; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; IPHONEOS_DEPLOYMENT_TARGET = 17.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = UMTP_IOS; }; name = Release; };
 
 /* Begin PBXFileReference section */
 		54E9868A2FB724BA0062F4A0 /* UMTP_IOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = UMTP_IOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -33,6 +56,8 @@
 			isa = PBXGroup;
 			children = (
 				54E9868C2FB724BA0062F4A0 /* UMTP_IOS */,
+				A10000000000000000000002,
+				A20000000000000000000002,
 				54E9868B2FB724BA0062F4A0 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +66,8 @@
 			isa = PBXGroup;
 			children = (
 				54E9868A2FB724BA0062F4A0 /* UMTP_IOS.app */,
+				A10000000000000000000003,
+				A20000000000000000000003,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -100,6 +127,8 @@
 			projectRoot = "";
 			targets = (
 				54E986892FB724BA0062F4A0 /* UMTP_IOS */,
+				A10000000000000000000001,
+				A20000000000000000000001,
 			);
 		};
 /* End PBXProject section */

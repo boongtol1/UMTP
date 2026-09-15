@@ -14,7 +14,9 @@
 - Mac arm64, Xcode 26.6 (17F113), Swift 6.3.3, iOS 최소 17.0.
 - project `ios/UMTP_IOS/UMTP_IOS.xcodeproj`, 앱 target/scheme `UMTP_IOS`. 기존 테스트 target 없음.
 - iOS Debug baseline 성공: `xcodebuild -project ios/UMTP_IOS/UMTP_IOS.xcodeproj -scheme UMTP_IOS -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/umtp-parity.PKH6ia/baseline-ios CODE_SIGNING_ALLOWED=NO build`.
-- Android baseline 실행 중: Android Studio JBR로 `./gradlew :app:testDebugUnitTest :app:assembleDebug`. adb 연결 기기 및 AVD 없음.
+- Android baseline: Android Studio JBR 사용. 기존 산출물 hash 읽기에서 10분 이상 정지(스택/lsof 증거)하여 해당 실행만 종료하고 임시 build/cache 경로로 재실행. **Unit Test 19개·Debug APK 모두 성공**(33초). 기존 산출물 보존. 로그 `android-isolated-build.log`.
+- Android 실행: adb 연결 기기 및 AVD/system image 없음. SDK system image 설치 시도는 미동의 라이선스로 중단됨. 라이선스 동의나 임의 기기 등록을 수행하지 않음.
+- iOS 통합 1차: Swift actor 기본 인자 오류 발견 후 optional 주입으로 수정. 2차 **XCTest 39개 성공(실패 0)**, 실제 iPhone 17 Pro iOS 26.5 Simulator. 증거 `unit-tests-2.xcresult`, `unit-tests-2.log`. 구성: Core 7 / Alerts 11 / Settings 12 / Trade 9. UI 테스트는 별도로 진행 중.
 - 원본 실행 증거 `/tmp/umtp-parity.PKH6ia/`. 최종 명령·결과 요약은 이 문서에 보존한다.
 
 ## 전체 조사와 기능 대응표
@@ -54,4 +56,5 @@
 
 ## 생성 commit
 
-아직 없음. 기능별 검증과 diff 검토 뒤 필요한 경로만 stage한다.
+- `94623b7` — Android/iOS/API 전체 조사·baseline 기록.
+- 공통 API/인증/테스트 구조 commit 준비: 39개 통합 Unit Test 통과. 추가 UI 및 푸시 검증 진행 중.

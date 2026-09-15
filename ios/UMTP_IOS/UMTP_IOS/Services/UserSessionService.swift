@@ -4,9 +4,9 @@ final class UserSessionService {
     static let shared = UserSessionService()
 
     private let userIdKey = "umtp_user_id"
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
 
-    private init() {}
+    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
     func saveUserId(_ userId: String) {
         let trimmed = userId.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -25,5 +25,4 @@ final class UserSessionService {
         defaults.removeObject(forKey: userIdKey)
     }
 
-    // TODO(Stage2): Keychain 기반 사용자 세션 저장소로 확장
 }

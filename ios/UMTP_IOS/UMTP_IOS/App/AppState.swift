@@ -5,11 +5,12 @@ import Foundation
 final class AppState: ObservableObject {
     @Published var userId: String?
     @Published var isLoadingSession: Bool = false
+    @Published var pendingAlertID: Int?
 
     private let sessionService: UserSessionService
 
-    init(sessionService: UserSessionService = .shared, userId: String? = nil) {
-        self.sessionService = sessionService
+    init(sessionService: UserSessionService? = nil, userId: String? = nil) {
+        self.sessionService = sessionService ?? .shared
         self.userId = userId
     }
 
@@ -25,12 +26,13 @@ final class AppState: ObservableObject {
     }
 
     func completeLogin(userId: String) {
+        sessionService.saveUserId(userId)
         self.userId = userId
     }
 
     func logout() {
         sessionService.clearUserId()
         userId = nil
-        // TODO(Stage2): 로그아웃 시 푸시 토큰 해제/서버 세션 정리 연동
+        pendingAlertID = nil
     }
 }

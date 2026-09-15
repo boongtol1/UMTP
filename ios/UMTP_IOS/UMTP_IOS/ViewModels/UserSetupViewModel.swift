@@ -12,14 +12,14 @@ final class UserSetupViewModel: ObservableObject {
 
     init(
         sessionService: UserSessionService,
-        userAPI: UserAPIProtocol = UserAPI.shared
+        userAPI: UserAPIProtocol? = nil
     ) {
         self.sessionService = sessionService
-        self.userAPI = userAPI
+        self.userAPI = userAPI ?? UserAPI.shared
     }
 
     var canSubmit: Bool {
-        userIdInput.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 && !isSubmitting
+        (2...100).contains(userIdInput.trimmingCharacters(in: .whitespacesAndNewlines).count) && !isSubmitting
     }
 
     func register(appState: AppState) async {
@@ -28,24 +28,26 @@ final class UserSetupViewModel: ObservableObject {
         }
 
         let trimmed = userIdInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 2 else {
-            errorMessage = "사용자 ID는 2자 이상 입력해 주세요."
+        guard (2...100).contains(trimmed.count) else {
+            errorMessage = UserAPIError.invalidInput.userMessage
             return
         }
 
         isSubmitting = true
+        defer { isSubmitting = false }
         errorMessage = nil
 
         do {
             let result = try await userAPI.register(userId: trimmed)
             sessionService.saveUserId(result.userId)
             appState.completeLogin(userId: result.userId)
+        } catch is CancellationError {
+            return
         } catch let error as UserAPIError {
             errorMessage = error.userMessage
         } catch {
             errorMessage = UserAPIError.unknown.userMessage
         }
 
-        isSubmitting = false
     }
 }

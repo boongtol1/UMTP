@@ -18,6 +18,8 @@ struct UserSetupView: View {
                 .textFieldStyle(.roundedBorder)
                 .textInputAutocapitalization(.never)
                 .disableAutocorrection(true)
+                .disabled(viewModel.isSubmitting)
+                .accessibilityIdentifier("registration.userId")
 
             if let errorMessage = viewModel.errorMessage {
                 Text(errorMessage)
@@ -36,11 +38,12 @@ struct UserSetupView: View {
                         ProgressView()
                             .controlSize(.small)
                     }
-                    Text(viewModel.isSubmitting ? "등록 중..." : "등록")
+                    Text(viewModel.isSubmitting ? "등록 중..." : "저장 및 시작")
                 }
             }
             .buttonStyle(.borderedProminent)
             .disabled(!viewModel.canSubmit)
+            .accessibilityIdentifier("registration.submit")
         }
         .padding()
     }

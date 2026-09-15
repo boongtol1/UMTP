@@ -13,23 +13,22 @@ final class UserAPI: UserAPIProtocol {
     static let shared = UserAPI()
 
     private let apiClient: APIClient
-    private let defaults: UserDefaults
-    private let fallbackDeviceIdKey = "umtp_ios_fallback_device_id"
+    private let deviceIdentity: DeviceIdentity
 
     init(apiClient: APIClient = .shared, defaults: UserDefaults = .standard) {
         self.apiClient = apiClient
-        self.defaults = defaults
+        self.deviceIdentity = DeviceIdentity(defaults: defaults)
     }
 
     func register(userId: String) async throws -> RegisterUserResult {
         let trimmedUserId = userId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmedUserId.count >= 2 else {
+        guard (2...100).contains(trimmedUserId.count) else {
             throw UserAPIError.invalidInput
         }
 
         let request = RegisterUserRequest(
             user_id: trimmedUserId,
-            device_id: resolveDeviceId(),
+            device_id: deviceIdentity.resolve(),
             platform: "ios"
         )
 
@@ -51,6 +50,8 @@ final class UserAPI: UserAPIProtocol {
             }
 
             return RegisterUserResult(userId: resolvedUserId)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch let error as APIClientError {
             throw UserAPIError.fromAPIClientError(error)
         } catch let error as UserAPIError {
@@ -60,23 +61,6 @@ final class UserAPI: UserAPIProtocol {
         }
     }
 
-    private func resolveDeviceId() -> String {
-        if let identifierForVendor = UIDevice.current.identifierForVendor?.uuidString,
-           !identifierForVendor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return identifierForVendor
-        }
-
-        if let storedFallback = defaults.string(forKey: fallbackDeviceIdKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !storedFallback.isEmpty {
-            return storedFallback
-        }
-
-        let generatedFallback = UUID().uuidString
-        defaults.set(generatedFallback, forKey: fallbackDeviceIdKey)
-        // TODO(Stage2): Keychain 기반 영구 UUID 저장으로 대체
-        return generatedFallback
-    }
 }
 
 enum UserAPIError: Error {
@@ -86,11 +70,14 @@ enum UserAPIError: Error {
     case network
     case timeout
     case unknown
+    case identityMismatch
 
     var userMessage: String {
         switch self {
         case .invalidInput:
-            return "사용자 ID는 2자 이상 입력해 주세요."
+            return "사용자 ID는 2자 이상 100자 이하로 입력해 주세요."
+        case .identityMismatch:
+            return "사용자 ID와 이 기기의 등록 정보가 일치하지 않아요. 기존에 등록한 ID를 확인해 주세요."
         case .registrationFailed:
             return "사용자 등록에 실패했어요."
         case .invalidServerResponse:
@@ -112,6 +99,8 @@ enum UserAPIError: Error {
             return urlError.code == .timedOut ? .timeout : .network
         case .httpStatus:
             return .registrationFailed
+        case .serverRejected(let reason):
+            return ["user_device_mismatch", "device_user_mismatch"].contains(reason) ? .identityMismatch : .registrationFailed
         case .invalidResponse, .decodingFailed:
             return .invalidServerResponse
         case .unknown:
