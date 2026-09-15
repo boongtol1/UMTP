@@ -370,6 +370,8 @@ private struct SettingsUnitCard: View {
             Text("계산식: (시장가 − 알림 기준 가격) / 시장가 × 100").font(.caption).foregroundStyle(.secondary)
             Text("이 제품이 보통 이 정도 가격이라고 생각하는 금액을 입력하세요. 시장가보다 낮거나 높은 가격에서 알림을 받도록 설정할 수 있습니다.")
                 .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("settings.market.guidance.\(unit.id)")
         }
     }
 

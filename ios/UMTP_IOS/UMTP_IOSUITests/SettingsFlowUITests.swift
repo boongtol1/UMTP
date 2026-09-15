@@ -24,6 +24,15 @@ final class SettingsFlowUITests: XCTestCase {
         scrollTo(target, in: app)
         replace(target, with: "800000")
         dismissKeyboard(app)
+        let guidance = app.staticTexts["settings.market.guidance.\(unitKey)"]
+        scrollTo(guidance, in: app)
+        XCTAssertTrue(guidance.label.hasSuffix("설정할 수 있습니다."))
+        XCTAssertGreaterThan(guidance.frame.height, 30,
+                             "시장가 안내문은 한 줄로 잘리지 않고 전체 문장이 표시되어야 합니다.")
+        let guidanceScreenshot = XCTAttachment(screenshot: app.screenshot())
+        guidanceScreenshot.name = "시장가 안내문 전체 표시"
+        guidanceScreenshot.lifetime = .keepAlways
+        add(guidanceScreenshot)
         let above = app.buttons["이상 알림"]
         scrollTo(above, in: app)
         above.tap()
