@@ -74,4 +74,174 @@ final class PushParityTests: XCTestCase {
         await queue.run(operation)
         XCTAssertEqual(calls, 3)
     }
+
+    func testUnconfiguredLogoutCreatesNoDeletionButPreservesExistingCleanup() async {
+        let suite = UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var calls = 0
+        let deletion = PushTokenDeletion(defaults: defaults) { calls += 1 }
+
+        deletion.requireDeletion(isConfigured: false)
+        XCTAssertFalse(deletion.isPending)
+        XCTAssertNil(defaults.object(forKey: "umtp_ios_push_token_deletion_pending"))
+        let noCleanupNeeded = await deletion.completePendingDeletion(isConfigured: false)
+        XCTAssertTrue(noCleanupNeeded)
+        XCTAssertEqual(calls, 0)
+
+        deletion.requireDeletion(isConfigured: true)
+        deletion.requireDeletion(isConfigured: false)
+        let unavailable = await deletion.completePendingDeletion(isConfigured: false)
+        XCTAssertFalse(unavailable, "Existing cleanup must still block SDK token activation")
+        XCTAssertTrue(deletion.isPending)
+        XCTAssertTrue(defaults.bool(forKey: "umtp_ios_push_token_deletion_pending"))
+        XCTAssertEqual(calls, 0, "A missing Firebase configuration must never invoke its SDK")
+
+        let configuredAgain = await deletion.completePendingDeletion(isConfigured: true)
+        XCTAssertTrue(configuredAgain)
+        XCTAssertEqual(calls, 1)
+        XCTAssertFalse(deletion.isPending)
+    }
+
+    func testTokenDeletionFailureStaysPendingUntilRetrySucceeds() async {
+        let suite = UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var calls = 0
+        let deletion = PushTokenDeletion(defaults: defaults) {
+            calls += 1
+            if calls == 1 { throw APIClientError.httpStatus(503) }
+        }
+
+        let initiallyReady = await deletion.completePendingDeletion()
+        XCTAssertTrue(initiallyReady)
+        XCTAssertEqual(calls, 0)
+        deletion.requireDeletion()
+        XCTAssertTrue(defaults.bool(forKey: "umtp_ios_push_token_deletion_pending"))
+
+        let failed = await deletion.completePendingDeletion()
+        XCTAssertFalse(failed, "A failed deletion must keep token activation blocked")
+        XCTAssertTrue(deletion.isPending)
+        XCTAssertNotNil(deletion.lastError)
+        XCTAssertTrue(defaults.bool(forKey: "umtp_ios_push_token_deletion_pending"))
+
+        let retried = await deletion.completePendingDeletion()
+        XCTAssertTrue(retried)
+        XCTAssertFalse(deletion.isPending)
+        XCTAssertNil(deletion.lastError)
+        XCTAssertNil(defaults.object(forKey: "umtp_ios_push_token_deletion_pending"))
+        let alreadyReady = await deletion.completePendingDeletion()
+        XCTAssertTrue(alreadyReady)
+        XCTAssertEqual(calls, 2, "A confirmed deletion must not be repeated on each foreground activation")
+    }
+
+    func testPendingTokenDeletionSurvivesCoordinatorRecreation() async {
+        let suite = UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var calls = 0
+        let original = PushTokenDeletion(defaults: defaults) {
+            calls += 1
+            throw APIClientError.httpStatus(503)
+        }
+        original.requireDeletion()
+
+        // Recreate before any SDK call, as if the process ended immediately after logout.
+        let restored = PushTokenDeletion(defaults: UserDefaults(suiteName: suite)!) {
+            calls += 1
+            throw APIClientError.httpStatus(503)
+        }
+        XCTAssertTrue(restored.isPending)
+        XCTAssertEqual(calls, 0)
+        let failed = await restored.completePendingDeletion()
+        XCTAssertFalse(failed)
+
+        // A failed attempt must also survive another restart and permit a later retry.
+        let retried = PushTokenDeletion(defaults: UserDefaults(suiteName: suite)!) { calls += 1 }
+        XCTAssertTrue(retried.isPending)
+        let completed = await retried.completePendingDeletion()
+        XCTAssertTrue(completed)
+        XCTAssertEqual(calls, 2)
+        let completedAfterRestart = PushTokenDeletion(defaults: UserDefaults(suiteName: suite)!) {}
+        XCTAssertFalse(completedAfterRestart.isPending)
+    }
+
+    func testConcurrentCleanupAndRepeatedLogoutShareOneDeletion() async {
+        let suite = UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var finish: CheckedContinuation<Void, Never>?
+        var calls = 0
+        let deletion = PushTokenDeletion(defaults: defaults) {
+            calls += 1
+            if calls == 1 { await withCheckedContinuation { finish = $0 } }
+        }
+        deletion.requireDeletion()
+        let logout = Task { await deletion.completePendingDeletion() }
+        while finish == nil { await Task.yield() }
+
+        var joined = 0
+        let activation = Task {
+            joined += 1
+            return await deletion.completePendingDeletion()
+        }
+        while joined < 1 { await Task.yield() }
+        deletion.requireDeletion()
+        deletion.requireDeletion()
+        let repeatedLogout = Task {
+            joined += 1
+            return await deletion.completePendingDeletion()
+        }
+        while joined < 2 { await Task.yield() }
+        XCTAssertTrue(deletion.isPending)
+        XCTAssertEqual(calls, 1, "Logout and activation must await the same in-flight SDK deletion")
+
+        finish?.resume()
+        let logoutCompleted = await logout.value
+        let activationCompleted = await activation.value
+        let repeatedLogoutCompleted = await repeatedLogout.value
+        XCTAssertTrue(logoutCompleted)
+        XCTAssertTrue(activationCompleted)
+        XCTAssertTrue(repeatedLogoutCompleted)
+        XCTAssertFalse(deletion.isPending)
+        XCTAssertEqual(calls, 1)
+
+        deletion.requireDeletion()
+        let nextSessionLogout = await deletion.completePendingDeletion()
+        XCTAssertTrue(nextSessionLogout)
+        XCTAssertEqual(calls, 2, "A later session's logout must start a fresh deletion")
+    }
+
+    func testDeletionWaitsForTokenFetchAlreadyInProgress() async {
+        let suite = UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let queue = PushTokenFetchQueue()
+        var finishFetch: CheckedContinuation<Void, Never>?
+        var events: [String] = []
+        let fetch = Task {
+            await queue.run {
+                events.append("fetch started")
+                await withCheckedContinuation { finishFetch = $0 }
+                events.append("fetch finished")
+            }
+        }
+        while finishFetch == nil { await Task.yield() }
+        var waitingForFetch = false
+        let deletion = PushTokenDeletion(defaults: defaults, waitForFetches: {
+            waitingForFetch = true
+            await queue.waitUntilIdle()
+        }, deleteToken: { events.append("token deleted") })
+        deletion.requireDeletion()
+        let cleanup = Task { await deletion.completePendingDeletion() }
+        while !waitingForFetch { await Task.yield() }
+        XCTAssertEqual(events, ["fetch started"])
+        XCTAssertTrue(deletion.isPending)
+
+        finishFetch?.resume()
+        await fetch.value
+        let completed = await cleanup.value
+        XCTAssertTrue(completed)
+        XCTAssertEqual(events, ["fetch started", "fetch finished", "token deleted"])
+    }
 }

@@ -5,7 +5,7 @@ import UIKit
 import UserNotifications
 
 enum PushRoute {
-    static func alertID(from payload: [AnyHashable: Any]) -> Int? {
+    nonisolated static func alertID(from payload: [AnyHashable: Any]) -> Int? {
         let value: Int?
         if let text = payload["alert_id"] as? String { value = Int(text) }
         else if let number = payload["alert_id"] as? NSNumber,
@@ -73,16 +73,93 @@ final class PushTokenRegistration {
 final class PushTokenFetchQueue {
     private var running = false
     private var requested = false
+    private var idleWaiters: [CheckedContinuation<Void, Never>] = []
 
     func run(_ operation: () async -> Void) async {
         requested = true
         guard !running else { return }
         running = true
-        defer { running = false }
+        defer {
+            running = false
+            let waiters = idleWaiters
+            idleWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
         repeat {
             requested = false
             await operation()
         } while requested
+    }
+
+    func waitUntilIdle() async {
+        guard running else { return }
+        await withCheckedContinuation { idleWaiters.append($0) }
+    }
+}
+
+@MainActor
+final class PushTokenDeletion {
+    private static let pendingKey = "umtp_ios_push_token_deletion_pending"
+    private let defaults: UserDefaults
+    private let waitForFetches: () async -> Void
+    private let deleteToken: () async throws -> Void
+    private var inFlight: Task<Bool, Never>?
+    private(set) var isPending: Bool
+    private(set) var lastError: String?
+
+    init(defaults: UserDefaults = .standard,
+         waitForFetches: @escaping () async -> Void = {},
+         deleteToken: (() async throws -> Void)? = nil) {
+        self.defaults = defaults
+        self.waitForFetches = waitForFetches
+        self.deleteToken = deleteToken ?? {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                Messaging.messaging().deleteToken { error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume() }
+                }
+            }
+        }
+        isPending = defaults.bool(forKey: Self.pendingKey)
+    }
+
+    func requireDeletion(isConfigured: Bool = true) {
+        // A build without Firebase cannot have created a new SDK token. Preserve
+        // any earlier marker, but do not create an obligation it cannot complete.
+        guard isConfigured else { return }
+        // Persist before starting Firebase work so a relaunch resumes unfinished logout.
+        isPending = true
+        defaults.set(true, forKey: Self.pendingKey)
+    }
+
+    func completePendingDeletion(isConfigured: Bool = true) async -> Bool {
+        guard isPending else { return true }
+        guard isConfigured else { return false }
+        let attempt: Task<Bool, Never>
+        if let inFlight {
+            attempt = inFlight
+        } else {
+            attempt = Task {
+                // A fetch started in the previous session must finish before its token is deleted.
+                await waitForFetches()
+                do {
+                    try await deleteToken()
+                    defaults.removeObject(forKey: Self.pendingKey)
+                    isPending = false
+                    lastError = nil
+                    inFlight = nil
+                    return true
+                } catch {
+                    lastError = "이전 계정의 푸시 연결을 정리하지 못했어요. 앱에 다시 돌아오면 재시도합니다."
+                    inFlight = nil
+                    return false
+                }
+            }
+            inFlight = attempt
+        }
+        let completed = await attempt.value
+        // Another logout may begin before an awaiting activation resumes.
+        return completed && !isPending
     }
 }
 
@@ -98,35 +175,40 @@ final class PushService: NSObject, ObservableObject {
     private var token: String?
     private var requestingPermission = false
     private var sessionGeneration = 0
-    private var deletingToken: Task<Void, Never>?
-    private var deletionID: UUID?
     private let tokenFetchQueue = PushTokenFetchQueue()
+    private lazy var tokenDeletion = PushTokenDeletion(waitForFetches: { [tokenFetchQueue] in
+        await tokenFetchQueue.waitUntilIdle()
+    })
     private var hasAPNSToken = false
 
     func configure() {
         UNUserNotificationCenter.current().delegate = self
-        guard FirebaseApp.app() == nil,
-              let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
-              let options = FirebaseOptions(contentsOfFile: path),
-              options.bundleID == Bundle.main.bundleIdentifier else {
-            isConfigured = FirebaseApp.app() != nil
-            return
+        if FirebaseApp.app() == nil {
+            guard let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
+                  let options = FirebaseOptions(contentsOfFile: path),
+                  options.bundleID == Bundle.main.bundleIdentifier else { return }
+            FirebaseApp.configure(options: options)
         }
-        FirebaseApp.configure(options: options)
+        // Firebase persists this preference; disable it until activation confirms cleanup.
+        Messaging.messaging().isAutoInitEnabled = false
         Messaging.messaging().delegate = self
         isConfigured = true
+        if tokenDeletion.isPending { prepareTokenDeletion() }
     }
 
     func activate(user: String?) async {
-        if currentUser != user { sessionGeneration += 1; currentUser = user }
+        if currentUser != user {
+            sessionGeneration += 1
+            if currentUser != nil { prepareTokenDeletion() }
+            currentUser = user
+        }
         let generation = sessionGeneration
-        if let deletingToken { await deletingToken.value }
-        guard generation == sessionGeneration else { return }
         authorization = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
-        guard generation == sessionGeneration, currentUser == user else { return }
-        guard user != nil, isConfigured else { return }
+        guard generation == sessionGeneration, currentUser == user, isConfigured else { return }
+        guard await completePendingDeletion(for: generation) else { return }
+        guard user != nil else { return }
         if authorization == .notDetermined { await requestPermission() }
-        guard generation == sessionGeneration, currentUser == user else { return }
+        guard generation == sessionGeneration, currentUser == user, !tokenDeletion.isPending else { return }
         if [.authorized, .provisional, .ephemeral].contains(authorization) {
             Messaging.messaging().isAutoInitEnabled = true
             UIApplication.shared.registerForRemoteNotifications()
@@ -145,6 +227,7 @@ final class PushService: NSObject, ObservableObject {
             authorization = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
             guard generation == sessionGeneration else { return }
             if isConfigured && currentUser != nil && authorization == .authorized {
+                guard await completePendingDeletion(for: generation) else { return }
                 Messaging.messaging().isAutoInitEnabled = true
                 UIApplication.shared.registerForRemoteNotifications()
             }
@@ -152,7 +235,7 @@ final class PushService: NSObject, ObservableObject {
     }
 
     func receivedAPNSToken(_ deviceToken: Data) {
-        guard isConfigured, currentUser != nil, deletingToken == nil else { return }
+        guard isConfigured, currentUser != nil, !tokenDeletion.isPending else { return }
         // SwiftUI + disabled swizzling requires the explicit APNs → FCM mapping.
         Messaging.messaging().apnsToken = deviceToken
         hasAPNSToken = true
@@ -164,13 +247,13 @@ final class PushService: NSObject, ObservableObject {
     }
 
     private func fetchCurrentToken() async {
-        guard isConfigured, currentUser != nil, deletingToken == nil, hasAPNSToken else { return }
+        guard isConfigured, currentUser != nil, !tokenDeletion.isPending, hasAPNSToken else { return }
         let generation = sessionGeneration
         // Server currently stores FCM registration tokens, not Firebase installation IDs.
         let value: String? = await withCheckedContinuation { continuation in
             Messaging.messaging().token { value, _ in continuation.resume(returning: value) }
         }
-        guard generation == sessionGeneration else { return }
+        guard generation == sessionGeneration, !tokenDeletion.isPending else { return }
         if let value { await register(value) }
         else { message = "푸시 연결을 완료하지 못했어요. 다음 실행 때 다시 시도합니다." }
     }
@@ -178,7 +261,7 @@ final class PushService: NSObject, ObservableObject {
     func registrationFailed() { message = "푸시 연결을 완료하지 못했어요. 앱 내 알림을 확인해 주세요." }
 
     private func register(_ value: String) async {
-        guard let user = currentUser else { return }
+        guard isConfigured, !tokenDeletion.isPending, let user = currentUser else { return }
         let generation = sessionGeneration
         token = value
         await registration.register(user: user, token: value)
@@ -189,6 +272,13 @@ final class PushService: NSObject, ObservableObject {
     func signOut() {
         sessionGeneration += 1
         currentUser = nil
+        prepareTokenDeletion()
+        let generation = sessionGeneration
+        Task { _ = await completePendingDeletion(for: generation) }
+    }
+
+    private func prepareTokenDeletion() {
+        tokenDeletion.requireDeletion(isConfigured: isConfigured)
         pendingAlertID = nil
         token = nil
         hasAPNSToken = false
@@ -196,17 +286,17 @@ final class PushService: NSObject, ObservableObject {
         UIApplication.shared.unregisterForRemoteNotifications()
         if isConfigured {
             Messaging.messaging().isAutoInitEnabled = false
-            let previousDeletion = deletingToken
-            let id = UUID()
-            deletionID = id
-            deletingToken = Task {
-                if let previousDeletion { await previousDeletion.value }
-                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                    Messaging.messaging().deleteToken { _ in continuation.resume() }
-                }
-                if deletionID == id { deletingToken = nil; deletionID = nil }
-            }
+            Messaging.messaging().apnsToken = nil
         }
+    }
+
+    private func completePendingDeletion(for generation: Int) async -> Bool {
+        guard generation == sessionGeneration else { return false }
+        guard tokenDeletion.isPending else { return true }
+        let completed = await tokenDeletion.completePendingDeletion(isConfigured: isConfigured)
+        guard generation == sessionGeneration else { return false }
+        message = tokenDeletion.lastError
+        return completed
     }
 
     func route(_ payload: [AnyHashable: Any]) {
