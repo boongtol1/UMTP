@@ -5,6 +5,9 @@
 	};
 	objectVersion = 77;
 	objects = {
+		F10000000000000000000001 = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git"; requirement = {kind = exactVersion; version = 12.19.1; }; };
+		F10000000000000000000002 = {isa = XCSwiftPackageProductDependency; package = F10000000000000000000001; productName = FirebaseMessaging; };
+		F10000000000000000000003 = {isa = PBXBuildFile; productRef = F10000000000000000000002; };
 A10000000000000000000001 = {isa = PBXNativeTarget; buildConfigurationList = A10000000000000000000008; buildPhases = (A10000000000000000000004, A10000000000000000000005, A10000000000000000000006,); buildRules = (); dependencies = (A10000000000000000000010,); fileSystemSynchronizedGroups = (A10000000000000000000002,); name = UMTP_IOSTests; productName = UMTP_IOSTests; productReference = A10000000000000000000003; productType = "com.apple.product-type.bundle.unit-test"; };
 A10000000000000000000002 = {isa = PBXFileSystemSynchronizedRootGroup; path = UMTP_IOSTests; sourceTree = "<group>"; };
 A10000000000000000000003 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = UMTP_IOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -46,6 +49,7 @@ A20000000000000000000012 = {isa = XCBuildConfiguration; buildSettings = {GENERAT
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F10000000000000000000003,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -92,6 +96,7 @@ A20000000000000000000012 = {isa = XCBuildConfiguration; buildSettings = {GENERAT
 			);
 			name = UMTP_IOS;
 			packageProductDependencies = (
+				F10000000000000000000002,
 			);
 			productName = UMTP_IOS;
 			productReference = 54E9868A2FB724BA0062F4A0 /* UMTP_IOS.app */;
@@ -122,6 +127,7 @@ A20000000000000000000012 = {isa = XCBuildConfiguration; buildSettings = {GENERAT
 			mainGroup = 54E986812FB724BA0062F4A0;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			packageReferences = (F10000000000000000000001,);
 			productRefGroup = 54E9868B2FB724BA0062F4A0 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -278,6 +284,10 @@ A20000000000000000000012 = {isa = XCBuildConfiguration; buildSettings = {GENERAT
 		54E986962FB724BB0062F4A0 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				INFOPLIST_FILE = Config/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = Config/UMTP.entitlements;
+				APNS_ENVIRONMENT = development;
+				OTHER_LDFLAGS = ("$(inherited)", "-ObjC",);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
@@ -310,6 +320,10 @@ A20000000000000000000012 = {isa = XCBuildConfiguration; buildSettings = {GENERAT
 		54E986972FB724BB0062F4A0 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				INFOPLIST_FILE = Config/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = Config/UMTP.entitlements;
+				APNS_ENVIRONMENT = production;
+				OTHER_LDFLAGS = ("$(inherited)", "-ObjC",);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;

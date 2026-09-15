@@ -23,6 +23,7 @@ final class AppState: ObservableObject {
         isLoadingSession = true
         defer { isLoadingSession = false }
         userId = sessionService.loadUserId()
+        if userId != nil { _ = DeviceIdentity().resolve() }
     }
 
     func completeLogin(userId: String) {
@@ -31,6 +32,7 @@ final class AppState: ObservableObject {
     }
 
     func logout() {
+        PushService.shared.signOut()
         sessionService.clearUserId()
         userId = nil
         pendingAlertID = nil

@@ -2,6 +2,7 @@
 .gjc/
 **/xcuserdata/
 umtp/logs/
+ios/**/GoogleService-Info.plist
 
 # Superseded 20260913 training intermediates; the chronological dataset and v3 model are versioned.
 umtp/data/fraud_probability/training_features_20260913.csv
