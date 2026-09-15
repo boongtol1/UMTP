@@ -4,9 +4,12 @@ final class APIClient {
     static let shared = APIClient()
     private let baseURL: URL?
     private let session: URLSession
+    private let dnsRecovery: DNSRecovery
+    private let transport: DNSRecovery.Transport?
 
     init(baseURLString: String = AppConfig.apiBaseURL,
-         timeout: TimeInterval = AppConfig.requestTimeout, session: URLSession? = nil) {
+         timeout: TimeInterval = AppConfig.requestTimeout, session: URLSession? = nil,
+         dnsRecovery: DNSRecovery? = nil, transport: DNSRecovery.Transport? = nil) {
         let url = URL(string: baseURLString)
         self.baseURL = url?.host != nil && ["https", "http"].contains(url?.scheme ?? "") ? url : nil
         let configuration = URLSessionConfiguration.default
@@ -14,6 +17,8 @@ final class APIClient {
         configuration.timeoutIntervalForResource = timeout
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         self.session = session ?? URLSession(configuration: configuration)
+        self.dnsRecovery = dnsRecovery ?? .shared
+        self.transport = transport
     }
 
     func get<Response: Decodable>(path: String, query: [URLQueryItem] = []) async throws -> Response {
@@ -60,7 +65,8 @@ final class APIClient {
         }
         do {
             try Task.checkCancellation()
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await dnsRecovery.data(for: request, baseHost: baseURL.host,
+                transport: transport ?? { [session] request in try await DNSRecovery.load(request, session: session) })
             try Task.checkCancellation()
             guard let response = response as? HTTPURLResponse else { throw APIClientError.invalidResponse }
             guard (200..<300).contains(response.statusCode) else {
