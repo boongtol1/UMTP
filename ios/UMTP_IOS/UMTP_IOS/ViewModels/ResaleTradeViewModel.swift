@@ -131,8 +131,16 @@ final class ResaleTradeViewModel: ObservableObject {
                 // Editing a purchase detail must not silently undo a later stage.
                 updates["current_stage"] = .string(row["current_stage"])
             }
-            let result = try await api.save(userId: userId, row: row, mode: mode, updates: updates).checked()
-            guard let updated = result.row else { throw TradeError.missingRow }
+            let updated: ResaleTradeRow
+            if verificationSaved && updates.isEmpty {
+                // Verification is already saved. An empty resale PATCH can rederive
+                // a different stage from historical sale fields without any user edit.
+                updated = row
+            } else {
+                let result = try await api.save(userId: userId, row: row, mode: mode, updates: updates).checked()
+                guard let savedRow = result.row else { throw TradeError.missingRow }
+                updated = savedRow
+            }
             // Keep the draft if the other mode has unsaved edits.
             let retained = inputs
             let otherFields = mode == .purchase ? TradeField.resale : TradeField.purchase

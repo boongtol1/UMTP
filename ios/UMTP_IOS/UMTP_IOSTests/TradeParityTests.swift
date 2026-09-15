@@ -173,6 +173,55 @@ final class TradeParityTests: XCTestCase {
         XCTAssertEqual(model.errorMessage, TradeError.partialSave.localizedDescription)
     }
 
+    func testResaleVerificationOnlyDoesNotSendEmptyPatchOrChangeStageAndKeepsPurchaseDraft() async throws {
+        let original = try response(#"{"ok":true,"row":{"id":7,"product_id":"123","current_stage":"KEEP","sale_price_krw":300000,"sold_at":"2026-09-14","purchase_price_krw":200000,"activation_lock_off":false}}"#)
+        let verified = try response(#"{"ok":true,"row":{"id":7,"product_id":"123","current_stage":"KEEP","sale_price_krw":300000,"sold_at":"2026-09-14","purchase_price_krw":200000,"activation_lock_off":true}}"#)
+        let api = TradeMockAPI(start: original)
+        // The second response models the unwanted server rederivation if a regression
+        // sends an empty resale PATCH after the verification has already been saved.
+        api.saveResults = [verified, try response(#"{"ok":true,"row":{"id":7,"current_stage":"SOLD","sale_price_krw":300000,"activation_lock_off":true}}"#)]
+        api.purchasedResult = try response(#"{"ok":true,"items":[{"id":7,"current_stage":"KEEP"}]}"#)
+        let model = ResaleTradeViewModel(userId: "test", api: api)
+        model.select(try XCTUnwrap(original.row))
+        model.mode = .resale
+        model.inputs["activation_lock_off"] = "true"
+        model.inputs["purchase_price_krw"] = "210000"
+
+        await model.save()
+
+        XCTAssertEqual(api.savedModes, [.purchase])
+        XCTAssertEqual(api.savedUpdates, [["activation_lock_off": .bool(true), "current_stage": .string("KEEP")]])
+        XCTAssertEqual(model.selected?.id, 7)
+        XCTAssertEqual(model.selected?["current_stage"], "KEEP")
+        XCTAssertEqual(model.selected?.values["activation_lock_off"]?.boolValue, true)
+        XCTAssertEqual(model.selected?["purchase_price_krw"], "200000")
+        XCTAssertEqual(model.inputs["purchase_price_krw"], "210000")
+        XCTAssertEqual(model.inputs["sale_price_krw"], "300000")
+        XCTAssertTrue(model.hasUnsavedChanges)
+        XCTAssertEqual(model.purchased.first?.id, 7)
+        XCTAssertEqual(model.message, "되팔이 후 입력이 저장되었습니다.")
+        XCTAssertNil(model.errorMessage)
+        XCTAssertFalse(model.isBusy)
+    }
+
+    func testExplicitEmptyResaleSaveStillUsesResaleEndpointWhenVerificationIsUnchanged() async throws {
+        let original = try response(#"{"ok":true,"row":{"id":7,"product_id":"123","current_stage":"KEEP","sale_price_krw":300000,"activation_lock_off":true}}"#)
+        let api = TradeMockAPI(start: original)
+        api.saveResults = [try response(#"{"ok":true,"row":{"id":7,"product_id":"123","current_stage":"SOLD","sale_price_krw":300000,"activation_lock_off":true}}"#)]
+        let model = ResaleTradeViewModel(userId: "test", api: api)
+        model.select(try XCTUnwrap(original.row))
+        model.mode = .resale
+
+        await model.save()
+
+        XCTAssertEqual(api.savedModes, [.resale])
+        XCTAssertEqual(api.savedUpdates, [[:]])
+        XCTAssertEqual(model.selected?["current_stage"], "SOLD")
+        XCTAssertFalse(model.hasUnsavedChanges)
+        XCTAssertEqual(model.message, "되팔이 후 입력이 저장되었습니다.")
+        XCTAssertNil(model.errorMessage)
+    }
+
     @MainActor
     func testHistoryFailuresAreIndependentAndSelectionDeleteIsScoped() async throws {
         let api = TradeMockAPI(start: try response(#"{"ok":true,"row":{}}"#))
