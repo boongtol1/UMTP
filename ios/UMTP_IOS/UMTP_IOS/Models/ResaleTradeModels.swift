@@ -230,6 +230,11 @@ struct TradeField: Identifiable {
             if let value = formatter.date(from: text), formatter.string(from: value) == text { return true }
         }
         let formatter = ISO8601DateFormatter()
+        if text.dropFirst(10).first == " " {
+            // Python's datetime.fromisoformat also accepts the SQL-style separator
+            // with a UTC offset. Keep the strict date/time checks above for both forms.
+            formatter.formatOptions.insert(.withSpaceBetweenDateAndTime)
+        }
         if formatter.date(from: text) != nil { return true }
         formatter.formatOptions.insert(.withFractionalSeconds)
         return formatter.date(from: text) != nil

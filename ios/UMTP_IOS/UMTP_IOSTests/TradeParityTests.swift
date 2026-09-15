@@ -86,6 +86,19 @@ final class TradeParityTests: XCTestCase {
         }
     }
 
+    func testSpaceSeparatedOffsetDatesPreserveValidInputAndRejectImpossibleComponents() throws {
+        for value in ["2026-09-15 14:20:00+09:00", "2026-09-15 14:20:00+0900",
+                      "2026-09-15 14:20:00Z", "2024-02-29 14:20:00.123456+09:00"] {
+            XCTAssertEqual(try TradeField.parse("purchased_at", text: value), .string(value))
+            XCTAssertEqual(try TradeField.parse("sold_at", text: value), .string(value))
+        }
+        for value in ["2026-02-30 14:20:00+09:00", "2026-02-29 14:20:00.123456Z",
+                      "2026-09-15 25:20:00+09:00", "2026-09-15 14:61:00+0900",
+                      "2026-09-15 14:20:60Z"] {
+            XCTAssertThrowsError(try TradeField.parse("purchased_at", text: value), value)
+        }
+    }
+
     @MainActor
     func testMissingStartRowKeepsSelectedRecordAndInput() async throws {
         let api = TradeMockAPI(start: try response(#"{"ok":true}"#))
@@ -238,6 +251,109 @@ final class TradeParityTests: XCTestCase {
         XCTAssertEqual(api.deletedIDs, Set([7]))
     }
 
+    func testZeroDeletedCountPreservesDraftWhenStaleCompletedRecordIsNowKeep() async throws {
+        let api = TradeMockAPI(start: try response(#"{"ok":true,"row":{}}"#))
+        api.completedResult = try response(#"{"ok":true,"items":[{"id":7,"current_stage":"SOLD","title":"원본"}]}"#)
+        api.deleteResult = try response(#"{"ok":true,"deleted_count":0}"#)
+        let model = ResaleTradeViewModel(userId: "test", api: api)
+        await model.loadHistory()
+        model.select(try XCTUnwrap(model.completed.first))
+        model.inputs["title"] = "저장하지 않은 제목"
+        model.selectedForDeletion = [7]
+        api.completedResult = try response(#"{"ok":true,"items":[]}"#)
+        api.purchasedResult = try response(#"{"ok":true,"items":[{"id":7,"current_stage":"KEEP"}]}"#)
+
+        await model.deleteCompleted(all: false)
+
+        XCTAssertEqual(api.deletedIDs, Set([7]))
+        XCTAssertEqual(model.selected?.id, 7)
+        XCTAssertEqual(model.inputs["title"], "저장하지 않은 제목")
+        XCTAssertTrue(model.hasUnsavedChanges)
+        XCTAssertEqual(model.purchased.first?["current_stage"], "KEEP")
+        XCTAssertTrue(model.message?.hasPrefix("삭제된 완료 거래가 없습니다.") == true)
+        XCTAssertTrue(model.message?.contains("최신 목록") == true)
+    }
+
+    func testPartialAndAllDeletionCountsDoNotProveWhichDraftWasDeleted() async throws {
+        for all in [false, true] {
+            for historyFails in [false, true] {
+                let api = TradeMockAPI(start: try response(#"{"ok":true,"row":{}}"#))
+                api.completedResult = try response(#"{"ok":true,"items":[{"id":7,"current_stage":"SOLD","title":"원본"},{"id":8,"current_stage":"SOLD"}]}"#)
+                api.deleteResult = try response(#"{"ok":true,"deleted_count":1}"#)
+                let model = ResaleTradeViewModel(userId: "test", api: api)
+                await model.loadHistory()
+                model.select(try XCTUnwrap(model.completed.first))
+                model.inputs["title"] = "입력 유지"
+                model.selectedForDeletion = [7, 8]
+                let history = try response(historyFails ? #"{"ok":false,"reason":"network"}"# : #"{"ok":true,"items":[]}"#)
+                api.completedResult = history
+                api.purchasedResult = history
+
+                await model.deleteCompleted(all: all)
+
+                XCTAssertEqual(api.deletedIDs, all ? nil : Set([7, 8]))
+                XCTAssertEqual(model.selected?.id, 7)
+                XCTAssertEqual(model.inputs["title"], "입력 유지")
+                XCTAssertTrue(model.hasUnsavedChanges)
+                XCTAssertTrue(model.message?.contains("입력은 유지") == true)
+                XCTAssertEqual(model.completedError != nil, historyFails)
+                XCTAssertEqual(model.purchasedError != nil, historyFails)
+            }
+        }
+    }
+
+    func testFullyConfirmedSelectedDeletionClearsDeletedRowAndDraft() async throws {
+        let api = TradeMockAPI(start: try response(#"{"ok":true,"row":{}}"#))
+        api.completedResult = try response(#"{"ok":true,"items":[{"id":7,"current_stage":"SOLD","title":"원본"},{"id":8,"current_stage":"SOLD"}]}"#)
+        api.deleteResult = try response(#"{"ok":true,"deleted_count":2}"#)
+        let model = ResaleTradeViewModel(userId: "test", api: api)
+        await model.loadHistory()
+        model.select(try XCTUnwrap(model.completed.first))
+        model.inputs["title"] = "명시적으로 삭제할 기록의 입력"
+        model.selectedForDeletion = [7, 8]
+        api.completedResult = try response(#"{"ok":true,"items":[]}"#)
+
+        await model.deleteCompleted(all: false)
+
+        XCTAssertNil(model.selected)
+        XCTAssertTrue(model.inputs.isEmpty)
+        XCTAssertTrue(model.selectedForDeletion.isEmpty)
+        XCTAssertEqual(model.message, "완료된 거래 2건을 삭제했습니다.")
+    }
+
+    func testUncertainDeletedDraftRetryPatchesOriginalIDAndNotFoundKeepsInputs() async throws {
+        let api = makeHTTPAPI()
+        defer { TradeTestURLProtocol.handler = nil }
+        var writes: [String] = []
+        TradeTestURLProtocol.handler = { request in
+            if request.httpMethod == "GET" { return Data(#"{"ok":true,"items":[]}"#.utf8) }
+            writes.append("\(request.httpMethod ?? "") \(request.url?.path ?? "")")
+            if request.url?.path.hasSuffix("/completed/delete-all") == true {
+                return Data(#"{"ok":true,"deleted_count":1}"#.utf8)
+            }
+            XCTAssertEqual(request.url?.path, "/users/test/resale-trade-journeys/7/purchase")
+            XCTAssertEqual(TradeTestURLProtocol.body(request)["updates"], .object(["title": .string("입력 유지"), "current_stage": .string("SOLD")]))
+            return Data(#"{"ok":false,"reason":"not_found"}"#.utf8)
+        }
+        let model = ResaleTradeViewModel(userId: "test", api: api)
+        model.select(ResaleTradeRow(values: ["id": .whole(7), "product_id": .string("123"), "current_stage": .string("SOLD"), "title": .string("원본")]))
+        model.inputs["title"] = "입력 유지"
+
+        await model.deleteCompleted(all: true)
+        XCTAssertEqual(model.selected?.id, 7)
+        XCTAssertEqual(model.inputs["title"], "입력 유지")
+        await model.save()
+
+        XCTAssertEqual(writes, ["PATCH /users/test/resale-trade-journeys/completed/delete-all", "PATCH /users/test/resale-trade-journeys/7/purchase"])
+        XCTAssertEqual(model.selected?.id, 7)
+        XCTAssertEqual(model.inputs["title"], "입력 유지")
+        XCTAssertTrue(model.hasUnsavedChanges)
+        // The real transport rejects the HTTP-200 ok:false envelope before
+        // the domain response is decoded; do not assert the mock API's error type.
+        XCTAssertEqual(model.errorMessage, APIClientError.serverRejected("not_found").localizedDescription)
+        XCTAssertNil(model.message)
+    }
+
     func testAPIUsesUpsertForDraftAndPatchForSavedAndEncodedUserPath() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [TradeTestURLProtocol.self]
@@ -379,6 +495,7 @@ private final class TradeMockAPI: ResaleTradeAPIProtocol {
     var savedModes: [TradeMode] = []
     var savedUpdates: [[String: TradeValue]] = []
     var deletedIDs: Set<Int>?
+    var deleteResult: TradeResponse?
     var completedResult: TradeResponse?
     var purchasedResult: TradeResponse?
     var startFailures = 0
@@ -406,6 +523,7 @@ private final class TradeMockAPI: ResaleTradeAPIProtocol {
     }
     func delete(userId: String, ids: Set<Int>?) async throws -> TradeResponse {
         deletedIDs = ids
+        if let deleteResult { return deleteResult }
         return try JSONDecoder().decode(TradeResponse.self, from: Data(#"{"ok":true,"deleted_count":1}"#.utf8))
     }
 }

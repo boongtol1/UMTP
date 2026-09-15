@@ -185,16 +185,28 @@ final class ResaleTradeViewModel: ObservableObject {
         guard !isBusy else { return }
         let ids = selectedForDeletion.intersection(Set(completed.compactMap(\.id)))
         guard all || !ids.isEmpty else { return }
+        let requestedIDs = all ? Set(completed.compactMap(\.id)) : ids
         isBusy = true
         errorMessage = nil
         message = nil
         defer { isBusy = false }
         do {
             let response = try await api.delete(userId: userId, ids: all ? nil : ids).checked()
-            let deletedIDs = all ? Set(completed.compactMap(\.id)) : ids
-            if let selectedId = selected?.id, deletedIDs.contains(selectedId) { applySelection(nil) }
-            selectedForDeletion.subtract(deletedIDs)
-            message = "완료된 거래 \(response.deletedCount)건을 삭제했습니다."
+            // A count proves individual identities only when every explicitly
+            // requested ID was deleted. A partial count or delete-all can include
+            // different rows; absence from 200-row history pages is not proof.
+            let confirmedIDs = !all && response.deletedCount == ids.count ? ids : Set<Int>()
+            if let selectedId = selected?.id, confirmedIDs.contains(selectedId) { applySelection(nil) }
+            selectedForDeletion.subtract(confirmedIDs)
+            message = response.deletedCount == 0
+                ? "삭제된 완료 거래가 없습니다."
+                : "완료된 거래 \(response.deletedCount)건을 삭제했습니다."
+            if let row = selected, let id = row.id,
+               requestedIDs.contains(id) || (all && row["current_stage"] == "SOLD") {
+                // Retain the positive ID as well as the draft: retry must PATCH
+                // the same row, never silently upsert a replacement after deletion.
+                message = (message ?? "") + " 현재 선택 기록과 입력은 유지했습니다. 저장 전에 최신 목록에서 해당 기록을 확인해 주세요."
+            }
             await loadHistory()
         } catch is CancellationError {
         } catch { errorMessage = error.localizedDescription }
