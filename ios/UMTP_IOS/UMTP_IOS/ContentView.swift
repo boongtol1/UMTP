@@ -9,7 +9,8 @@ struct ContentView: View {
             if appState.isLoadingSession {
                 ProgressView("세션 확인 중...")
             } else if appState.isLoggedIn {
-                MainPlaceholderView(userId: appState.userId ?? "")
+                MainTabView(userId: appState.userId ?? "")
+                    .id(appState.userId)
             } else {
                 UserSetupView()
             }

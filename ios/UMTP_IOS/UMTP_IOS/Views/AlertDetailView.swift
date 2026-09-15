@@ -68,6 +68,7 @@ struct AlertCardView: View {
             .contentShape(Rectangle())
             .onTapGesture(perform: onOpen)
             .accessibilityElement(children: .combine)
+            .accessibilityValue(isSelecting ? (isSelected ? "선택됨" : "선택 안 됨") : "")
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("alert.card.\(alert.eventID)")
 
