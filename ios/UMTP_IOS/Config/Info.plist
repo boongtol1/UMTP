@@ -1,11 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-    <key>UMTPParityFixtureURL</key><string>$(UMTP_PARITY_FIXTURE_URL)</string>
-    <key>UMTPParityCompilationConditions</key><string>$(SWIFT_ACTIVE_COMPILATION_CONDITIONS)</string>
-    <key>FirebaseAppDelegateProxyEnabled</key><false/>
-    <key>FirebaseMessagingAutoInitEnabled</key><false/>
-    <key>FirebaseMessagingInstallationIdEnabled</key><false/>
-    <key>UIBackgroundModes</key><array><string>remote-notification</string></array>
-    <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
-</dict></plist>
+<plist version="1.0">
+<dict>
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<false/>
+	<key>FirebaseMessagingAutoInitEnabled</key>
+	<false/>
+	<key>FirebaseMessagingInstallationIdEnabled</key>
+	<false/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>UIBackgroundModes</key>
+	<array/>
+	<key>UMTPParityCompilationConditions</key>
+	<string>$(SWIFT_ACTIVE_COMPILATION_CONDITIONS)</string>
+	<key>UMTPParityFixtureURL</key>
+	<string>$(UMTP_PARITY_FIXTURE_URL)</string>
+</dict>
+</plist>
