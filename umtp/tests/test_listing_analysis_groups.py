@@ -80,8 +80,12 @@ class ListingAnalysisGroupsTest(unittest.TestCase):
         self.spec = self.mock("parse_listing_title", return_value=SPEC)
         self.risk = self.mock("analyze_risk", return_value={"risk_score": 0, "risk_level": "LOW"})
         self.snapshot = self.mock("update_seen_product_content_snapshot")
+        self.enrichment = self.mock("persist_latest_search_result_enrichment")
         self.mock("get_seen_product", return_value={})
-        self.mock("_resolve_seller_info_for_alert", return_value={"seller_store_seq": 1234, "seller_store_name": "seller"})
+        self.seller = self.mock(
+            "_resolve_seller_info_for_alert",
+            return_value={"seller_store_seq": 1234, "seller_store_name": "seller"},
+        )
         self.store = self.mock("_ensure_store_snapshots_before_fraud_scoring")
         self.fraud = self.mock("score_alert_fraud_probability_comparison", return_value={})
         self.failed = self.mock("mark_analysis_job_failed")
@@ -115,7 +119,9 @@ class ListingAnalysisGroupsTest(unittest.TestCase):
         self.fetch.assert_called_once()
         self.page.assert_called_once()
         self.risk.assert_called_once()
+        self.seller.assert_called_once()
         self.snapshot.assert_called_once()
+        self.enrichment.assert_called_once()
         self.store.assert_called_once()
         self.assertEqual(self.fraud.call_count, 2)  # personal discount is a model feature
         self.batch_dispatch.assert_called_once()

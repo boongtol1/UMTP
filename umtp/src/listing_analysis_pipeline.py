@@ -36,6 +36,9 @@ try:
     from src.listing_page_parser import fetch_html, parse_joongna_listing_page
     from src.notification_worker import dispatch_alert_event_immediately, dispatch_alert_events_immediately
     from src.risk_analyzer import analyze_risk
+    from src.search_result_enrichment import (
+        persist_latest_search_result_enrichment,
+    )
     from src.spec_parser import parse_listing_title
     from src.user_fair_price import (
         is_user_fair_price_target_enabled,
@@ -75,6 +78,9 @@ except ModuleNotFoundError:
     from listing_page_parser import fetch_html, parse_joongna_listing_page
     from notification_worker import dispatch_alert_event_immediately, dispatch_alert_events_immediately
     from risk_analyzer import analyze_risk
+    from search_result_enrichment import (
+        persist_latest_search_result_enrichment,
+    )
     from spec_parser import parse_listing_title
     from user_fair_price import (
         is_user_fair_price_target_enabled,
@@ -344,6 +350,7 @@ def _resolve_seller_info_for_alert(
     product_id,
     fallback_store_seq=None,
     fallback_store_name=None,
+    refresh_profile=False,
 ):
     normalized_product_id = _normalize_optional_text(product_id)
     if normalized_product_id is None:
@@ -403,7 +410,11 @@ def _resolve_seller_info_for_alert(
         if len(row) >= 3:
             latest_raw_json = row[2]
 
-    if normalized_store_seq is not None and normalized_store_name is not None:
+    if (
+        normalized_store_seq is not None
+        and normalized_store_name is not None
+        and not refresh_profile
+    ):
         return {
             "seller_store_seq": normalized_store_seq,
             "seller_store_name": normalized_store_name,
@@ -422,6 +433,32 @@ def _resolve_seller_info_for_alert(
                 raw_json_obj.get("seller_store_name")
                 or raw_json_obj.get("store_name")
                 or raw_json_obj.get("storeName")
+            )
+
+    if normalized_store_seq is not None and (
+        normalized_store_name is None or refresh_profile
+    ):
+        try:
+            # Imported lazily to avoid the polling -> pipeline import cycle.
+            try:
+                from src.joongna_polling_service import resolve_store_profile_for_store_seq
+            except ModuleNotFoundError:
+                from joongna_polling_service import resolve_store_profile_for_store_seq
+            profile = resolve_store_profile_for_store_seq(cursor, normalized_store_seq)
+            if isinstance(profile, dict):
+                normalized_store_name = (
+                    _normalize_optional_text(profile.get("store_name"))
+                    or normalized_store_name
+                )
+                persist_latest_search_result_enrichment(
+                    cursor,
+                    normalized_product_id,
+                    seller_profile=profile,
+                )
+        except Exception as exc:
+            print(
+                "[listing_analysis_pipeline] seller profile enrichment skipped: "
+                f"product_id={normalized_product_id}, error={exc}"
             )
 
     return {
@@ -1474,6 +1511,18 @@ def analyze_listing_once(job, cursor):
         except Exception as exc:
             detail_error = str(exc)
             print(f"[analysis_pipeline] detail fetch failed, using search snapshot: product_id={product_id}, error={exc}")
+    if detail_needed and detail_error is None:
+        persist_latest_search_result_enrichment(
+            cursor,
+            product_id,
+            body_text=description,
+            self_check_fields=self_check_fields,
+        )
+    seller_info = _resolve_seller_info_for_alert(
+        cursor,
+        product_id=product_id,
+        refresh_profile=True,
+    )
     risk_result = analyze_risk(f"{title or ''} {description or ''}".strip(), self_check_fields=self_check_fields)
     content_snapshot = build_listing_content_snapshot(
         title=title, price_krw=price, body_text=description, self_check_fields=self_check_fields,
@@ -1501,6 +1550,7 @@ def analyze_listing_once(job, cursor):
     return {
         "listing_snapshot": snapshot, "title": title, "listing_price_krw": price,
         "description": description, "parsed_spec": parsed_spec, "risk_result": risk_result,
+        "seller_info": seller_info,
         "content_snapshot": content_snapshot, "content_change_fields": fields,
         "detail_fetch_performed": detail_needed, "detail_fetch_reason": decision if detail_needed else None,
         "detail_skipped_reason": None if detail_needed else decision, "detail_fetch_error": detail_error,

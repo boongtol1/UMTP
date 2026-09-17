@@ -47,11 +47,22 @@ class _StoreProfileCacheCursor:
             return
 
         if normalized.startswith("insert into joongna_store_profiles"):
-            if params and len(params) == 2:
-                store_seq, store_name = params
+            if params and len(params) == 6:
+                (
+                    store_seq,
+                    store_name,
+                    profile_image_url,
+                    store_level,
+                    trust_score,
+                    review_count,
+                ) = params
                 self.cache_rows[int(store_seq)] = {
                     "store_seq": int(store_seq),
                     "store_name": store_name,
+                    "profile_image_url": profile_image_url,
+                    "store_level": store_level,
+                    "trust_score": trust_score,
+                    "review_count": review_count,
                     "fetch_status": "success",
                     "error_message": None,
                     "last_fetched_at": datetime.now(),
@@ -83,6 +94,26 @@ class _StoreProfileCacheCursor:
 
     def fetchone(self):
         return self._fetchone_result
+
+
+class _LegacyStoreProfileCacheCursor(_StoreProfileCacheCursor):
+    def execute(self, query, params=None):
+        normalized = " ".join((query or "").split()).lower()
+        if "profile_image_url" in normalized:
+            raise RuntimeError("Unknown column 'profile_image_url'")
+        if normalized.startswith("insert into joongna_store_profiles") and params and len(params) == 2:
+            store_seq, store_name = params
+            self.cache_rows[int(store_seq)] = {
+                "store_seq": int(store_seq),
+                "store_name": store_name,
+                "fetch_status": "success",
+                "error_message": None,
+                "last_fetched_at": datetime.now(),
+                "next_retry_at": None,
+            }
+            self.rowcount = 1
+            return
+        super().execute(query, params)
 
 
 class JoongnaStoreProfileCacheTest(unittest.TestCase):
@@ -175,6 +206,36 @@ class JoongnaStoreProfileCacheTest(unittest.TestCase):
         self.assertEqual(cached_row.get("fetch_status"), "success")
         self.assertIsNone(cached_row.get("next_retry_at"))
 
+    def test_supports_legacy_store_profile_schema_during_migration(self):
+        cursor = _LegacyStoreProfileCacheCursor(
+            cache_rows={
+                703755: {
+                    "store_seq": 703755,
+                    "store_name": "기존상호",
+                    "fetch_status": "success",
+                    "error_message": None,
+                    "last_fetched_at": datetime.now(),
+                    "next_retry_at": None,
+                }
+            }
+        )
+
+        with patch("src.joongna_polling_service.fetch_joongna_store_profile") as mock_fetch:
+            cached = resolve_store_profile_for_store_seq(cursor, 703755, store_profile_cache={})
+
+        self.assertEqual(cached.get("store_name"), "기존상호")
+        self.assertEqual(mock_fetch.call_count, 0)
+
+        cursor.cache_rows.clear()
+        with patch(
+            "src.joongna_polling_service.fetch_joongna_store_profile",
+            return_value={"store_seq": 703755, "store_name": "새상호"},
+        ):
+            fetched = resolve_store_profile_for_store_seq(cursor, 703755, store_profile_cache={})
+
+        self.assertEqual(fetched.get("store_name"), "새상호")
+        self.assertEqual(cursor.cache_rows[703755].get("store_name"), "새상호")
+
     def test_api_failure_does_not_break_save_group_search_results(self):
         cursor = _StoreProfileCacheCursor()
         items = [
@@ -244,6 +305,37 @@ class JoongnaStoreProfileCacheTest(unittest.TestCase):
             )
 
         self.assertEqual(body_text, "상세 페이지 본문")
+
+    def test_lightweight_search_result_save_skips_network_enrichment(self):
+        cursor = _StoreProfileCacheCursor()
+        items = [
+            {
+                "seq": 1001,
+                "product_id": 1001,
+                "title": "맥북에어 M2",
+                "price": 1200000,
+                "sort_date": "2026-09-17 12:00:00",
+                "product_url": "https://web.joongna.com/product/1001",
+                "storeSeq": 703755,
+            }
+        ]
+
+        with patch("src.joongna_polling_service.fetch_html") as mock_fetch_html:
+            with patch(
+                "src.joongna_polling_service.fetch_joongna_store_profile"
+            ) as mock_fetch_profile:
+                result = save_group_search_results(
+                    cursor,
+                    source="joongna",
+                    search_keyword="맥북",
+                    items=items,
+                    enrich_details=False,
+                )
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(mock_fetch_html.call_count, 0)
+        self.assertEqual(mock_fetch_profile.call_count, 0)
+        self.assertEqual(cursor.inserted_search_results, 1)
 
 
 if __name__ == "__main__":

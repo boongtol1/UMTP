@@ -21,7 +21,7 @@ try:
     from src.search_keyword_utils import dedupe_keywords_keep_order, normalize_search_keyword
     from src.user_settings_service import (
         get_due_user_fair_price_polling_targets as get_due_watch_rules,
-        mark_user_fair_price_polled as mark_watch_rule_polled,
+        mark_user_fair_prices_polled as mark_watch_rules_polled,
     )
 except ModuleNotFoundError:
     from db import get_connection
@@ -39,7 +39,7 @@ except ModuleNotFoundError:
     from search_keyword_utils import dedupe_keywords_keep_order, normalize_search_keyword
     from user_settings_service import (
         get_due_user_fair_price_polling_targets as get_due_watch_rules,
-        mark_user_fair_price_polled as mark_watch_rule_polled,
+        mark_user_fair_prices_polled as mark_watch_rules_polled,
     )
 
 
@@ -1091,6 +1091,10 @@ def _fetch_store_profile_cache_row(cursor, store_seq):
             SELECT
                 store_seq,
                 store_name,
+                profile_image_url,
+                store_level,
+                trust_score,
+                review_count,
                 fetch_status,
                 error_message,
                 last_fetched_at,
@@ -1104,6 +1108,52 @@ def _fetch_store_profile_cache_row(cursor, store_seq):
         row = cursor.fetchone()
     except Exception as exc:
         if _is_schema_missing_error(exc):
+            if "unknown column" not in str(exc).lower():
+                return None
+            cursor.execute(
+                """
+                SELECT
+                    store_seq,
+                    store_name,
+                    fetch_status,
+                    error_message,
+                    last_fetched_at,
+                    next_retry_at
+                FROM joongna_store_profiles
+                WHERE store_seq = %s
+                LIMIT 1
+                """,
+                (store_seq,),
+            )
+            legacy_row = cursor.fetchone()
+            if legacy_row is None:
+                return None
+            if isinstance(legacy_row, dict):
+                return {
+                    "store_seq": _safe_int(legacy_row.get("store_seq")),
+                    "store_name": _safe_text(legacy_row.get("store_name")),
+                    "profile_image_url": None,
+                    "store_level": None,
+                    "trust_score": None,
+                    "review_count": None,
+                    "fetch_status": _safe_text(legacy_row.get("fetch_status")),
+                    "error_message": _safe_text(legacy_row.get("error_message")),
+                    "last_fetched_at": _coerce_datetime(legacy_row.get("last_fetched_at")),
+                    "next_retry_at": _coerce_datetime(legacy_row.get("next_retry_at")),
+                }
+            if isinstance(legacy_row, (tuple, list)):
+                return {
+                    "store_seq": _safe_int(legacy_row[0]) if len(legacy_row) > 0 else None,
+                    "store_name": _safe_text(legacy_row[1]) if len(legacy_row) > 1 else None,
+                    "profile_image_url": None,
+                    "store_level": None,
+                    "trust_score": None,
+                    "review_count": None,
+                    "fetch_status": _safe_text(legacy_row[2]) if len(legacy_row) > 2 else None,
+                    "error_message": _safe_text(legacy_row[3]) if len(legacy_row) > 3 else None,
+                    "last_fetched_at": _coerce_datetime(legacy_row[4]) if len(legacy_row) > 4 else None,
+                    "next_retry_at": _coerce_datetime(legacy_row[5]) if len(legacy_row) > 5 else None,
+                }
             return None
         raise
 
@@ -1114,6 +1164,10 @@ def _fetch_store_profile_cache_row(cursor, store_seq):
         return {
             "store_seq": _safe_int(row.get("store_seq")),
             "store_name": _safe_text(row.get("store_name")),
+            "profile_image_url": _safe_text(row.get("profile_image_url")),
+            "store_level": _safe_text(row.get("store_level")),
+            "trust_score": _safe_int(row.get("trust_score")),
+            "review_count": _safe_int(row.get("review_count")),
             "fetch_status": _safe_text(row.get("fetch_status")),
             "error_message": _safe_text(row.get("error_message")),
             "last_fetched_at": _coerce_datetime(row.get("last_fetched_at")),
@@ -1124,16 +1178,20 @@ def _fetch_store_profile_cache_row(cursor, store_seq):
         return {
             "store_seq": _safe_int(row[0]) if len(row) > 0 else None,
             "store_name": _safe_text(row[1]) if len(row) > 1 else None,
-            "fetch_status": _safe_text(row[2]) if len(row) > 2 else None,
-            "error_message": _safe_text(row[3]) if len(row) > 3 else None,
-            "last_fetched_at": _coerce_datetime(row[4]) if len(row) > 4 else None,
-            "next_retry_at": _coerce_datetime(row[5]) if len(row) > 5 else None,
+            "profile_image_url": _safe_text(row[2]) if len(row) > 2 else None,
+            "store_level": _safe_text(row[3]) if len(row) > 3 else None,
+            "trust_score": _safe_int(row[4]) if len(row) > 4 else None,
+            "review_count": _safe_int(row[5]) if len(row) > 5 else None,
+            "fetch_status": _safe_text(row[6]) if len(row) > 6 else None,
+            "error_message": _safe_text(row[7]) if len(row) > 7 else None,
+            "last_fetched_at": _coerce_datetime(row[8]) if len(row) > 8 else None,
+            "next_retry_at": _coerce_datetime(row[9]) if len(row) > 9 else None,
         }
 
     return None
 
 
-def _upsert_store_profile_cache_success(cursor, *, store_seq, store_name):
+def _upsert_store_profile_cache_success(cursor, *, store_seq, profile):
     if cursor is None:
         return
     try:
@@ -1142,23 +1200,60 @@ def _upsert_store_profile_cache_success(cursor, *, store_seq, store_name):
             INSERT INTO joongna_store_profiles (
                 store_seq,
                 store_name,
+                profile_image_url,
+                store_level,
+                trust_score,
+                review_count,
                 fetch_status,
                 error_message,
                 last_fetched_at,
                 next_retry_at
             )
-            VALUES (%s, %s, 'success', NULL, CURRENT_TIMESTAMP, NULL)
+            VALUES (%s, %s, %s, %s, %s, %s, 'success', NULL, CURRENT_TIMESTAMP, NULL)
             ON DUPLICATE KEY UPDATE
                 store_name = VALUES(store_name),
+                profile_image_url = VALUES(profile_image_url),
+                store_level = VALUES(store_level),
+                trust_score = VALUES(trust_score),
+                review_count = VALUES(review_count),
                 fetch_status = 'success',
                 error_message = NULL,
                 last_fetched_at = CURRENT_TIMESTAMP,
                 next_retry_at = NULL
             """,
-            (store_seq, store_name),
+            (
+                store_seq,
+                _safe_text((profile or {}).get("store_name")),
+                _safe_text((profile or {}).get("profile_image_url")),
+                _safe_text((profile or {}).get("store_level")),
+                _safe_int((profile or {}).get("trust_score")),
+                _safe_int((profile or {}).get("review_count")),
+            ),
         )
     except Exception as exc:
         if _is_schema_missing_error(exc):
+            if "unknown column" not in str(exc).lower():
+                return
+            cursor.execute(
+                """
+                INSERT INTO joongna_store_profiles (
+                    store_seq,
+                    store_name,
+                    fetch_status,
+                    error_message,
+                    last_fetched_at,
+                    next_retry_at
+                )
+                VALUES (%s, %s, 'success', NULL, CURRENT_TIMESTAMP, NULL)
+                ON DUPLICATE KEY UPDATE
+                    store_name = VALUES(store_name),
+                    fetch_status = 'success',
+                    error_message = NULL,
+                    last_fetched_at = CURRENT_TIMESTAMP,
+                    next_retry_at = NULL
+                """,
+                (store_seq, _safe_text((profile or {}).get("store_name"))),
+            )
             return
         raise
 
@@ -1215,6 +1310,10 @@ def resolve_store_profile_for_store_seq(cursor, store_seq, *, store_profile_cach
                 result = {
                     "store_seq": normalized_store_seq,
                     "store_name": stale_store_name,
+                    "profile_image_url": _safe_text(cached_row.get("profile_image_url")),
+                    "store_level": _safe_text(cached_row.get("store_level")),
+                    "trust_score": _safe_int(cached_row.get("trust_score")),
+                    "review_count": _safe_int(cached_row.get("review_count")),
                 }
                 if isinstance(store_profile_cache, dict):
                     store_profile_cache[normalized_store_seq] = result
@@ -1225,6 +1324,10 @@ def resolve_store_profile_for_store_seq(cursor, store_seq, *, store_profile_cach
             result = {
                 "store_seq": normalized_store_seq,
                 "store_name": stale_store_name,
+                "profile_image_url": _safe_text(cached_row.get("profile_image_url")),
+                "store_level": _safe_text(cached_row.get("store_level")),
+                "trust_score": _safe_int(cached_row.get("trust_score")),
+                "review_count": _safe_int(cached_row.get("review_count")),
             }
             if isinstance(store_profile_cache, dict):
                 store_profile_cache[normalized_store_seq] = result
@@ -1236,7 +1339,7 @@ def resolve_store_profile_for_store_seq(cursor, store_seq, *, store_profile_cach
         _upsert_store_profile_cache_success(
             cursor,
             store_seq=normalized_store_seq,
-            store_name=fetched_store_name,
+            profile=fetched,
         )
         result = {
             "store_seq": normalized_store_seq,
@@ -1312,6 +1415,7 @@ def save_group_search_results(
     fetched_at=None,
     status="ok",
     store_profile_cache=None,
+    enrich_details=True,
 ):
     normalized_source = _normalize_source(source)
     normalized_keyword = normalize_search_keyword(search_keyword)
@@ -1361,7 +1465,7 @@ def save_group_search_results(
         seller_trust_score = _safe_int(item.get("seller_trust_score"))
         seller_review_count = _safe_int(item.get("seller_review_count"))
 
-        if seller_store_seq is not None:
+        if enrich_details and seller_store_seq is not None:
             # search API에는 판매자 닉네임이 없어서 storeSeq 기준 캐시 조회 후 필요 시 상세 API를 호출한다.
             store_profile = resolve_store_profile_for_store_seq(
                 cursor,
@@ -1389,7 +1493,9 @@ def save_group_search_results(
         sort_date = _coerce_datetime(item.get("sort_date"))
         url = _safe_text(item.get("product_url")) or ""
         refresh_key = _safe_text(item.get("refresh_key"))
-        body_text = resolve_search_result_body_text(item, url=url)
+        body_text = _extract_body_text_from_search_item(item)
+        if body_text is None and enrich_details:
+            body_text = resolve_search_result_body_text(item, url=url)
         if body_text is not None:
             item["body_text"] = body_text
         raw_json = _safe_json_dumps(item)
@@ -1844,12 +1950,17 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                     continue
                 marked_rule_ids.add(setting_id)
 
-                try:
-                    mark_watch_rule_polled(setting_id)
-                    stats["settings_marked"] += 1
-                except Exception as exc:
-                    stats["db_errors"] += 1
-                    print(f"[polling] setting polled_at 갱신 실패 (setting_id={setting_id}): {exc}")
+        if not marked_rule_ids:
+            return
+        try:
+            marked_count = mark_watch_rules_polled(sorted(marked_rule_ids))
+            stats["settings_marked"] += int(marked_count or 0)
+        except Exception as exc:
+            stats["db_errors"] += 1
+            print(
+                "[polling] setting polled_at 일괄 갱신 실패 "
+                f"(count={len(marked_rule_ids)}): {exc}"
+            )
 
     try:
         try:
@@ -1891,6 +2002,7 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                                 fetched_at=datetime.now(),
                                 status="fetch_error",
                                 store_profile_cache=store_profile_cache,
+                                enrich_details=False,
                             )
                             connection.commit()
                         except Exception as cache_exc:
@@ -1916,6 +2028,7 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                             fetched_at=datetime.now(),
                             status="ok",
                             store_profile_cache=store_profile_cache,
+                            enrich_details=False,
                         )
                         if save_result.get("ok"):
                             connection.commit()

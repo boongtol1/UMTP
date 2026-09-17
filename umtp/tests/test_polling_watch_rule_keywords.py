@@ -267,7 +267,10 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
             with patch("src.joongna_polling_service.search_joongna_products", return_value=[mock_item]):
                 with patch("src.joongna_polling_service.get_connection", side_effect=RuntimeError("db down")):
-                    with patch("src.joongna_polling_service.mark_watch_rule_polled") as mock_mark_polled:
+                    with patch(
+                        "src.joongna_polling_service.mark_watch_rules_polled",
+                        return_value=2,
+                    ) as mock_mark_polled:
                         with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
                             mock_enqueue.return_value = {
                                 "ok": True,
@@ -281,7 +284,7 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         self.assertEqual(enqueue_args[0].get("product_id"), 1001)
         self.assertEqual(len(enqueue_args[1]), 2)
         self.assertEqual(enqueue_args[2], "new")
-        self.assertEqual(mock_mark_polled.call_count, 2)
+        mock_mark_polled.assert_called_once_with([1, 2])
         self.assertEqual(stats.get("analysis_jobs_created"), 2)
         self.assertEqual(stats.get("analysis_jobs_processed"), 0)
 
@@ -599,7 +602,10 @@ class PollingWatchRuleKeywordTest(unittest.TestCase):
         with patch("src.joongna_polling_service.get_due_watch_rules", return_value=due_rules):
             with patch("src.joongna_polling_service.search_joongna_products", side_effect=_search_side_effect) as mock_search:
                 with patch("src.joongna_polling_service.get_connection", side_effect=RuntimeError("db down")):
-                    with patch("src.joongna_polling_service.mark_watch_rule_polled") as mock_mark_polled:
+                    with patch(
+                        "src.joongna_polling_service.mark_watch_rules_polled",
+                        return_value=1,
+                    ) as mock_mark_polled:
                         with patch("src.joongna_polling_service.enqueue_analysis_for_product") as mock_enqueue:
                             mock_enqueue.return_value = {
                                 "ok": True,

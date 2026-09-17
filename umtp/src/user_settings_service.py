@@ -3818,6 +3818,56 @@ def mark_user_fair_price_polled(setting_id):
             connection.close()
 
 
+def mark_user_fair_prices_polled(setting_ids):
+    normalized_ids = []
+    seen = set()
+    for setting_id in setting_ids or []:
+        normalized = _safe_int(setting_id)
+        if normalized is None or normalized <= 0 or normalized in seen:
+            continue
+        seen.add(normalized)
+        normalized_ids.append(normalized)
+    if not normalized_ids:
+        return 0
+
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        placeholders = ",".join(["%s"] * len(normalized_ids))
+        try:
+            cursor.execute(
+                f"""
+                UPDATE user_fair_prices
+                SET
+                    last_polled_at = CURRENT_TIMESTAMP,
+                    force_poll = FALSE,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id IN ({placeholders})
+                """,
+                tuple(normalized_ids),
+            )
+        except Exception as exc:
+            if "unknown column" not in str(exc).lower():
+                raise
+            cursor.execute(
+                f"""
+                UPDATE user_fair_prices
+                SET updated_at = CURRENT_TIMESTAMP
+                WHERE id IN ({placeholders})
+                """,
+                tuple(normalized_ids),
+            )
+        connection.commit()
+        return len(normalized_ids)
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+
 def refresh_user_fair_price_saved_at_for_active_rules(user_id):
     if not isinstance(user_id, str) or not user_id.strip():
         return {"ok": False, "reason": "invalid_user_id"}
