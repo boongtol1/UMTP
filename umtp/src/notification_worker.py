@@ -2503,13 +2503,13 @@ def _ensure_alert_fraud_probability_for_delivery(alert):
     return alert
 
 
-def send_alert_event(alert):
+def send_alert_event(alert, *, push_result=None, delivery_policy=None):
     if not isinstance(alert, dict):
         raise ValueError("invalid_alert")
 
     alert_id = _normalize_alert_id(alert.get("id"))
     user_id = _normalize_required_text(alert.get("user_id"), "user_id")
-    delivery_policy = resolve_user_alert_delivery_policy(user_id)
+    delivery_policy = delivery_policy or resolve_user_alert_delivery_policy(user_id)
     user_alert_enabled = bool(delivery_policy.get("enabled"))
     user_chat_id = _normalize_optional_text(delivery_policy.get("telegram_chat_id"))
     allow_global_fallback = bool(delivery_policy.get("allow_global_fallback"))
@@ -2531,7 +2531,8 @@ def send_alert_event(alert):
         pass
     _ensure_alert_fraud_probability_for_delivery(alert)
 
-    push_result = _send_fcm_to_user(user_id, alert)
+    if push_result is None:
+        push_result = _send_fcm_to_user(user_id, alert)
     push_sent = int(push_result.get("sent", 0))
     push_attempted = int(push_result.get("attempted", 0))
     push_reason = _normalize_optional_text(push_result.get("reason"))
@@ -2854,56 +2855,286 @@ def dispatch_alert_event_immediately(alert_id, *, fallback_alert=None):
         }
 
 
-def process_pending_alert_events(limit=20):
-    pending_alerts = get_pending_alert_events(limit=limit)
-    stats = {
-        "fetched": len(pending_alerts),
-        "sent": 0,
-        "app_only": 0,
-        "failed": 0,
-        "results": [],
-    }
+def _normalize_alert_id_list(alert_ids):
+    if not isinstance(alert_ids, (list, tuple, set)):
+        raise ValueError("invalid_alert_ids")
+    normalized = []
+    seen = set()
+    for value in alert_ids:
+        alert_id = _normalize_alert_id(value)
+        if alert_id in seen:
+            continue
+        seen.add(alert_id)
+        normalized.append(alert_id)
+    return normalized
 
-    for alert in pending_alerts:
-        alert_id = _normalize_alert_id(alert.get("id"))
+
+def _claim_alert_events_for_batch(alert_ids):
+    """Claim and load one committed analysis group in a single transaction."""
+    ids = _normalize_alert_id_list(alert_ids)
+    if not ids:
+        return []
+    connection = get_connection()
+    cursor = connection.cursor(dictionary=True)
+    claimed = []
+    try:
+        for offset in range(0, len(ids), 500):
+            batch = ids[offset:offset + 500]
+            placeholders = ",".join(["%s"] * len(batch))
+            cursor.execute(
+                f"SELECT * FROM alert_events WHERE id IN ({placeholders}) "
+                "AND status = 'pending' FOR UPDATE",
+                tuple(batch),
+            )
+            claimed.extend(cursor.fetchall() or [])
+        claimed_ids = [int(row["id"]) for row in claimed]
+        for offset in range(0, len(claimed_ids), 500):
+            batch = claimed_ids[offset:offset + 500]
+            placeholders = ",".join(["%s"] * len(batch))
+            cursor.execute(
+                f"UPDATE alert_events SET status = 'sending', "
+                "send_attempts = COALESCE(send_attempts, 0) + 1, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id IN ("
+                + placeholders + ") AND status = 'pending'",
+                tuple(batch),
+            )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+    rows = {int(row["id"]): row for row in claimed}
+    return [rows[alert_id] for alert_id in ids if alert_id in rows]
+
+
+def _fetch_batch_push_context(alerts):
+    """Read policies and Android tokens once for an entire analysis group."""
+    user_ids = list(dict.fromkeys(alert["user_id"] for alert in alerts))
+    if not user_ids:
+        return {}, {}
+    placeholders = ",".join(["%s"] * len(user_ids))
+    policies = {}
+    tokens = {user_id: [] for user_id in user_ids}
+    connection = get_connection()
+    cursor = connection.cursor(dictionary=True)
+    try:
+        try:
+            cursor.execute(
+                "SELECT user_id, app_notification_enabled, telegram_chat_id "
+                f"FROM users WHERE user_id IN ({placeholders})",
+                tuple(user_ids),
+            )
+            load_dotenv()
+            allow_fallback = (os.getenv("UMTP_ALLOW_GLOBAL_TELEGRAM_FALLBACK") or "").strip().lower() in {
+                "1", "true", "yes", "y",
+            }
+            for row in cursor.fetchall() or []:
+                if row.get("app_notification_enabled") is None:
+                    continue
+                chat_id = _normalize_optional_text(row.get("telegram_chat_id"))
+                policies[row["user_id"]] = {
+                    "enabled": bool(row.get("app_notification_enabled")),
+                    "telegram_chat_id": chat_id,
+                    "allow_global_fallback": allow_fallback and chat_id is None,
+                }
+        except Exception as exc:
+            lowered = str(exc).lower()
+            if "unknown column" not in lowered and "doesn't exist" not in lowered:
+                raise
 
         try:
-            claimed = mark_alert_event_sending(alert_id)
-            if not claimed:
-                stats["results"].append(
-                    {
-                        "ok": True,
-                        "alert_id": alert_id,
-                        "status": "skipped_not_pending",
-                    }
-                )
-                continue
-
-            send_result = send_alert_event(alert)
-            stats["results"].append(send_result)
-
-            status = send_result.get("status")
-            if status == "sent":
-                stats["sent"] += 1
-            elif status == "app_only":
-                stats["app_only"] += 1
-            else:
-                stats["failed"] += 1
+            cursor.execute(
+                "SELECT id, user_id, fcm_token AS token FROM user_push_tokens "
+                f"WHERE user_id IN ({placeholders}) AND platform = 'android' "
+                "AND is_active = TRUE ORDER BY id",
+                tuple(user_ids),
+            )
+            for row in cursor.fetchall() or []:
+                token = _normalize_optional_text(row.get("token"))
+                if token is not None:
+                    tokens[row["user_id"]].append({"id": int(row["id"]), "token": token})
         except Exception as exc:
+            if "doesn't exist" not in str(exc).lower():
+                raise
+    finally:
+        cursor.close()
+        connection.close()
+
+    # Preserve compatibility with older user schemas without sacrificing the
+    # two bulk reads on the current schema.
+    for user_id in user_ids:
+        if user_id not in policies:
+            policies[user_id] = resolve_user_alert_delivery_policy(user_id)
+    return policies, tokens
+
+
+def _persist_batch_push_token_results(sent_token_ids, invalid_tokens):
+    if not sent_token_ids and not invalid_tokens:
+        return
+    connection = get_connection()
+    cursor = connection.cursor()
+    try:
+        if sent_token_ids:
+            cursor.executemany(
+                "UPDATE user_push_tokens SET last_sent_at = CURRENT_TIMESTAMP, "
+                "last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                [(token_id,) for token_id in sent_token_ids],
+            )
+        if invalid_tokens:
+            cursor.executemany(
+                "UPDATE user_push_tokens SET is_active = FALSE, last_error = %s, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                [(reason[:255], token_id) for token_id, reason in invalid_tokens],
+            )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def _send_fcm_batch(alerts, policies, tokens_by_user):
+    """Submit personalized FCM messages together, up to 500 per SDK call."""
+    outcomes = {
+        int(alert["id"]): {"sent": 0, "failed": 0, "attempted": 0, "reason": "no_active_push_tokens"}
+        for alert in alerts
+    }
+    messages = []
+    owners = []
+    configured = _fcm_configured()
+    ready, init_error = _ensure_firebase_initialized() if configured else (False, "fcm_credentials_missing")
+
+    for alert in alerts:
+        alert_id = int(alert["id"])
+        policy = policies.get(alert["user_id"]) or {}
+        if not policy.get("enabled"):
+            outcomes[alert_id]["reason"] = "alerts_disabled"
+            continue
+        token_rows = tokens_by_user.get(alert["user_id"], [])
+        if not token_rows:
+            continue
+        outcomes[alert_id]["attempted"] = len(token_rows)
+        if not ready:
+            outcomes[alert_id].update(failed=len(token_rows), reason=init_error or "firebase_init_failed")
+            continue
+        title, body, data_payload = _build_push_notification_payload(alert)
+        for token_row in token_rows:
+            messages.append(
+                messaging.Message(  # type: ignore[union-attr]
+                    token=token_row["token"],
+                    notification=messaging.Notification(title=title, body=body),  # type: ignore[union-attr]
+                    data=data_payload,
+                    android=messaging.AndroidConfig(priority="high"),  # type: ignore[union-attr]
+                )
+            )
+            owners.append((alert_id, token_row["id"]))
+
+    try:
+        batch_size = int(os.getenv("UMTP_FCM_BATCH_SIZE", "100"))
+    except (TypeError, ValueError):
+        batch_size = 100
+    batch_size = max(1, min(500, batch_size))
+    sent_token_ids = []
+    invalid_tokens = []
+    for offset in range(0, len(messages), batch_size):
+        chunk = messages[offset:offset + batch_size]
+        try:
+            responses = messaging.send_each(chunk).responses  # type: ignore[union-attr]
+            if len(responses) != len(chunk):
+                raise RuntimeError("fcm_response_count_mismatch")
+        except Exception as exc:
+            responses = [exc] * len(chunk)
+        for (alert_id, token_id), response in zip(owners[offset:offset + batch_size], responses):
+            outcome = outcomes[alert_id]
+            if not isinstance(response, Exception) and response.success:
+                outcome["sent"] += 1
+                sent_token_ids.append(token_id)
+                continue
+            outcome["failed"] += 1
+            error_text = str(response if isinstance(response, Exception) else response.exception)
+            outcome["reason"] = error_text
+            if _is_unregistered_push_token_error(error_text):
+                invalid_tokens.append((token_id, error_text))
+
+    for outcome in outcomes.values():
+        if outcome["sent"]:
+            outcome["reason"] = "fcm_sent"
+        elif outcome["attempted"] and outcome["failed"]:
+            outcome["reason"] = outcome["reason"] or "fcm_send_failed"
+    _persist_batch_push_token_results(sent_token_ids, invalid_tokens)
+    return outcomes
+
+
+def dispatch_alert_events_immediately(alert_ids, *, fallback_alerts=None):
+    """Claim one analysis group, batch all FCM first, then retain Telegram behavior."""
+    ids = _normalize_alert_id_list(alert_ids)
+    claimed = _claim_alert_events_for_batch(ids)
+    by_id = {int(alert["id"]): alert for alert in claimed}
+    fallback_alerts = fallback_alerts or {}
+    for alert_id, alert in by_id.items():
+        for key, value in fallback_alerts.get(alert_id, {}).items():
+            if alert.get(key) is None:
+                alert[key] = value
+
+    results = []
+    skipped_ids = [alert_id for alert_id in ids if alert_id not in by_id]
+    results.extend({"ok": True, "alert_id": alert_id, "status": "skipped_not_pending", "reason": "not_pending"}
+                   for alert_id in skipped_ids)
+    if not claimed:
+        return {"fetched": 0, "sent": 0, "app_only": 0, "failed": 0, "results": results}
+
+    try:
+        policies, tokens_by_user = _fetch_batch_push_context(claimed)
+        push_results = _send_fcm_batch(claimed, policies, tokens_by_user)
+    except Exception as exc:
+        for alert in claimed:
             try:
-                mark_alert_event_failed(alert_id, str(exc))
+                mark_alert_event_failed(alert["id"], str(exc))
             except Exception:
                 pass
-            stats["failed"] += 1
-            stats["results"].append(
-                {
-                    "ok": False,
-                    "alert_id": alert_id,
-                    "status": "failed",
-                    "reason": str(exc),
-                }
-            )
+            results.append({"ok": False, "alert_id": int(alert["id"]), "status": "failed", "reason": str(exc)})
+    else:
+        # Every push submission finishes before the first Telegram request.
+        for alert in claimed:
+            try:
+                results.append(send_alert_event(
+                    alert,
+                    push_result=push_results[int(alert["id"])],
+                    delivery_policy=policies.get(alert["user_id"]),
+                ))
+            except Exception as exc:
+                try:
+                    mark_alert_event_failed(alert["id"], str(exc))
+                except Exception:
+                    pass
+                results.append({
+                    "ok": False, "alert_id": int(alert["id"]),
+                    "status": "failed", "reason": str(exc),
+                })
 
+    ordered = {row["alert_id"]: row for row in results}
+    results = [ordered[alert_id] for alert_id in ids if alert_id in ordered]
+    return {
+        "fetched": len(claimed),
+        "sent": sum(row.get("status") == "sent" for row in results),
+        "app_only": sum(row.get("status") == "app_only" for row in results),
+        "failed": sum(row.get("status") == "failed" for row in results),
+        "results": results,
+    }
+
+
+def process_pending_alert_events(limit=20):
+    pending_alerts = get_pending_alert_events(limit=limit)
+    ids = [_normalize_alert_id(alert.get("id")) for alert in pending_alerts]
+    fallback_alerts = {int(alert["id"]): alert for alert in pending_alerts}
+    stats = dispatch_alert_events_immediately(ids, fallback_alerts=fallback_alerts)
+    # Preserve the worker's historical meaning: fetched is the number read,
+    # including rows another worker wins before this process claims them.
+    stats["fetched"] = len(pending_alerts)
     return stats
 
 

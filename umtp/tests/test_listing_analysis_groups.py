@@ -88,6 +88,7 @@ class ListingAnalysisGroupsTest(unittest.TestCase):
         self.mock("_mark_seen_product_status")
         self.mock("save_success_log")
         self.single_dispatch = self.mock("dispatch_alert_event_immediately")
+        self.batch_dispatch = self.mock("dispatch_alert_events_immediately", return_value={"results": []})
 
     def mock(self, name, **kwargs):
         return self.stack.enter_context(patch.object(pipeline, name, **kwargs))
@@ -100,15 +101,14 @@ class ListingAnalysisGroupsTest(unittest.TestCase):
     def test_two_users_share_fetch_parse_risk_and_publish_after_one_commit(self):
         connection = self.connect([rule(1, "u1"), rule(2, "u2", fair_price_krw=900000)])
 
-        dispatched = []
-
-        def send(alert_id):
+        def send(alert_ids):
             self.assertEqual(connection.commits, 1)
             self.assertTrue(connection.closed)
-            dispatched.append(alert_id)
+            self.assertEqual(len(alert_ids), 2)
             self.assertTrue(any("update analysis_jobs set status = 'done'" in query for query, _ in connection.query_cursor.executed))
+            return {"results": [{"alert_id": value, "status": "sent"} for value in alert_ids]}
 
-        self.single_dispatch.side_effect = send
+        self.batch_dispatch.side_effect = send
         results = pipeline.process_analysis_group([job(1, "u1"), job(2, "u2")])
         self.assertTrue(all(item["ok"] for item in results))
         self.assertEqual([item["result"]["fair_price_krw"] for item in results], [1000000, 900000])
@@ -118,7 +118,8 @@ class ListingAnalysisGroupsTest(unittest.TestCase):
         self.snapshot.assert_called_once()
         self.store.assert_called_once()
         self.assertEqual(self.fraud.call_count, 2)  # personal discount is a model feature
-        self.assertEqual(len(dispatched), 2)
+        self.batch_dispatch.assert_called_once()
+        self.single_dispatch.assert_not_called()
         queries = [query for query, _ in connection.query_cursor.executed]
         self.assertEqual(sum("from user_fair_prices" in query for query in queries), 1)
 
@@ -153,12 +154,12 @@ class ListingAnalysisGroupsTest(unittest.TestCase):
         self.assertTrue(all(not result["ok"] for result in results))
         self.assertEqual(connection.commits, 0)
         self.assertEqual(connection.rollbacks, 1)
-        self.single_dispatch.assert_not_called()
+        self.batch_dispatch.assert_not_called()
         self.assertEqual(self.failed.call_count, 2)
 
     def test_dispatch_failure_preserves_committed_work_for_notification_retry(self):
         connection = self.connect([rule(1, "u1")])
-        self.single_dispatch.side_effect = RuntimeError("FCM down")
+        self.batch_dispatch.side_effect = RuntimeError("FCM down")
         result = pipeline.process_analysis_group([job(1, "u1")])[0]
         self.assertTrue(result["ok"])
         self.assertEqual(connection.commits, 1)

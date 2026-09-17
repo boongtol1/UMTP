@@ -4,7 +4,7 @@ requests
 beautifulsoup4
 fastapi
 uvicorn
-firebase-admin
+firebase-admin>=6.2.0
 joblib
 numpy
 scikit-learn

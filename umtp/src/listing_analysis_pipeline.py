@@ -34,7 +34,7 @@ try:
         update_seen_product_content_snapshot,
     )
     from src.listing_page_parser import fetch_html, parse_joongna_listing_page
-    from src.notification_worker import dispatch_alert_event_immediately
+    from src.notification_worker import dispatch_alert_event_immediately, dispatch_alert_events_immediately
     from src.risk_analyzer import analyze_risk
     from src.spec_parser import parse_listing_title
     from src.user_fair_price import (
@@ -73,7 +73,7 @@ except ModuleNotFoundError:
         update_seen_product_content_snapshot,
     )
     from listing_page_parser import fetch_html, parse_joongna_listing_page
-    from notification_worker import dispatch_alert_event_immediately
+    from notification_worker import dispatch_alert_event_immediately, dispatch_alert_events_immediately
     from risk_analyzer import analyze_risk
     from spec_parser import parse_listing_title
     from user_fair_price import (
@@ -1929,25 +1929,23 @@ def process_analysis_group(jobs):
         if connection is not None and connection.is_connected():
             connection.close()
 
-    # Keep the existing notification path. Only listing analysis and rule
-    # evaluation are grouped by this branch; notification batching is out of
-    # scope and remains a per-alert call after the shared transaction commits.
-    for row in results:
-        result = row["result"]
-        alert_id = result.get("alert_event_id") if result.get("alert_created") else None
-        if alert_id is None:
-            continue
+    alert_ids = [row["result"]["alert_event_id"] for row in results if row["result"].get("alert_created")]
+    if alert_ids:
         try:
-            dispatch_result = dispatch_alert_event_immediately(alert_id)
-            if isinstance(dispatch_result, dict):
-                result["alert_dispatch_status"] = _normalize_optional_text(dispatch_result.get("status"))
-                result["alert_dispatch_reason"] = _normalize_optional_text(dispatch_result.get("reason"))
+            dispatch_stats = dispatch_alert_events_immediately(alert_ids)
+            dispatch_by_id = {
+                item.get("alert_id"): item for item in dispatch_stats.get("results", [])
+                if isinstance(item, dict)
+            }
+            for row in results:
+                result = row["result"]
+                dispatch_result = dispatch_by_id.get(result.get("alert_event_id"))
+                if dispatch_result:
+                    result["alert_dispatch_status"] = _normalize_optional_text(dispatch_result.get("status"))
+                    result["alert_dispatch_reason"] = _normalize_optional_text(dispatch_result.get("reason"))
         except Exception as exc:
-            # The committed pending alert remains available to the existing
-            # notification worker. Delivery failure must not repeat analysis.
-            result["alert_dispatch_status"] = "dispatch_exception"
-            result["alert_dispatch_reason"] = str(exc)
-            print(f"[analysis_pipeline] immediate alert dispatch failed: alert_id={alert_id}, error={exc}")
+            # Committed pending alerts remain available to the existing worker.
+            print(f"[analysis_pipeline] grouped alert dispatch deferred: {exc}")
     return results
 
 

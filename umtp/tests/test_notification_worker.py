@@ -552,34 +552,47 @@ class NotificationWorkerTest(unittest.TestCase):
             {"id": 12, "user_id": "u2", "message": "B"},
         ]
 
-        def _send_side_effect(alert):
-            if alert.get("id") == 11:
-                raise RuntimeError("send failed")
-            return {"ok": True, "alert_id": 12, "status": "sent", "reason": "telegram_sent"}
-
         with patch("src.notification_worker.get_pending_alert_events", return_value=pending_alerts):
-            with patch("src.notification_worker.mark_alert_event_sending"):
-                with patch("src.notification_worker.send_alert_event", side_effect=_send_side_effect):
-                    with patch("src.notification_worker.mark_alert_event_failed") as mock_mark_failed:
-                        stats = process_pending_alert_events(limit=20)
+            with patch(
+                "src.notification_worker.dispatch_alert_events_immediately",
+                return_value={
+                    "fetched": 2,
+                    "failed": 1,
+                    "sent": 1,
+                    "app_only": 0,
+                    "results": [
+                        {"ok": False, "alert_id": 11, "status": "failed"},
+                        {"ok": True, "alert_id": 12, "status": "sent"},
+                    ],
+                },
+            ) as mock_dispatch:
+                stats = process_pending_alert_events(limit=20)
 
         self.assertEqual(stats.get("fetched"), 2)
         self.assertEqual(stats.get("failed"), 1)
         self.assertEqual(stats.get("sent"), 1)
-        self.assertEqual(mock_mark_failed.call_count, 1)
+        mock_dispatch.assert_called_once_with(
+            [11, 12],
+            fallback_alerts={11: pending_alerts[0], 12: pending_alerts[1]},
+        )
 
     def test_process_pending_alert_events_skips_when_not_claimed(self):
         pending_alerts = [{"id": 11, "user_id": "u1", "message": "A"}]
 
         with patch("src.notification_worker.get_pending_alert_events", return_value=pending_alerts):
-            with patch("src.notification_worker.mark_alert_event_sending", return_value=False):
-                with patch("src.notification_worker.send_alert_event") as mock_send_alert:
-                    stats = process_pending_alert_events(limit=20)
+            with patch(
+                "src.notification_worker.dispatch_alert_events_immediately",
+                return_value={
+                    "fetched": 0, "sent": 0, "app_only": 0, "failed": 0,
+                    "results": [{"ok": True, "alert_id": 11, "status": "skipped_not_pending"}],
+                },
+            ) as mock_dispatch:
+                stats = process_pending_alert_events(limit=20)
 
         self.assertEqual(stats.get("fetched"), 1)
         self.assertEqual(stats.get("sent"), 0)
         self.assertEqual(stats.get("failed"), 0)
-        self.assertEqual(mock_send_alert.call_count, 0)
+        mock_dispatch.assert_called_once()
         self.assertEqual(stats.get("results")[0].get("status"), "skipped_not_pending")
 
     def test_dispatch_alert_event_immediately_skips_when_not_pending(self):
