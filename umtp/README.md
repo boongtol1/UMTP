@@ -886,6 +886,7 @@ mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/alter_listing_analysis_results_
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_identity_user_product.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_joongna_sort_date_tracking.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_search_query_results_cache.sql
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_search_result_enrichment.sql
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_fraud_store_monitor.sql
 # heartbeat 롤백(066b3e5 제거) 시에만 실행
 mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_remove_worker_heartbeats.sql
@@ -913,6 +914,8 @@ python src/run_joongna_polling_umtp.py --once
 python src/run_joongna_polling_umtp.py --interval 60
 python src/run_analysis_worker_umtp.py --once
 python src/run_analysis_worker_umtp.py --interval 5
+python src/run_content_refresh_worker_umtp.py --once
+python src/run_content_refresh_worker_umtp.py --interval 5
 python src/run_notification_worker_umtp.py --once
 python src/run_notification_worker_umtp.py --interval 3
 python src/run_fraud_store_monitor_umtp.py --once
@@ -946,6 +949,10 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - 설정 저장 시 `enabled=true`이면 `force_poll=true`, `last_poll_requested_at=NOW()`, `last_polled_at=NULL`이 되어 즉시 due 대상이 됩니다.
 - polling worker는 due 설정을 읽어 검색하며, 같은 검색어를 여러 사용자가 켜도 Search API는 검색어당 1회만 호출합니다.
 - polling worker는 조회한 그룹 결과를 `search_queries`/`search_results`에도 저장해 후속 집계와 디버깅에 재사용할 수 있습니다.
+- polling worker는 검색 스냅샷만 저장하고 상세 본문/판매자 API를 호출하지 않습니다. 신규·변경 매물의 상세 본문은 analysis worker가 매물당 한 번 조회해 `search_results.body_text/body_hash`에 저장합니다.
+- content refresh worker는 analysis backlog가 없을 때만 기존 매물을 한 건씩 재확인합니다. 본문 또는 자체점검 hash가 달라지면 `body_changed`/`self_check_changed` 분석 작업을 생성합니다.
+- content refresh 기본 주기는 등록 1시간 이내 3분, 24시간 이내 20분, 이후 7일까지 6시간이며 `CONTENT_REFRESH_*` 환경변수로 조정할 수 있습니다.
+- 판매자 프로필은 `storeSeq`별 24시간 TTL 캐시를 사용하며 analysis/content refresh worker가 필요할 때만 갱신합니다.
 - 참고 알림/놓친 후보 집계 성능을 위해 `analysis_jobs`에 `(user_id, source, search_keyword, created_at)` 및 `(user_id, source, search_keyword, product_id, created_at)` 조회 인덱스를 적용합니다.
 - 알림 속도(priority)는 UI에 `빠름/보통/절전`으로 표시되며 내부값은 `FAST/NORMAL/LOW`를 사용합니다.
 - priority별 기본 주기는 `FAST=45초`, `NORMAL=180초`, `LOW=600초`입니다.
@@ -985,6 +992,8 @@ docker run -d --name umtp-polling --restart unless-stopped --env-file .env umtp 
 
 docker run -d --name umtp-analysis --restart unless-stopped --env-file .env umtp python src/run_analysis_worker_umtp.py --interval 5
 
+docker run -d --name umtp-content-refresh --restart unless-stopped --env-file .env umtp python src/run_content_refresh_worker_umtp.py --interval 5
+
 docker run -d --name umtp-notification --restart unless-stopped --env-file .env umtp python src/run_notification_worker_umtp.py --interval 3
 
 docker run -d --name umtp-fraud-store-monitor --restart unless-stopped --env-file .env umtp python src/run_fraud_store_monitor_umtp.py --interval 600
@@ -996,6 +1005,7 @@ docker run -d --name umtp-fraud-store-monitor --restart unless-stopped --env-fil
 docker logs -f umtp-api
 docker logs -f umtp-polling
 docker logs -f umtp-analysis
+docker logs -f umtp-content-refresh
 docker logs -f umtp-notification
 docker logs -f umtp-fraud-store-monitor
 ```
@@ -1004,6 +1014,7 @@ docker logs -f umtp-fraud-store-monitor
 - `umtp-api`: Android/iOS API 서버(FastAPI)
 - `umtp-polling`(market-watcher): 중고나라 polling + `analysis_jobs` enqueue 전용
 - `umtp-analysis`(analysis-worker): `analysis_jobs` pending 처리 전용
+- `umtp-content-refresh`: 기존 매물 본문/자체점검/판매자 TTL 저우선순위 갱신 전용
 - `umtp-notification`(notification-worker): `alert_events` pending Telegram/app 상태 처리 전용
 - `umtp-fraud-store-monitor`: `store_id` 상태/활동량 스냅샷 + 학습 라벨 후보 갱신 전용
 

@@ -404,7 +404,10 @@ def upsert_seen_product_observation(
     body_hash = _resolve_body_hash(product)
     self_check_hash = _resolve_self_check_hash(product)
     content_revision_hash = _coerce_text(product.get("content_revision_hash"))
-    if content_revision_hash is None:
+    # A search observation is not a detail-content check. Building a revision
+    # from title/price alone would advance last_content_checked_at on every
+    # fast poll and starve the low-priority body refresh scheduler.
+    if content_revision_hash is None and (body_hash is not None or self_check_hash is not None):
         content_revision_hash = build_listing_content_snapshot(
             title=title,
             price_krw=price_krw,
