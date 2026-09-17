@@ -1,5 +1,6 @@
 import hashlib
 import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from src.db import get_connection
@@ -643,32 +644,179 @@ def create_analysis_jobs_for_rules(product, watch_rules, trigger_reason):
             }
         )
 
-    for target in unique_targets:
+    return _create_analysis_job_group(product, unique_targets, trigger_reason)
 
-        result = create_analysis_job(
-            source="joongna",
-            product_id=product.get("product_id"),
-            url=product.get("product_url"),
-            title=product.get("title"),
-            price_krw=product.get("price"),
-            search_keyword=product.get("search_keyword") or product.get("search_word"),
-            user_id=target.get("user_id"),
-            watch_rule_id=target.get("watch_rule_id"),
-            sort_date=product.get("sort_date"),
-            trigger_reason=trigger_reason,
-            change_fingerprint=product.get("change_fingerprint"),
-            refresh_key=product.get("refresh_key"),
+
+def _create_analysis_job_group(product, targets, trigger_reason):
+    """Publish every recipient of one observation in a single transaction.
+
+    A worker must never see just the first user's jobs while the poller is still
+    inserting the others. Preserve the existing per-rule identities and rows.
+    """
+    result = {"ok": True, "created_jobs": [], "skipped_jobs": []}
+    if not targets:
+        return result
+    source = _normalize_optional_text(product.get("source")) or "joongna"
+    product_id = _normalize_required_text(product.get("product_id"), "product_id")
+    url = _normalize_required_text(product.get("product_url"), "url")
+    title = _normalize_optional_text(product.get("title"))
+    price = _normalize_optional_int(product.get("price"), "price_krw")
+    keyword = _normalize_optional_text(product.get("search_keyword") or product.get("search_word"))
+    sort_date = _normalize_sort_date_for_db(product.get("sort_date"))
+    reason = _normalize_optional_text(trigger_reason)
+    fingerprint = _normalize_change_fingerprint(product.get("change_fingerprint"))
+    if not fingerprint:
+        fingerprint = _build_change_fingerprint(
+            trigger_reason=reason, sort_date=sort_date, title=title,
+            price_krw=price, url=url, refresh_key=product.get("refresh_key"),
         )
-        if result.get("created"):
-            created_jobs.append(result)
-        else:
-            skipped_jobs.append(result)
+    connection = get_connection()
+    cursor = connection.cursor(dictionary=True)
+    try:
+        lookup = """
+            SELECT id, user_id, watch_rule_id, status FROM analysis_jobs
+            WHERE source = %s AND product_id = %s AND change_fingerprint = %s
+        """
+        scope = (source, product_id, fingerprint)
+        cursor.execute(lookup, scope)
+        existing = {(row["user_id"], row["watch_rule_id"]): row for row in cursor.fetchall()}
+        values = [
+            (source, product_id, url, title, price, keyword, target["user_id"],
+             target["watch_rule_id"], sort_date, reason, fingerprint)
+            for target in targets
+            if (target["user_id"], target["watch_rule_id"]) not in existing
+        ]
+        for offset in range(0, len(values), 500):
+            cursor.executemany(
+                """
+                INSERT INTO analysis_jobs (
+                    source, product_id, url, title, price_krw, search_keyword,
+                    user_id, watch_rule_id, sort_date, trigger_reason,
+                    change_fingerprint, status
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')
+                ON DUPLICATE KEY UPDATE id = id
+                """, values[offset:offset + 500],
+            )
+        # Locking read also sees a concurrently committed duplicate under RR.
+        cursor.execute(lookup + " FOR UPDATE", scope)
+        rows = {(row["user_id"], row["watch_rule_id"]): row for row in cursor.fetchall()}
+        for target in targets:
+            key = (target["user_id"], target["watch_rule_id"])
+            row = rows[key]
+            created = key not in existing
+            item = {"ok": True, "created": created, "job_id": int(row["id"]), "status": row["status"]}
+            if not created:
+                item["reason"] = "duplicate_identity_job"
+            result["created_jobs" if created else "skipped_jobs"].append(item)
+        connection.commit()
+        return result
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
 
-    return {
-        "ok": True,
-        "created_jobs": created_jobs,
-        "skipped_jobs": skipped_jobs,
-    }
+
+def _analysis_product_lock_name(job):
+    identity = [
+        _normalize_optional_text(job.get("source")) or "joongna",
+        _normalize_optional_text(job.get("product_id")) or _normalize_optional_text(job.get("url")),
+    ]
+    digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode("utf-8")).hexdigest()
+    return "umtp:analysis:" + digest[:48]
+
+
+@contextmanager
+def claim_pending_analysis_group():
+    """Own one complete listing event until the caller finishes processing it.
+
+    The MySQL named lock is held on this connection across the caller's work.
+    It serializes revisions of a product, but allows other workers to process
+    other products. A crashed owner's connection releases the lock; the next
+    owner can safely reclaim its running rows without a time-based lease race.
+    All analysis workers must use this protocol (stop old workers at rollout).
+    """
+    connection = get_connection()
+    cursor = connection.cursor(dictionary=True)
+    lock_name = None
+    claimed_ids = []
+    try:
+        cursor.execute(
+            """
+            SELECT aj.* FROM analysis_jobs aj
+            JOIN (
+                SELECT MIN(id) AS id FROM analysis_jobs
+                WHERE status IN ('pending', 'running')
+                GROUP BY source, product_id
+                ORDER BY MIN(id) LIMIT 200
+            ) candidates ON candidates.id = aj.id
+            ORDER BY aj.id
+            """
+        )
+        candidates = cursor.fetchall() or []
+        connection.commit()
+        jobs = []
+        for candidate in candidates:
+            name = _analysis_product_lock_name(candidate)
+            cursor.execute("SELECT GET_LOCK(%s, 0) AS acquired", (name,))
+            acquired = cursor.fetchone() or {}
+            if acquired.get("acquired") != 1:
+                continue
+            lock_name = name
+            # FOR UPDATE is a current read, including recovery after a crash.
+            cursor.execute(
+                """
+                SELECT * FROM analysis_jobs
+                WHERE source = %s AND product_id <=> %s
+                  AND change_fingerprint = %s
+                  AND status IN ('pending', 'running')
+                ORDER BY id FOR UPDATE
+                """,
+                (candidate["source"], candidate.get("product_id"), candidate["change_fingerprint"]),
+            )
+            jobs = cursor.fetchall() or []
+            if jobs:
+                claimed_ids = [int(job["id"]) for job in jobs]
+                for offset in range(0, len(claimed_ids), 500):
+                    ids = claimed_ids[offset:offset + 500]
+                    placeholders = ",".join(["%s"] * len(ids))
+                    cursor.execute(
+                        f"""UPDATE analysis_jobs SET status = 'running',
+                            attempts = COALESCE(attempts, 0) + 1,
+                            started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                            WHERE id IN ({placeholders})""", tuple(ids),
+                    )
+                connection.commit()
+                break
+            connection.commit()
+            cursor.execute("SELECT RELEASE_LOCK(%s)", (name,))
+            cursor.fetchone()
+            lock_name = None
+        yield jobs
+    finally:
+        try:
+            connection.rollback()
+            if claimed_ids:
+                # Aborted/uncaught processing becomes retryable. Committed done
+                # or failed jobs are never reset and therefore never replayed.
+                for offset in range(0, len(claimed_ids), 500):
+                    ids = claimed_ids[offset:offset + 500]
+                    placeholders = ",".join(["%s"] * len(ids))
+                    cursor.execute(
+                        f"""UPDATE analysis_jobs SET status = 'pending',
+                            updated_at = CURRENT_TIMESTAMP
+                            WHERE id IN ({placeholders}) AND status = 'running'""", tuple(ids),
+                    )
+                connection.commit()
+        finally:
+            try:
+                if lock_name is not None:
+                    cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                    cursor.fetchone()
+            finally:
+                cursor.close()
+                connection.close()
 
 
 def get_pending_analysis_jobs(limit=20):

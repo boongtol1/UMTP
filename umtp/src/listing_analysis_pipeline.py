@@ -13,8 +13,8 @@ try:
     )
     from src.analysis_log import save_success_log
     from src.analysis_jobs import (
+        claim_pending_analysis_group,
         create_analysis_jobs_for_rules,
-        get_pending_analysis_jobs,
         mark_analysis_job_done,
         mark_analysis_job_failed,
         mark_analysis_job_started,
@@ -52,8 +52,8 @@ except ModuleNotFoundError:
     )
     from analysis_log import save_success_log
     from analysis_jobs import (
+        claim_pending_analysis_group,
         create_analysis_jobs_for_rules,
-        get_pending_analysis_jobs,
         mark_analysis_job_done,
         mark_analysis_job_failed,
         mark_analysis_job_started,
@@ -430,7 +430,7 @@ def _resolve_seller_info_for_alert(
     }
 
 
-def _resolve_price_rules(cursor, user_id, parsed_spec, watch_rule_id=None):
+def _resolve_price_rules(cursor, user_id, parsed_spec, watch_rule_id=None, *, rules=None):
     parse_success = bool(parsed_spec.get("parse_success")) if isinstance(parsed_spec, dict) else False
     if not parse_success:
         return None, None, None, None, None, None, "parse_failed", None
@@ -442,7 +442,28 @@ def _resolve_price_rules(cursor, user_id, parsed_spec, watch_rule_id=None):
     normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
 
     try:
-        if normalized_watch_rule_id is not None:
+        if rules is not None:
+            candidates = (
+                [rules.get(normalized_watch_rule_id)]
+                if normalized_watch_rule_id is not None
+                else rules.values()
+            )
+            resolved_fair_price = None
+            for rule in candidates:
+                if not rule or _normalize_optional_text(rule.get("user_id")) != normalized_user_id:
+                    continue
+                if rule.get("enabled") is not None and not bool(rule["enabled"]):
+                    continue
+                if any(rule.get(field) != parsed_spec.get(field) for field in (
+                    "product_type", "chip", "screen_inch", "ram_gb", "ssd_gb"
+                )):
+                    continue
+                resolved_fair_price = dict(rule, source="watch_rule" if normalized_watch_rule_id else "user_fair_prices")
+                break
+            if resolved_fair_price is None:
+                reason = "watch_rule_spec_mismatch" if normalized_watch_rule_id else "user_target_disabled"
+                return None, None, None, None, None, None, reason, "watch_rule" if normalized_watch_rule_id else None
+        elif normalized_watch_rule_id is not None:
             resolved_fair_price = resolve_fair_price_for_watch_rule(
                 cursor,
                 normalized_user_id,
@@ -563,10 +584,13 @@ def _build_body_excerpt(description, max_len=ALERT_BODY_EXCERPT_MAX_LEN):
     return f"{normalized[:max_len].rstrip()}..."
 
 
-def _evaluate_watch_rule_saved_window(cursor, *, user_id, watch_rule_id, sort_date):
+def _evaluate_watch_rule_saved_window(cursor, *, user_id, watch_rule_id, sort_date, rules=None):
     normalized_watch_rule_id = _normalize_optional_watch_rule_id(watch_rule_id)
     if normalized_watch_rule_id is None:
         return True, None
+
+    if rules is not None:
+        return _evaluate_saved_window_row(rules.get(normalized_watch_rule_id), user_id, sort_date)
 
     try:
         cursor.execute(
@@ -594,6 +618,10 @@ def _evaluate_watch_rule_saved_window(cursor, *, user_id, watch_rule_id, sort_da
         )
         row = cursor.fetchone()
 
+    return _evaluate_saved_window_row(row, user_id, sort_date)
+
+
+def _evaluate_saved_window_row(row, user_id, sort_date):
     if not row:
         return False, "watch_rule_missing"
 
@@ -848,6 +876,7 @@ def maybe_create_alert_event(
     change_fingerprint=None,
     seller_store_seq=None,
     seller_store_name=None,
+    shared_cache=None,
 ):
     parsed_spec = parsed_spec or {}
     risk_result = risk_result or {}
@@ -884,30 +913,40 @@ def maybe_create_alert_event(
             "alert_id": int(duplicate[0]) if isinstance(duplicate, (tuple, list)) else int(duplicate.get("id")),
         }
 
-    _ensure_store_snapshots_before_fraud_scoring(
-        cursor,
-        store_id=seller_store_seq,
-        product_id=normalized_product_id,
-        sort_date=normalized_sort_date,
-    )
+    if shared_cache is None or not shared_cache.get("store_snapshots_ready"):
+        _ensure_store_snapshots_before_fraud_scoring(
+            cursor,
+            store_id=seller_store_seq,
+            product_id=normalized_product_id,
+            sort_date=normalized_sort_date,
+        )
+        if shared_cache is not None:
+            shared_cache["store_snapshots_ready"] = True
 
-    fraud_score = score_alert_fraud_probability_comparison(
-        cursor,
-        product_id=normalized_product_id,
-        store_id=seller_store_seq,
-        alert_context={
-            "title": title,
-            "body_excerpt": body_excerpt,
-            "body_text": body_text,
-            "price_krw": price_krw,
-            "drop_rate_percent": drop_rate_percent,
-            "risk_score": risk_result.get("risk_score"),
-            "risk_level": risk_result.get("risk_level"),
-            "trade_type": risk_result.get("trade_type"),
-            "is_exchange_post": risk_result.get("is_exchange_post"),
-            "risk_keywords_json": risk_result.get("risk_keywords_json"),
-        },
-    )
+    # The model consumes the user's price discount. Share scores only for equal
+    # inputs; sharing one score unconditionally would change personal risk scores.
+    score_cache = shared_cache.setdefault("fraud_scores", {}) if shared_cache is not None else {}
+    score_key = (normalized_product_id, seller_store_seq, drop_rate_percent)
+    if score_key not in score_cache:
+        score_cache[score_key] = score_alert_fraud_probability_comparison(
+            cursor,
+            product_id=normalized_product_id,
+            store_id=seller_store_seq,
+            feature_cache=shared_cache.setdefault("fraud_feature_inputs", {}) if shared_cache is not None else None,
+            alert_context={
+                "title": title,
+                "body_excerpt": body_excerpt,
+                "body_text": body_text,
+                "price_krw": price_krw,
+                "drop_rate_percent": drop_rate_percent,
+                "risk_score": risk_result.get("risk_score"),
+                "risk_level": risk_result.get("risk_level"),
+                "trade_type": risk_result.get("trade_type"),
+                "is_exchange_post": risk_result.get("is_exchange_post"),
+                "risk_keywords_json": risk_result.get("risk_keywords_json"),
+            },
+        )
+    fraud_score = score_cache[score_key]
 
     try:
         cursor.execute(
@@ -1380,7 +1419,95 @@ def _mark_seen_product_status(product_id, status):
             connection.close()
 
 
-def analyze_product_for_watch_rule(job):
+def _load_group_rules(cursor, jobs):
+    """Load personal prices and saved windows once, including legacy user jobs."""
+    rule_ids = sorted({int(job["watch_rule_id"]) for job in jobs if job.get("watch_rule_id")})
+    legacy_users = sorted({job["user_id"] for job in jobs if not job.get("watch_rule_id")})
+    clauses, params = [], []
+    if rule_ids:
+        clauses.append("id IN (" + ",".join(["%s"] * len(rule_ids)) + ")")
+        params.extend(rule_ids)
+    if legacy_users:
+        clauses.append("user_id IN (" + ",".join(["%s"] * len(legacy_users)) + ")")
+        params.extend(legacy_users)
+    if not clauses:
+        return {}
+    # SELECT * also supports older schemas without optional bounds/saved_at.
+    cursor.execute("SELECT * FROM user_fair_prices WHERE " + " OR ".join(clauses) + " ORDER BY id", tuple(params))
+    columns = [column[0] for column in (cursor.description or [])]
+    rows = cursor.fetchall() or []
+    rules = {}
+    for row in rows:
+        rule = row if isinstance(row, dict) else dict(zip(columns, row))
+        rules[int(rule["id"])] = rule
+    return rules
+
+
+def analyze_listing_once(job, cursor):
+    """Fetch and parse one listing revision, independent of its recipients."""
+    product_id = _normalize_optional_text(job.get("product_id"))
+    trigger_reason = _normalize_optional_text(job.get("trigger_reason"))
+    snapshot = _build_listing_snapshot_from_job(job)
+    title, price = snapshot.get("title"), snapshot.get("price")
+    description, self_check_fields = None, {}
+    parsed_spec = _safe_parse_listing_from_title(title)
+    detail_needed, decision = should_fetch_detail(snapshot, trigger_reason, parsed_spec)
+    detail_error = None
+    try:
+        previous_seen = get_seen_product(cursor, product_id) or {}
+    except Exception:
+        previous_seen = {}
+    if detail_needed:
+        try:
+            page = parse_joongna_listing_page(fetch_html(job["url"]))
+            title = _normalize_optional_text(page.get("title")) or title
+            description = _normalize_optional_text(page.get("description"))
+            detail_price = _normalize_optional_int(page.get("listing_price_krw"))
+            if detail_price is not None:
+                price = detail_price
+            self_check_fields = page.get("self_check_fields") or {}
+            parse_text = f"{title or ''} {description or ''}".strip()
+            try:
+                parsed_spec = parse_listing_title(parse_text, self_check_fields=self_check_fields) if parse_text else _build_parse_failure_result("detail_parse_empty")
+            except Exception:
+                parsed_spec = _build_parse_failure_result("detail_parse_exception")
+        except Exception as exc:
+            detail_error = str(exc)
+            print(f"[analysis_pipeline] detail fetch failed, using search snapshot: product_id={product_id}, error={exc}")
+    risk_result = analyze_risk(f"{title or ''} {description or ''}".strip(), self_check_fields=self_check_fields)
+    content_snapshot = build_listing_content_snapshot(
+        title=title, price_krw=price, body_text=description, self_check_fields=self_check_fields,
+    )
+    fields = []
+    explicit_fields = {
+        CHANGE_REASON_TITLE_CHANGED: "title", CHANGE_REASON_PRICE_CHANGED: "price",
+        CHANGE_REASON_BODY_CHANGED: "body_text", CHANGE_REASON_SELF_CHECK_CHANGED: "self_check",
+    }
+    if trigger_reason in explicit_fields:
+        fields.append(explicit_fields[trigger_reason])
+    if detail_needed and detail_error is None:
+        for previous_key, current_key, field in (
+            ("last_body_hash", "body_hash", "body_text"),
+            ("last_self_check_hash", "self_check_hash", "self_check"),
+        ):
+            before, after = previous_seen.get(previous_key), content_snapshot.get(current_key)
+            if before and after and before != after and field not in fields:
+                fields.append(field)
+        if product_id is not None:
+            update_seen_product_content_snapshot(
+                cursor, product_id, title=title, price_krw=price,
+                body_text=description, self_check_fields=self_check_fields, changed_reason=trigger_reason,
+            )
+    return {
+        "listing_snapshot": snapshot, "title": title, "listing_price_krw": price,
+        "description": description, "parsed_spec": parsed_spec, "risk_result": risk_result,
+        "content_snapshot": content_snapshot, "content_change_fields": fields,
+        "detail_fetch_performed": detail_needed, "detail_fetch_reason": decision if detail_needed else None,
+        "detail_skipped_reason": None if detail_needed else decision, "detail_fetch_error": detail_error,
+    }
+
+
+def analyze_product_for_watch_rule(job, *, group_context=None):
     if not isinstance(job, dict):
         raise ValueError("invalid_job")
 
@@ -1398,135 +1525,42 @@ def analyze_product_for_watch_rule(job):
     if user_id is None:
         raise ValueError("analysis_job_user_id_missing")
 
-    listing_snapshot = _build_listing_snapshot_from_job(job)
-    title = _normalize_optional_text(listing_snapshot.get("title"))
-    listing_price_krw = _normalize_optional_int(listing_snapshot.get("price"))
-    description = None
-    self_check_fields = {}
-
-    parsed_spec = _safe_parse_listing_from_title(title, self_check_fields=self_check_fields)
-    parsing_source_text = f"{title or ''}".strip()
-    risk_result = analyze_risk(parsing_source_text, self_check_fields=self_check_fields)
-
-    detail_fetch_performed = False
-    detail_fetch_reason = None
-    detail_skipped_reason = None
-    detail_fetch_error = None
-
+    owns_connection = group_context is None
     connection = None
     cursor = None
     try:
-        connection = get_connection()
-        cursor = connection.cursor()
-        try:
-            previous_seen_product = get_seen_product(cursor, product_id)
-        except Exception:
-            previous_seen_product = None
-
+        connection = get_connection() if owns_connection else group_context["connection"]
+        cursor = connection.cursor() if owns_connection else group_context["cursor"]
+        shared = analyze_listing_once(job, cursor) if owns_connection else group_context["shared"]
+        rules = None if owns_connection else group_context["rules"]
+        listing_snapshot = shared["listing_snapshot"]
+        title = shared["title"]
+        listing_price_krw = shared["listing_price_krw"]
+        description = shared["description"]
+        parsed_spec = shared["parsed_spec"]
+        risk_result = shared["risk_result"]
+        content_snapshot = shared["content_snapshot"]
+        content_change_fields = shared["content_change_fields"]
+        detail_fetch_performed = shared["detail_fetch_performed"]
+        detail_fetch_reason = shared["detail_fetch_reason"]
+        detail_skipped_reason = shared["detail_skipped_reason"]
+        detail_fetch_error = shared["detail_fetch_error"]
         (
-            pre_fair_price_krw,
-            pre_target_price_krw,
-            pre_alert_drop_rate_percent,
-            pre_alert_price_direction,
-            pre_min_price_krw,
-            pre_max_price_krw,
-            pre_price_error_reason,
-            pre_fair_price_source,
+            fair_price_krw,
+            target_price_krw,
+            alert_drop_rate_percent,
+            alert_price_direction,
+            min_price_krw,
+            max_price_krw,
+            price_error_reason,
+            fair_price_source,
         ) = _resolve_price_rules(
             cursor,
             user_id,
             parsed_spec,
             watch_rule_id=watch_rule_id,
+            rules=rules,
         )
-
-        detail_fetch_needed, detail_decision_reason = should_fetch_detail(
-            listing_snapshot,
-            trigger_reason,
-            parsed_spec,
-            target_price_krw=pre_target_price_krw,
-        )
-
-        if detail_fetch_needed:
-            detail_fetch_performed = True
-            detail_fetch_reason = detail_decision_reason
-            try:
-                html = fetch_html(url)
-                parsed_page = parse_joongna_listing_page(html)
-
-                parsed_title = _normalize_optional_text(parsed_page.get("title"))
-                if parsed_title is not None:
-                    title = parsed_title
-
-                description = _normalize_optional_text(parsed_page.get("description"))
-
-                parsed_listing_price_krw = _normalize_optional_int(parsed_page.get("listing_price_krw"))
-                if parsed_listing_price_krw is not None:
-                    listing_price_krw = parsed_listing_price_krw
-
-                self_check_fields = parsed_page.get("self_check_fields") or {}
-                parsing_source_text = f"{title or ''} {description or ''}".strip()
-                if parsing_source_text:
-                    try:
-                        parsed_spec = parse_listing_title(
-                            parsing_source_text,
-                            self_check_fields=self_check_fields,
-                        )
-                    except Exception:
-                        parsed_spec = _build_parse_failure_result("detail_parse_exception")
-                else:
-                    parsed_spec = _build_parse_failure_result("detail_parse_empty")
-
-                risk_result = analyze_risk(parsing_source_text, self_check_fields=self_check_fields)
-            except Exception as detail_exc:
-                detail_fetch_error = str(detail_exc)
-                print(
-                    "[analysis_pipeline] detail fetch 실패, 목록 정보로 fallback "
-                    f"(product_id={product_id}, reason={detail_exc})"
-                )
-        else:
-            detail_skipped_reason = detail_decision_reason
-
-        content_snapshot = build_listing_content_snapshot(
-            title=title,
-            price_krw=listing_price_krw,
-            body_text=description,
-            self_check_fields=self_check_fields,
-        )
-        previous_body_hash = _normalize_optional_text((previous_seen_product or {}).get("last_body_hash"))
-        previous_self_check_hash = _normalize_optional_text((previous_seen_product or {}).get("last_self_check_hash"))
-        current_body_hash = _normalize_optional_text(content_snapshot.get("body_hash"))
-        current_self_check_hash = _normalize_optional_text(content_snapshot.get("self_check_hash"))
-
-        content_change_fields = []
-        if trigger_reason == CHANGE_REASON_TITLE_CHANGED:
-            content_change_fields.append("title")
-        if trigger_reason == CHANGE_REASON_PRICE_CHANGED:
-            content_change_fields.append("price")
-        if trigger_reason == CHANGE_REASON_BODY_CHANGED:
-            content_change_fields.append("body_text")
-        if trigger_reason == CHANGE_REASON_SELF_CHECK_CHANGED:
-            content_change_fields.append("self_check")
-        if previous_body_hash and current_body_hash and previous_body_hash != current_body_hash:
-            if "body_text" not in content_change_fields:
-                content_change_fields.append("body_text")
-        if (
-            previous_self_check_hash
-            and current_self_check_hash
-            and previous_self_check_hash != current_self_check_hash
-        ):
-            if "self_check" not in content_change_fields:
-                content_change_fields.append("self_check")
-
-        if product_id is not None:
-            update_seen_product_content_snapshot(
-                cursor,
-                product_id,
-                title=title,
-                price_krw=listing_price_krw,
-                body_text=description,
-                self_check_fields=self_check_fields,
-                changed_reason=trigger_reason,
-            )
 
         if trigger_reason == "unchanged":
             return {
@@ -1551,7 +1585,7 @@ def analyze_product_for_watch_rule(job):
                 "alert_dispatch_status": None,
                 "alert_dispatch_reason": None,
                 "alert_skip_reason": "unchanged_skip_analysis",
-                "fair_price_source": pre_fair_price_source,
+                "fair_price_source": fair_price_source,
                 "sort_date": sort_date,
                 "saved_window_allowed": True,
                 "analysis_skipped": True,
@@ -1563,32 +1597,6 @@ def analyze_product_for_watch_rule(job):
                 "content_change_fields": content_change_fields,
             }
 
-        if detail_fetch_performed and detail_fetch_error is None:
-            (
-                fair_price_krw,
-                target_price_krw,
-                alert_drop_rate_percent,
-                alert_price_direction,
-                min_price_krw,
-                max_price_krw,
-                price_error_reason,
-                fair_price_source,
-            ) = _resolve_price_rules(
-                cursor,
-                user_id,
-                parsed_spec,
-                watch_rule_id=watch_rule_id,
-            )
-        else:
-            fair_price_krw = pre_fair_price_krw
-            target_price_krw = pre_target_price_krw
-            alert_drop_rate_percent = pre_alert_drop_rate_percent
-            alert_price_direction = pre_alert_price_direction
-            min_price_krw = pre_min_price_krw
-            max_price_krw = pre_max_price_krw
-            price_error_reason = pre_price_error_reason
-            fair_price_source = pre_fair_price_source
-
         matched_watch_rule = bool(parsed_spec.get("parse_success")) if isinstance(parsed_spec, dict) else False
 
         saved_window_allowed, saved_window_reason = _evaluate_watch_rule_saved_window(
@@ -1596,6 +1604,7 @@ def analyze_product_for_watch_rule(job):
             user_id=user_id,
             watch_rule_id=watch_rule_id,
             sort_date=sort_date,
+            rules=rules,
         )
 
         drop_rate_percent = None
@@ -1662,12 +1671,15 @@ def analyze_product_for_watch_rule(job):
             listing_price_krw=listing_price_krw,
         )
         if is_alert_target:
-            seller_info = _resolve_seller_info_for_alert(
-                cursor,
-                product_id=product_id,
-                fallback_store_seq=listing_snapshot.get("seller_store_seq"),
-                fallback_store_name=listing_snapshot.get("seller_store_name"),
-            )
+            seller_info = shared.get("seller_info")
+            if seller_info is None:
+                seller_info = _resolve_seller_info_for_alert(
+                    cursor,
+                    product_id=product_id,
+                    fallback_store_seq=listing_snapshot.get("seller_store_seq"),
+                    fallback_store_name=listing_snapshot.get("seller_store_name"),
+                )
+                shared["seller_info"] = seller_info
             if is_content_changed_alert:
                 alert_message = _build_content_changed_alert_message(
                     title=title,
@@ -1721,6 +1733,7 @@ def analyze_product_for_watch_rule(job):
                 change_fingerprint=alert_change_fingerprint,
                 seller_store_seq=seller_info.get("seller_store_seq"),
                 seller_store_name=seller_info.get("seller_store_name"),
+                shared_cache=shared if not owns_connection else None,
             )
 
         result_save = save_listing_analysis_result(
@@ -1753,11 +1766,12 @@ def analyze_product_for_watch_rule(job):
             body_text=description,
         )
 
-        connection.commit()
+        if owns_connection:
+            connection.commit()
 
         alert_dispatch_result = None
         created_alert_id = _normalize_optional_int(alert_create_result.get("alert_id"))
-        if alert_create_result.get("created") and created_alert_id is not None:
+        if owns_connection and alert_create_result.get("created") and created_alert_id is not None:
             try:
                 alert_dispatch_result = dispatch_alert_event_immediately(
                     created_alert_id,
@@ -1829,16 +1843,16 @@ def analyze_product_for_watch_rule(job):
             "content_change_fields": content_change_fields,
         }
     except Exception:
-        if connection is not None:
+        if owns_connection and connection is not None:
             try:
                 connection.rollback()
             except Exception:
                 pass
         raise
     finally:
-        if cursor is not None:
+        if owns_connection and cursor is not None:
             cursor.close()
-        if connection is not None and connection.is_connected():
+        if owns_connection and connection is not None and connection.is_connected():
             connection.close()
 
 
@@ -1875,11 +1889,74 @@ def process_analysis_job(job):
         }
 
 
+def process_analysis_group(jobs):
+    """Analyze claimed recipients together and publish their alerts atomically."""
+    if not jobs:
+        return []
+    keys = {(job.get("source"), str(job.get("product_id")), job.get("change_fingerprint")) for job in jobs}
+    if len(keys) != 1:
+        raise ValueError("mixed_analysis_group")
+    connection, cursor = None, None
+    results = []
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        shared = analyze_listing_once(jobs[0], cursor)
+        context = {"connection": connection, "cursor": cursor, "shared": shared, "rules": _load_group_rules(cursor, jobs)}
+        for job in jobs:
+            result = analyze_product_for_watch_rule(job, group_context=context)
+            results.append({"ok": True, "job_id": job["id"], "result": result})
+        ids = [int(job["id"]) for job in jobs]
+        cursor.execute(
+            "UPDATE analysis_jobs SET status = 'done', processed_at = CURRENT_TIMESTAMP, "
+            "updated_at = CURRENT_TIMESTAMP WHERE status = 'running' AND id IN ("
+            + ",".join(["%s"] * len(ids)) + ")", tuple(ids),
+        )
+        mark_seen_product_analyzed(cursor, jobs[0]["product_id"], status="analyzed")
+        # No alert is visible to either dispatcher until every recipient has
+        # been evaluated and all jobs are complete.
+        connection.commit()
+    except Exception as exc:
+        if connection is not None:
+            connection.rollback()
+        for job in jobs:
+            mark_analysis_job_failed(job["id"], str(exc))
+        _mark_seen_product_status(jobs[0].get("product_id"), "analysis_failed")
+        return [{"ok": False, "job_id": job["id"], "reason": str(exc)} for job in jobs]
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
+
+    # Keep the existing notification path. Only listing analysis and rule
+    # evaluation are grouped by this branch; notification batching is out of
+    # scope and remains a per-alert call after the shared transaction commits.
+    for row in results:
+        result = row["result"]
+        alert_id = result.get("alert_event_id") if result.get("alert_created") else None
+        if alert_id is None:
+            continue
+        try:
+            dispatch_result = dispatch_alert_event_immediately(alert_id)
+            if isinstance(dispatch_result, dict):
+                result["alert_dispatch_status"] = _normalize_optional_text(dispatch_result.get("status"))
+                result["alert_dispatch_reason"] = _normalize_optional_text(dispatch_result.get("reason"))
+        except Exception as exc:
+            # The committed pending alert remains available to the existing
+            # notification worker. Delivery failure must not repeat analysis.
+            result["alert_dispatch_status"] = "dispatch_exception"
+            result["alert_dispatch_reason"] = str(exc)
+            print(f"[analysis_pipeline] immediate alert dispatch failed: alert_id={alert_id}, error={exc}")
+    return results
+
+
 def process_pending_analysis_jobs(limit=20):
-    jobs = get_pending_analysis_jobs(limit=limit)
+    """The limit counts listing events, never truncates a recipient group."""
     stats = {
-        "fetched": len(jobs),
-        "fetched_list_count": len(jobs),
+        "fetched": 0,
+        "fetched_list_count": 0,
+        "event_groups": 0,
         "done": 0,
         "skipped": 0,
         "failed": 0,
@@ -1890,45 +1967,28 @@ def process_pending_analysis_jobs(limit=20):
         "results": [],
     }
 
-    for job in jobs:
-        try:
-            result = process_analysis_job(job)
-            stats["results"].append(result)
-            if result.get("skipped"):
-                stats["skipped"] += 1
-            elif result.get("ok"):
-                stats["done"] += 1
-
-                analysis_result = result.get("result")
-                if isinstance(analysis_result, dict):
-                    detail_fetch_performed = bool(analysis_result.get("detail_fetch_performed"))
-                    if detail_fetch_performed:
-                        stats["detail_fetch_count"] += 1
-                        fetch_reason = _normalize_optional_text(analysis_result.get("detail_fetch_reason")) or "unknown"
-                        reason_counts = stats.get("detail_fetch_reason_counts") or {}
-                        reason_counts[fetch_reason] = int(reason_counts.get(fetch_reason, 0)) + 1
-                        stats["detail_fetch_reason_counts"] = reason_counts
-                    else:
-                        stats["detail_skipped_count"] += 1
-                        skip_reason = _normalize_optional_text(analysis_result.get("detail_skipped_reason"))
-                        if skip_reason == "unchanged":
-                            stats["unchanged_detail_skipped_count"] += 1
+    for _ in range(max(0, int(limit))):
+        with claim_pending_analysis_group() as jobs:
+            if not jobs:
+                break
+            stats["event_groups"] += 1
+            stats["fetched"] += len(jobs)
+            stats["fetched_list_count"] += len(jobs)
+            results = process_analysis_group(jobs)
+        stats["results"].extend(results)
+        for result in results:
+            stats["skipped" if result.get("skipped") else "done" if result.get("ok") else "failed"] += 1
+        # Network detail work is measured once per event, not once per user.
+        analysis_result = next((row["result"] for row in results if row.get("result")), None)
+        if analysis_result:
+            if analysis_result.get("detail_fetch_performed"):
+                stats["detail_fetch_count"] += 1
+                reason = analysis_result.get("detail_fetch_reason") or "unknown"
+                counts = stats["detail_fetch_reason_counts"]
+                counts[reason] = counts.get(reason, 0) + 1
             else:
-                stats["failed"] += 1
-        except Exception as exc:
-            job_id = _normalize_optional_int(job.get("id")) if isinstance(job, dict) else None
-            if job_id is not None:
-                try:
-                    mark_analysis_job_failed(job_id, str(exc))
-                except Exception:
-                    pass
-            stats["failed"] += 1
-            stats["results"].append(
-                {
-                    "ok": False,
-                    "job_id": job_id,
-                    "reason": str(exc),
-                }
-            )
+                stats["detail_skipped_count"] += 1
+                if analysis_result.get("detail_skipped_reason") == "unchanged":
+                    stats["unchanged_detail_skipped_count"] += 1
 
     return stats

@@ -23,6 +23,29 @@ class _CapturingModel:
 
 
 class FraudProbabilityServiceTest(unittest.TestCase):
+    def test_group_reuses_common_db_features_but_preserves_personal_discount(self):
+        cache = {}
+        with patch.object(service, "_fetch_first_search_result", return_value={"seller_store_seq": "s1"}) as search, \
+             patch.object(service, "_fetch_latest_activity", return_value={}) as activity, \
+             patch.object(service, "_fetch_latest_profile", return_value={}) as profile, \
+             patch.object(service, "_fetch_seller_history", return_value={}) as history:
+            first = service._build_alert_fraud_features(
+                object(), product_id="p1", store_id="s1", feature_cache=cache,
+                alert_context={"drop_rate_percent": 20, "title": "listing"},
+            )
+            second = service._build_alert_fraud_features(
+                object(), product_id="p1", store_id="s1", feature_cache=cache,
+                alert_context={"drop_rate_percent": 35, "title": "listing"},
+            )
+            for fetch in (search, activity, profile, history):
+                fetch.assert_called_once()
+            self.assertEqual(first["drop_rate_percent"], 20)
+            self.assertEqual(second["drop_rate_percent"], 35)
+            service._build_alert_fraud_features(
+                object(), product_id="p2", store_id="s1", feature_cache=cache,
+            )
+            self.assertEqual(search.call_count, 2)
+
     def test_build_features_includes_v2_text_and_seller_history(self):
         features = service._build_features(
             search_result={

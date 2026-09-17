@@ -626,14 +626,21 @@ def _build_alert_fraud_features(
     product_id: Any,
     store_id: Any = None,
     alert_context: Optional[Dict[str, Any]] = None,
+    feature_cache: Optional[Dict[Any, Any]] = None,
 ) -> Dict[str, Any]:
     normalized_product_id = _normalize_optional_text(product_id)
     if normalized_product_id is None:
         return {}
 
     alert_context = alert_context or {}
-    search_result = _fetch_first_search_result(cursor, normalized_product_id)
     normalized_store_id = _normalize_optional_text(store_id)
+    # This cache lives for one listing-event transaction, never across events.
+    # Only DB inputs are shared: personal discount/risk context stays separate.
+    cache_key = (normalized_product_id, normalized_store_id)
+    cached = feature_cache.get(cache_key) if feature_cache is not None else None
+    if cached is not None:
+        return _build_features(**cached, alert_context=alert_context)
+    search_result = _fetch_first_search_result(cursor, normalized_product_id)
     if normalized_store_id is None:
         normalized_store_id = _normalize_optional_text(search_result.get("seller_store_seq"))
 
@@ -652,18 +659,20 @@ def _build_alert_fraud_features(
             feature_time=feature_time,
         )
 
-    return _build_features(
-        search_result=search_result,
-        activity=activity,
-        profile=profile,
-        seller_history=_fetch_seller_history(
+    common_inputs = {
+        "search_result": search_result,
+        "activity": activity,
+        "profile": profile,
+        "seller_history": _fetch_seller_history(
             cursor,
             store_id=normalized_store_id,
             product_id=normalized_product_id,
             feature_time=feature_time,
         ),
-        alert_context=alert_context,
-    )
+    }
+    if feature_cache is not None:
+        feature_cache[cache_key] = common_inputs
+    return _build_features(**common_inputs, alert_context=alert_context)
 
 
 def _score_features_with_artifact(
@@ -722,6 +731,7 @@ def score_alert_fraud_probability_comparison(
     product_id: Any,
     store_id: Any = None,
     alert_context: Optional[Dict[str, Any]] = None,
+    feature_cache: Optional[Dict[Any, Any]] = None,
 ) -> Dict[str, Any]:
     """Score one alert with the frozen v1/v2 models and the current v3 model."""
     try:
@@ -730,6 +740,7 @@ def score_alert_fraud_probability_comparison(
             product_id=product_id,
             store_id=store_id,
             alert_context=alert_context,
+            feature_cache=feature_cache,
         )
         if not features:
             return {}

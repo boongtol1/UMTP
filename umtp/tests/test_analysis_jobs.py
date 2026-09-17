@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -86,7 +86,8 @@ class AnalysisJobsTest(unittest.TestCase):
         self.assertFalse(result.get("created"))
         self.assertEqual(result.get("job_id"), 7)
         self.assertEqual(result.get("reason"), "duplicate_identity_job")
-        mock_find_identity.assert_called_once_with("boongtol", 1, "1001", None)
+        mock_find_identity.assert_called_once_with("boongtol", 1, "1001", None, ANY)
+        self.assertEqual(len(mock_find_identity.call_args.args[4]), 64)
 
     def test_create_analysis_job_insert(self):
         fake_cursor = _FakeCursor(lastrowid=11)

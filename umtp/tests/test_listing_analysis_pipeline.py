@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from contextlib import nullcontext
 from unittest.mock import patch
 
 
@@ -711,10 +712,10 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
     def test_process_pending_analysis_jobs_counts_skipped(self):
         jobs = [{"id": 11, "product_id": "1002"}]
 
-        with patch("src.listing_analysis_pipeline.get_pending_analysis_jobs", return_value=jobs):
+        with patch("src.listing_analysis_pipeline.claim_pending_analysis_group", side_effect=[nullcontext(jobs), nullcontext([])]):
             with patch(
-                "src.listing_analysis_pipeline.process_analysis_job",
-                return_value={"ok": True, "skipped": True, "job_id": 11, "reason": "job_not_pending"},
+                "src.listing_analysis_pipeline.process_analysis_group",
+                return_value=[{"ok": True, "skipped": True, "job_id": 11, "reason": "job_not_pending"}],
             ):
                 stats = process_pending_analysis_jobs(limit=20)
 
