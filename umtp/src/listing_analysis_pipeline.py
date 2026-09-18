@@ -95,7 +95,7 @@ _MAC_PRODUCT_NAME_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 _TITLE_CHIP_SPEC_PATTERN = re.compile(
-    r"(?<![a-z0-9])m\s*[1-5](?:\s*[-]?\s*(?:pro|max|프로|맥스))?(?![a-z0-9])",
+    r"(?<![a-z0-9])(?:m\s*[1-5](?:\s*[-]?\s*(?:pro|max|프로|맥스))?|a\s*18\s*-?\s*(?:pro|프로))(?![a-z0-9])",
     flags=re.IGNORECASE,
 )
 _TITLE_RAM_SPEC_PATTERN = re.compile(

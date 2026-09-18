@@ -131,6 +131,15 @@ for chip, screen, ram, ssd, price in re.findall(
     MACBOOK_PRO_PRICES[(chip, int(screen), int(ram), int(ssd))] = int(price)
 if not MACBOOK_PRO_PRICES:
     raise ValueError("MacBook Pro fixture requires the fair-price SQL seed")
+MACBOOK_NEO_SEED = Path(__file__).resolve().parents[3] / "umtp/sql/seed_silicon_macbook_neo_fair_prices.sql"
+MACBOOK_NEO_PRICES = {}
+for chip, screen, ram, ssd, price in re.findall(
+        r"\('MacBook Neo', '([^']+)', (\d+), (\d+), (\d+), (\d+)\)",
+        MACBOOK_NEO_SEED.read_text(encoding="utf-8")):
+    UNITS.append(dict(product_type="MacBook Neo", chip=chip, screen_inch=int(screen), ram_gb=int(ram), ssd_gb=int(ssd)))
+    MACBOOK_NEO_PRICES[(chip, int(screen), int(ram), int(ssd))] = int(price)
+if len(MACBOOK_NEO_PRICES) != 2:
+    raise ValueError("MacBook Neo fixture requires the two fair-price SQL seed configurations")
 ALERT = dict(id=101, alert_event_id=101, user_id="parity-fixture-user", title="검증용 맥북 에어 M1",
              product_type="MacBook Air", chip="M1", screen_inch=13, ram_gb=8, ssd_gb=256,
              listing_price_krw=500000, user_market_price_krw=800000, fair_price_krw=800000,
@@ -153,8 +162,10 @@ def reset():
     for index, unit in enumerate(UNITS):
         price = MACBOOK_PRO_PRICES.get(tuple(unit[key] for key in ("chip", "screen_inch", "ram_gb", "ssd_gb")), 800000) \
             if unit["product_type"] == "MacBook Pro" else 800000
-        name = {"MacBook Air": "맥북 에어", "Mac mini": "맥미니", "MacBook Pro": "맥북 프로"}[unit["product_type"]]
-        keyword = f"{name} {unit['chip']}"
+        if unit["product_type"] == "MacBook Neo":
+            price = MACBOOK_NEO_PRICES[tuple(unit[key] for key in ("chip", "screen_inch", "ram_gb", "ssd_gb"))]
+        name = {"MacBook Air": "맥북 에어", "Mac mini": "맥미니", "MacBook Pro": "맥북 프로", "MacBook Neo": "맥북 네오"}[unit["product_type"]]
+        keyword = "맥북 네오" if unit["product_type"] == "MacBook Neo" else f"{name} {unit['chip']}"
         STATE["settings"].append(dict(**unit, id=index + 1, system_fair_price_krw=price,
             user_fair_price_krw=price, effective_fair_price_krw=price, user_alert_drop_rate_percent=20,
             effective_alert_drop_rate_percent=20, effective_target_buy_price_krw=price * 4 // 5,

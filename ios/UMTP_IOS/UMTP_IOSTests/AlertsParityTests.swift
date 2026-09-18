@@ -19,6 +19,15 @@ private final class AlertsURLProtocol: URLProtocol, @unchecked Sendable {
 
 @MainActor
 final class AlertsParityTests: XCTestCase {
+    func testMacBookNeoAlertDisplaysA18ProAndSeedSpecification() throws {
+        let data = Data(#"{"id":101,"product_type":"MacBook Neo","chip":"A18 Pro","screen_inch":13,"ram_gb":8,"ssd_gb":512}"#.utf8)
+        let alert = try JSONDecoder().decode(AlertItem.self, from: data)
+        XCTAssertEqual(alert.displaySpec, "MacBook Neo · A18 Pro · 13인치 · 8GB · 512GB SSD")
+        let rows = Dictionary(uniqueKeysWithValues: alert.detailRows(archive: false))
+        XCTAssertEqual(rows["제품 분류"], "MacBook Neo")
+        XCTAssertEqual(rows["칩"], "A18 Pro")
+    }
+
     func testMacBookProAlertDisplaysCompleteSiliconSpecification() throws {
         let data = Data(#"{"id":101,"product_type":"MacBook Pro","chip":"M5 Max","screen_inch":16,"ram_gb":128,"ssd_gb":8192}"#.utf8)
         let alert = try JSONDecoder().decode(AlertItem.self, from: data)

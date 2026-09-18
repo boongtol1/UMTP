@@ -5,6 +5,50 @@ import XCTest
 final class SettingsParityTests: XCTestCase {
     private let unit = MacUnit(product_type: "MacBook Air", chip: "M2", screen_inch: 13, ram_gb: 16, ssd_gb: 512)
 
+    func testMacBookNeoCatalogAndSeedPricesPreserveOnlyTwoConfigurations() async {
+        let neo = [256, 512].map { ssd -> UserFairPriceItem in
+            var item = UserFairPriceItem(unit: MacUnit(product_type: "MacBook Neo", chip: "A18 Pro", screen_inch: 13, ram_gb: 8, ssd_gb: ssd))
+            item.system_fair_price_krw = ssd == 256 ? 850_000 : 900_000
+            item.recommended_search_keyword = "맥북 네오"
+            return item
+        }
+        let api = SettingsTestAPI(items: Array(neo.reversed()) + [UserFairPriceItem(unit: unit)])
+        let model = SettingsViewModel(api: api)
+        await model.load(userID: "neo-user")
+        XCTAssertEqual(model.products, ["MacBook Air", "MacBook Neo"])
+        XCTAssertEqual(model.chips(product: "MacBook Neo"), ["A18 Pro"])
+        XCTAssertEqual(model.screens(product: "MacBook Neo", chip: "A18 Pro"), [13])
+        XCTAssertEqual(model.units.filter { $0.product_type == "MacBook Neo" }.count, 2)
+        XCTAssertEqual(model.draft(for: neo[0].unit).targetText, "680000")
+        XCTAssertEqual(model.draft(for: neo[1].unit).targetText, "720000")
+        XCTAssertLessThan(MacUnit.chipOrder("A18 Pro"), MacUnit.chipOrder("unknown"))
+        await model.apply(.priority(.fast), scope: SettingsScope(product: "MacBook Neo", chip: nil, screen: nil))
+        XCTAssertEqual(api.requests.count, 2)
+        XCTAssertTrue(api.requests.allSatisfy { $0.product_type == "MacBook Neo" && $0.chip == "A18 Pro" && $0.ram_gb == 8 && $0.priority == "FAST" })
+    }
+
+    func testMacBookNeoSaveKeepsCanonicalChipAndStorage() async throws {
+        let neo = MacUnit(product_type: "MacBook Neo", chip: "A18 Pro", screen_inch: 13, ram_gb: 8, ssd_gb: 512)
+        var item = UserFairPriceItem(unit: neo)
+        item.system_fair_price_krw = 900_000
+        item.recommended_search_keyword = "맥북 네오"
+        let api = SettingsTestAPI(items: [item])
+        let model = SettingsViewModel(api: api)
+        await model.load(userID: "neo-user")
+        model.edit(neo) { $0.enabled = true }
+        let saved = await model.save(neo)
+        XCTAssertTrue(saved)
+        let request = try XCTUnwrap(api.requests.first)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        XCTAssertEqual(body["product_type"] as? String, "MacBook Neo")
+        XCTAssertEqual(body["chip"] as? String, "A18 Pro")
+        XCTAssertEqual(body["screen_inch"] as? Int, 13)
+        XCTAssertEqual(body["ram_gb"] as? Int, 8)
+        XCTAssertEqual(body["ssd_gb"] as? Int, 512)
+        XCTAssertEqual(body["fair_price_krw"] as? Int, 900_000)
+        XCTAssertEqual(body["enabled"] as? Bool, true)
+    }
+
     func testMacBookProCatalogGroupsEverySiliconGenerationAndUsesServerScreenSizes() async {
         let expectedChips = ["M1", "M1 Pro", "M1 Max", "M2", "M2 Pro", "M2 Max",
                              "M3", "M3 Pro", "M3 Max", "M4", "M4 Pro", "M4 Max",

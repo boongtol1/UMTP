@@ -8,12 +8,12 @@ struct MacUnit: Codable, Equatable, Hashable, Identifiable {
     var ssd_gb: Int
     var id: String { "\(product_type)|\(chip)|\(screen_inch)|\(ram_gb)|\(ssd_gb)" }
     static func productOrder(_ value: String) -> Int {
-        ["MacBook Air": 1, "Mac mini": 2, "MacBook Pro": 3][value] ?? 99
+        ["MacBook Air": 1, "Mac mini": 2, "MacBook Pro": 3, "MacBook Neo": 4][value] ?? 99
     }
     static func chipOrder(_ value: String) -> Int {
         let chips = ["M1", "M1 PRO", "M1 MAX", "M2", "M2 PRO", "M2 MAX",
                      "M3", "M3 PRO", "M3 MAX", "M4", "M4 PRO", "M4 MAX",
-                     "M5", "M5 PRO", "M5 MAX"]
+                     "M5", "M5 PRO", "M5 MAX", "A18 PRO"]
         return chips.firstIndex(of: value.uppercased()) ?? 99
     }
 }

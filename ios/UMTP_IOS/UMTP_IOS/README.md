@@ -61,6 +61,10 @@ MacBook Pro 설정 fixture는 저장소의 `umtp/sql/seed_silicon_macbook_pro_fa
 
 2026-09-18 MacBook Pro 확장 검증은 Xcode 27.0 / iOS 26.5 Simulator에서 단위 90개와 설정 UI 5개를 통과했습니다(실패·skip 0). 실제 서비스에 쓰지 않는 loopback fixture의 SQL 시드 276개 조합으로 확인했으며, 배포·실기기·APNs 검증은 포함하지 않습니다.
 
+MacBook Neo도 같은 `제품 → 칩 → 화면 크기 → RAM/SSD` 설정 흐름을 사용합니다. `A18 Pro → 13인치`에서 서버 카탈로그의 8GB/256GB·8GB/512GB만 표시하며, 시장가·알림 기준·활성화·우선순위·일괄 적용을 기존 제품과 같은 방식으로 저장합니다. 알림에도 제품명과 A18 Pro 사양을 표시합니다.
+
+Neo fixture는 `umtp/sql/seed_silicon_macbook_neo_fair_prices.sql`에서 두 사양과 850,000원·900,000원 시장가를 읽습니다. `SettingsFlowUITests/testMacBookNeoSeedCatalogAndSaveReachTheAPI`가 13인치 선택, 두 시장가 표시, 512GB 조건 저장 요청을 검증합니다. 2026-09-18 Xcode 27.0 / iOS 26.5 Simulator에서 단위 93개와 설정 UI 6개가 통과했습니다(실패·skip 0). 운영 서비스·실기기·APNs 테스트는 포함하지 않습니다.
+
 ```sh
 export UMTP_SIMULATOR_ID="사용할 Simulator UUID"
 python3 ios/UMTP_IOS/TestsSupport/parity_server.py

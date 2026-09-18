@@ -58,6 +58,8 @@ def _canonical_chip(chip):
         return None
 
     lowered_compact = normalized_chip.lower().replace(" ", "")
+    if lowered_compact == "a18pro":
+        return "A18 Pro"
     match = re.fullmatch(r"m([1-5])(pro|max)", lowered_compact)
     if match:
         return f"M{match.group(1)} {match.group(2).title()}"
@@ -92,6 +94,9 @@ def build_default_keyword_for_watch_rule(rule):
     if product_type == "MacBook Pro" and compact_chip:
         return normalize_search_keyword(f"{compact_chip} 맥북프로")
 
+    if product_type == "MacBook Neo":
+        return "맥북 네오"
+
     if product_type == "Mac mini" and compact_chip:
         return normalize_search_keyword(f"{compact_chip} 맥미니")
 
@@ -120,8 +125,13 @@ def build_recommended_keywords_for_spec(product_type, chip, ram_gb=None, ssd_gb=
 
     keywords = []
 
+    if normalized_product_type == "MacBook Neo":
+        keywords.append("맥북 네오")
+        if normalized_chip:
+            keywords.extend((f"맥북 네오 {normalized_chip}", f"MacBook Neo {normalized_chip}"))
+
     if normalized_product_type in ("MacBook Air", "MacBook Pro") and normalized_chip and compact_chip:
-        product_name = "맥북프로" if normalized_product_type == "MacBook Pro" else "맥북에어"
+        product_name = {"MacBook Air": "맥북에어", "MacBook Pro": "맥북프로"}[normalized_product_type]
         keywords.append(f"{compact_chip} {product_name}")
         keywords.append(f"{product_name} {normalized_chip}")
         keywords.append(f"맥북 {normalized_chip}")
