@@ -35,6 +35,7 @@ MacBook Neo 회귀 검증: `python3 -m unittest discover -s umtp/tests -p '*macb
 - `sql/seed_silicon_imac_fair_prices.sql`의 M1·M3·M4, 24인치, RAM/SSD 32개 조합을 기존 설정·분석·알림 흐름에 추가합니다. M2·Intel·iMac Pro와 시드에 없는 옵션은 제외합니다. 23.5인치 표기는 24인치로 정규화하며, 화면의 24와 RAM 24GB를 구분합니다.
 - `/silicon-mac-units`, 호환 경로 `/macbook-air-units`, `/user-fair-prices`에서 노출됩니다. 기본 검색어는 `m1 아이맥` 형식이며 신규 조건은 감시 OFF, 사용자 가격·조건은 시스템 기본값보다 우선합니다.
 - 기본 검색어를 사용하는 아이맥 조건은 칩별로 `m1 아이맥`과 `imac m1`처럼 한글·영문 검색을 각각 실행합니다. 양쪽에서 같은 게시글이 나오면 중고나라 상품 ID와 설정 ID로 합쳐 한 번만 분석하며, 사용자가 직접 입력한 검색어는 별칭을 추가하지 않고 그대로 사용합니다.
+- 최초 polling과 후속 본문 재조회는 같은 검색어 확장 함수를 사용합니다. 영어 검색으로만 발견한 아이맥 글도 본문 변경 시 원래 사용자 설정에 연결해 다시 분석합니다. 맥북 프로·네오·맥 스튜디오 및 기존 에어·미니도 이 공통 연결 경로를 사용하며, 활성 여부·설정 저장시각·중복 방지 조건은 유지합니다. 이 수정 배포 시 `umtp-content-refresh`도 새 이미지로 재생성해야 합니다.
 - 공정가 초기 적용은 `umtp`에서 `mysql -u <DB_USER> -p < sql/seed_silicon_imac_fair_prices.sql`로 실행합니다. 시드는 같은 사양의 시스템 공정가를 갱신하므로 수동 수정한 가격이 있으면 적용 전에 확인하세요. API와 polling/analysis/notification worker를 같은 버전으로 반영해야 합니다.
 - iPhone은 `iMac → 칩 → 24인치 → RAM/SSD` 순서로 기존과 같은 개별·일괄 설정을 사용하고, 텔레그램은 제품·칩·화면·RAM·SSD·가격을 기존 형식으로 표시합니다.
 

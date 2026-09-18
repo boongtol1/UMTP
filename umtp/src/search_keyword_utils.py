@@ -126,6 +126,35 @@ def build_default_keyword_for_watch_rule(rule):
     return None
 
 
+def polling_search_keywords_for_rule(rule):
+    """Return the same effective queries for initial search and later refresh.
+
+    Custom keywords are authoritative. Only the default iMac query expands
+    to its English alias; all other products keep their saved search keyword.
+    """
+    if not isinstance(rule, dict):
+        return []
+    saved_keyword = normalize_search_keyword(rule.get("search_keyword"))
+    if not saved_keyword:
+        return []
+    if rule.get("product_type") != "iMac":
+        return [saved_keyword]
+
+    default_keyword = build_default_keyword_for_watch_rule(rule)
+    if not default_keyword or saved_keyword.lower() != default_keyword.lower():
+        return [saved_keyword]
+
+    recommended = build_recommended_keywords_for_spec(
+        "iMac", rule.get("chip"),
+        ram_gb=rule.get("ram_gb"), ssd_gb=rule.get("ssd_gb"),
+    )
+    english_alias = next(
+        (keyword for keyword in recommended if keyword.lower().startswith("imac ")),
+        None,
+    )
+    return dedupe_keywords_keep_order([saved_keyword, english_alias])
+
+
 def build_recommended_keywords_for_spec(product_type, chip, ram_gb=None, ssd_gb=None):
     normalized_product_type = _normalize_product_type(product_type)
     normalized_chip = _canonical_chip(chip)

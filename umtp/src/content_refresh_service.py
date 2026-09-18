@@ -14,6 +14,7 @@ try:
         load_latest_search_result,
         persist_latest_search_result_enrichment,
     )
+    from src.search_keyword_utils import normalize_search_keyword, polling_search_keywords_for_rule
 except ModuleNotFoundError:
     from analysis_jobs import create_analysis_jobs_for_rules
     from db import get_connection
@@ -27,6 +28,7 @@ except ModuleNotFoundError:
         load_latest_search_result,
         persist_latest_search_result_enrichment,
     )
+    from search_keyword_utils import normalize_search_keyword, polling_search_keywords_for_rule
 
 
 FRESH_INTERVAL_MINUTES = int(os.getenv("CONTENT_REFRESH_FRESH_MINUTES", "3"))
@@ -56,13 +58,29 @@ def has_pending_analysis_jobs(cursor):
 
 
 def find_due_content_candidate(cursor, *, now=None):
+    cursor.execute(
+        """
+        SELECT DISTINCT product_type, chip, search_keyword
+        FROM user_fair_prices
+        WHERE enabled = TRUE
+          AND last_poll_requested_at IS NOT NULL
+          AND COALESCE(TRIM(search_keyword), '') <> ''
+        """
+    )
+    keywords = set()
+    for row in cursor.fetchall() or []:
+        rule = row if isinstance(row, dict) else dict(zip(("product_type", "chip", "search_keyword"), row))
+        keywords.update(keyword.lower() for keyword in polling_search_keywords_for_rule(rule))
+    if not keywords:
+        return None
+
     current = now or datetime.now()
     fresh_cutoff = current - timedelta(minutes=max(1, FRESH_INTERVAL_MINUTES))
     recent_cutoff = current - timedelta(minutes=max(1, RECENT_INTERVAL_MINUTES))
     older_cutoff = current - timedelta(minutes=max(1, OLDER_INTERVAL_MINUTES))
     lookback_cutoff = current - timedelta(days=max(1, LOOKBACK_DAYS))
     cursor.execute(
-        """
+        f"""
         SELECT
             p.seq AS product_id,
             p.search_word,
@@ -83,11 +101,9 @@ def find_due_content_candidate(cursor, *, now=None):
               SELECT 1
               FROM search_results sr
               INNER JOIN search_queries sq ON sq.id = sr.search_query_id
-              INNER JOIN user_fair_prices ufp
-                ON LOWER(TRIM(ufp.search_keyword)) = LOWER(TRIM(sq.normalized_keyword))
               WHERE sr.product_id = CAST(p.seq AS CHAR)
-                AND ufp.enabled = TRUE
-                AND ufp.last_poll_requested_at IS NOT NULL
+                AND sq.source = 'joongna'
+                AND LOWER(TRIM(sq.normalized_keyword)) IN ({', '.join(['%s'] * len(keywords))})
           )
           AND (
               p.last_content_checked_at IS NULL
@@ -107,6 +123,7 @@ def find_due_content_candidate(cursor, *, now=None):
         """,
         (
             lookback_cutoff,
+            *sorted(keywords),
             current, fresh_cutoff,
             current, current, recent_cutoff,
             current, older_cutoff,
@@ -118,45 +135,58 @@ def find_due_content_candidate(cursor, *, now=None):
 def load_active_targets_for_product(cursor, product_id, sort_date):
     cursor.execute(
         """
-        SELECT DISTINCT
-            ufp.id AS setting_id,
-            ufp.user_id,
-            ufp.search_keyword,
-            ufp.saved_at
+        SELECT DISTINCT sq.normalized_keyword
         FROM search_results sr
         INNER JOIN search_queries sq ON sq.id = sr.search_query_id
-        INNER JOIN user_fair_prices ufp
-          ON LOWER(TRIM(ufp.search_keyword)) = LOWER(TRIM(sq.normalized_keyword))
         WHERE sr.product_id = %s
-          AND ufp.enabled = TRUE
-          AND ufp.last_poll_requested_at IS NOT NULL
-          AND (%s IS NULL OR ufp.saved_at IS NULL OR ufp.saved_at <= %s)
-        ORDER BY ufp.id
+          AND sq.source = 'joongna'
         """,
-        (str(product_id), sort_date, sort_date),
+        (str(product_id),),
+    )
+    observed_keywords = {
+        normalize_search_keyword(row.get("normalized_keyword") if isinstance(row, dict) else row[0]).lower()
+        for row in cursor.fetchall() or []
+    }
+    if not observed_keywords:
+        return []
+
+    cursor.execute(
+        """
+        SELECT DISTINCT
+            id AS setting_id,
+            user_id,
+            search_keyword,
+            saved_at,
+            product_type,
+            chip
+        FROM user_fair_prices
+        WHERE enabled = TRUE
+          AND last_poll_requested_at IS NOT NULL
+          AND COALESCE(TRIM(search_keyword), '') <> ''
+          AND (%s IS NULL OR saved_at IS NULL OR saved_at <= %s)
+        ORDER BY id
+        """,
+        (sort_date, sort_date),
     )
     rows = cursor.fetchall() or []
     targets = []
     for row in rows:
-        if isinstance(row, dict):
-            setting_id = row.get("setting_id")
-            user_id = row.get("user_id")
-            search_keyword = row.get("search_keyword")
-            saved_at = row.get("saved_at")
-        else:
-            setting_id = row[0] if len(row) > 0 else None
-            user_id = row[1] if len(row) > 1 else None
-            search_keyword = row[2] if len(row) > 2 else None
-            saved_at = row[3] if len(row) > 3 else None
+        rule = row if isinstance(row, dict) else dict(zip(
+            ("setting_id", "user_id", "search_keyword", "saved_at", "product_type", "chip"), row
+        ))
+        setting_id = rule.get("setting_id")
+        user_id = rule.get("user_id")
         if setting_id is None or not user_id:
+            continue
+        if not any(keyword.lower() in observed_keywords for keyword in polling_search_keywords_for_rule(rule)):
             continue
         targets.append(
             {
                 "setting_id": setting_id,
                 "rule_id": setting_id,
                 "user_id": user_id,
-                "search_keyword": search_keyword,
-                "saved_at": saved_at,
+                "search_keyword": rule.get("search_keyword"),
+                "saved_at": rule.get("saved_at"),
             }
         )
     return targets

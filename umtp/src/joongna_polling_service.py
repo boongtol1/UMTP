@@ -19,10 +19,9 @@ try:
     )
     from src.listing_page_parser import fetch_html
     from src.search_keyword_utils import (
-        build_default_keyword_for_watch_rule,
-        build_recommended_keywords_for_spec,
         dedupe_keywords_keep_order,
         normalize_search_keyword,
+        polling_search_keywords_for_rule,
     )
     from src.user_settings_service import (
         get_due_user_fair_price_polling_targets as get_due_watch_rules,
@@ -42,10 +41,9 @@ except ModuleNotFoundError:
     )
     from listing_page_parser import fetch_html
     from search_keyword_utils import (
-        build_default_keyword_for_watch_rule,
-        build_recommended_keywords_for_spec,
         dedupe_keywords_keep_order,
         normalize_search_keyword,
+        polling_search_keywords_for_rule,
     )
     from user_settings_service import (
         get_due_user_fair_price_polling_targets as get_due_watch_rules,
@@ -1849,29 +1847,7 @@ def select_matches_for_analysis(matches, *, cursor=None, stats=None):
 
 
 def _polling_search_keywords_for_rule(rule):
-    saved_keyword = normalize_search_keyword((rule or {}).get("search_keyword"))
-    if not saved_keyword:
-        return []
-
-    if (rule or {}).get("product_type") != "iMac":
-        return [saved_keyword]
-
-    default_keyword = build_default_keyword_for_watch_rule(rule)
-    if not default_keyword or saved_keyword.lower() != default_keyword.lower():
-        # A user-entered keyword remains authoritative.
-        return [saved_keyword]
-
-    recommended = build_recommended_keywords_for_spec(
-        "iMac",
-        (rule or {}).get("chip"),
-        ram_gb=(rule or {}).get("ram_gb"),
-        ssd_gb=(rule or {}).get("ssd_gb"),
-    )
-    english_alias = next(
-        (keyword for keyword in recommended if keyword.lower().startswith("imac ")),
-        None,
-    )
-    return dedupe_keywords_keep_order([saved_keyword, english_alias])
+    return polling_search_keywords_for_rule(rule)
 
 
 def _build_keyword_targets_from_user_fair_prices(watch_rules):
