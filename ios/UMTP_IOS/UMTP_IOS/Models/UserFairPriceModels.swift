@@ -183,6 +183,19 @@ enum SettingsInputError: LocalizedError {
     }
 }
 
+enum SettingsSearchKeywordPolicy {
+    static func automaticEnglishAlias(for unit: MacUnit, keyword: String) -> String? {
+        guard unit.product_type == "iMac" else { return nil }
+        let chip = unit.chip.split(whereSeparator: \.isWhitespace).joined().lowercased()
+        guard !chip.isEmpty else { return nil }
+        let normalized = keyword.split(whereSeparator: \.isWhitespace).joined(separator: " ").lowercased()
+        // Mirror polling_search_keywords_for_rule on the server. An empty draft
+        // is saved without an override, so the server uses the default keyword.
+        guard normalized.isEmpty || normalized == "\(chip) 아이맥" else { return nil }
+        return "imac \(chip)"
+    }
+}
+
 enum SettingsPriceMath {
     static func gap(market: Int?, target: Int?) -> Double? {
         guard let market, market > 0, let target else { return nil }

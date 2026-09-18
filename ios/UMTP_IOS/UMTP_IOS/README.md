@@ -63,6 +63,10 @@ MacBook Pro와 Mac Studio 설정 fixture는 저장소의 각 `seed_silicon_*_fai
 
 iMac fixture는 `umtp/sql/seed_silicon_imac_fair_prices.sql`의 32개 사양·공정가를 그대로 읽고 신규 조건은 감시 OFF로 시작합니다. `SettingsParityTests`는 제품/칩/24인치 그룹, 시드 가격·저장 요청, 제품/칩별 일괄 설정 범위를 검증하고 `AlertsParityTests`는 알림 사양 표시를 확인합니다. `SettingsFlowUITests/testIMacSeedCatalogAndIndividualSaveReachTheAPI`는 `iMac → M4 → 24인치` 탐색과 150만원 기본 시장가, 개별 저장 API 요청을 검증합니다.
 
+iMac 커스텀 검색어 입력란은 선택한 칩의 기본 검색어(`m1 아이맥`, `m3 아이맥`, `m4 아이맥`)와 같으면 알림을 켜고 저장할 때 `imac m1` 등 영어 검색어도 함께 자동 검색된다고 안내합니다. 대소문자·연속 공백은 서버와 같이 정리해 비교하고, 빈 입력은 저장 시 기본 검색어가 적용되므로 같은 안내를 표시합니다. `아이맥 M1`, `imac m1`, `m1 아이맥 16gb` 등 다른 커스텀 검색어에는 별칭이 추가되지 않으므로 안내를 숨깁니다. 입력 중 실시간으로 안내만 변경하며 실제 저장 검색어를 바꾸거나 별도의 검색 요청을 보내지 않습니다.
+
+2026-09-18 영어 검색 안내 검증: Xcode 27.0 / iOS 26.5 전용 Simulator와 loopback fixture에서 전체 단위 104개와 신규 설정 UI 1개가 실패·skip 없이 통과했습니다. 기본어·빈 입력의 안내 표시, 다른 커스텀 검색어의 안내 숨김, 저장 요청 검색어 유지 및 화면 문구 표시를 확인했습니다. 서버·운영 DB·실기기는 변경하지 않았습니다.
+
 2026-09-18 iMac 확장 검증: Xcode 27.0 / iOS 26.5 Simulator에서 전체 설정 UI 6개가 실패 없이 통과했습니다. 단위 테스트의 `effective_search_keyword` fixture 누락을 실제 API 응답에 맞춰 수정한 뒤 전체 단위 94개를 재실행해 실패·skip 없이 통과했습니다. 이 수정은 테스트 데이터에만 적용했고 앱 코드와 UI 테스트는 바꾸지 않았습니다. 서버는 417개 통과·DB 의존 15개 skip이며 DB/ML 의존 모듈 2개는 제외했습니다. 시드 32개 사양 일치와 기존 제품을 포함한 파싱 표현 1,407건도 확인했습니다. 검증은 loopback fixture와 테스트 환경에서 수행했으며 운영 DB 적용·배포·실기기·APNs 검증은 포함하지 않습니다.
 
 2026-09-18 MacBook Pro 확장 검증은 Xcode 27.0 / iOS 26.5 Simulator에서 단위 90개와 설정 UI 5개를 통과했습니다(실패·skip 0). 실제 서비스에 쓰지 않는 loopback fixture의 SQL 시드 276개 조합으로 확인했으며, 배포·실기기·APNs 검증은 포함하지 않습니다.

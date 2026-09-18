@@ -341,6 +341,13 @@ private struct SettingsUnitCard: View {
             TextField(item?.recommended_search_keyword ?? "예: \(unit.chip) \(unit.product_type)", text: binding(\.keyword))
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("settings.keyword.\(unit.id)")
+            if let alias = SettingsSearchKeywordPolicy.automaticEnglishAlias(for: unit, keyword: draft.keyword) {
+                Text("알림을 켜고 저장하면 영어 검색어 “\(alias)”도 함께 자동 검색해요.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("settings.searchAlias.\(unit.id)")
+            }
             Text("알림 속도").font(.caption).foregroundStyle(.secondary)
             Picker("알림 속도", selection: binding(\.priority)) {
                 ForEach(WatchPriority.allCases, id: \.self) { Text($0.label).tag($0) }

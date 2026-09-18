@@ -99,6 +99,50 @@ final class SettingsParityTests: XCTestCase {
         XCTAssertEqual(body["priority"] as? String, "FAST")
     }
 
+    func testIMacAutomaticEnglishAliasMatchesDefaultKeywordsAcrossChips() {
+        for chip in ["M1", "M3", "M4"] {
+            let imac = MacUnit(product_type: "iMac", chip: chip, screen_inch: 24, ram_gb: 8, ssd_gb: 256)
+            for keyword in ["\(chip) 아이맥", "\(chip.lowercased()) 아이맥", "  \(chip)   아이맥  ", "\t\(chip)\n아이맥\t", "", " \t\n "] {
+                XCTAssertEqual(SettingsSearchKeywordPolicy.automaticEnglishAlias(for: imac, keyword: keyword),
+                               "imac \(chip.lowercased())", "chip=\(chip), keyword=\(keyword.debugDescription)")
+            }
+        }
+        let spacedChip = MacUnit(product_type: "iMac", chip: " M 1 ", screen_inch: 24, ram_gb: 8, ssd_gb: 256)
+        XCTAssertEqual(SettingsSearchKeywordPolicy.automaticEnglishAlias(for: spacedChip, keyword: "M1 아이맥"), "imac m1")
+    }
+
+    func testIMacAutomaticEnglishAliasExcludesCustomKeywordsAndOtherProducts() {
+        let imac = MacUnit(product_type: "iMac", chip: "M1", screen_inch: 24, ram_gb: 8, ssd_gb: 256)
+        for keyword in ["아이맥 M1", "imac m1", "m1 imac", "m1 아이맥 작업용", "m3 아이맥", "m1아이맥"] {
+            XCTAssertNil(SettingsSearchKeywordPolicy.automaticEnglishAlias(for: imac, keyword: keyword), keyword)
+        }
+        for product in ["MacBook Air", "Mac mini", "MacBook Pro", "MacBook Neo", "Mac Studio"] {
+            let other = MacUnit(product_type: product, chip: "M1", screen_inch: 13, ram_gb: 8, ssd_gb: 256)
+            for keyword in ["", "m1 아이맥"] {
+                XCTAssertNil(SettingsSearchKeywordPolicy.automaticEnglishAlias(for: other, keyword: keyword), product)
+            }
+        }
+        for chip in ["", " \t\n "] {
+            let invalid = MacUnit(product_type: "iMac", chip: chip, screen_inch: 24, ram_gb: 8, ssd_gb: 256)
+            XCTAssertNil(SettingsSearchKeywordPolicy.automaticEnglishAlias(for: invalid, keyword: ""))
+            XCTAssertNil(SettingsSearchKeywordPolicy.automaticEnglishAlias(for: invalid, keyword: "아이맥"))
+        }
+    }
+
+    func testIMacAutomaticEnglishAliasDoesNotChangeSavedKeyword() throws {
+        let imac = MacUnit(product_type: "iMac", chip: "M1", screen_inch: 24, ram_gb: 8, ssd_gb: 256)
+        var item = UserFairPriceItem(unit: imac)
+        item.system_fair_price_krw = 1_000_000
+        var draft = SettingDraft(setting: item)
+        draft.keyword = "  M1   아이맥  "
+        XCTAssertEqual(SettingsSearchKeywordPolicy.automaticEnglishAlias(for: imac, keyword: draft.keyword), "imac m1")
+        XCTAssertEqual(try draft.request(userID: "imac-user", unit: imac).search_keyword, "M1   아이맥")
+        XCTAssertEqual(draft.keyword, "  M1   아이맥  ")
+        draft.keyword = " \t\n "
+        XCTAssertEqual(SettingsSearchKeywordPolicy.automaticEnglishAlias(for: imac, keyword: draft.keyword), "imac m1")
+        XCTAssertNil(try draft.request(userID: "imac-user", unit: imac).search_keyword)
+    }
+
     func testIMacBulkChangesRespectChipAndProductScope() async {
         let units = [MacUnit(product_type: "iMac", chip: "M1", screen_inch: 24, ram_gb: 8, ssd_gb: 256),
                      MacUnit(product_type: "iMac", chip: "M4", screen_inch: 24, ram_gb: 16, ssd_gb: 256), unit]

@@ -111,6 +111,65 @@ final class SettingsFlowUITests: XCTestCase {
         XCTAssertEqual(body["enabled"] as? Bool, false)
     }
 
+    func testIMacAutomaticEnglishAliasHintTracksKeywordWithoutChangingSavedValue() async throws {
+        try await resetFixture()
+        let app = launchFixtureApp()
+        app.tabBars.buttons["설정"].tap()
+        let imac = app.buttons["iMac"]
+        XCTAssertTrue(imac.waitForExistence(timeout: 10))
+        imac.tap()
+        XCTAssertTrue(app.buttons["M1"].waitForExistence(timeout: 5))
+        app.buttons["M1"].tap()
+        XCTAssertTrue(app.buttons["24인치"].waitForExistence(timeout: 5))
+        app.buttons["24인치"].tap()
+        XCTAssertTrue(app.navigationBars["M1 iMac 24인치 설정"].waitForExistence(timeout: 5))
+        let key = "iMac|M1|24|8|256"
+        let keyword = app.textFields["settings.keyword.\(key)"]
+        let hint = app.staticTexts["settings.searchAlias.\(key)"]
+        scrollTo(keyword, in: app)
+        XCTAssertEqual(keyword.value as? String, "아이맥 M1")
+        XCTAssertFalse(hint.exists)
+
+        replace(keyword, with: "M1 아이맥")
+        dismissKeyboard(app)
+        XCTAssertTrue(hint.waitForExistence(timeout: 5))
+        XCTAssertEqual(hint.label, "알림을 켜고 저장하면 영어 검색어 “imac m1”도 함께 자동 검색해요.")
+        scrollTo(hint, in: app)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "imac-automatic-english-search"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        scrollTo(keyword, in: app, towardTop: true)
+        replace(keyword, with: "M1 아이맥 작업용")
+        dismissKeyboard(app)
+        XCTAssertFalse(hint.exists)
+        replace(keyword, with: "")
+        dismissKeyboard(app)
+        XCTAssertTrue(hint.waitForExistence(timeout: 5))
+        replace(keyword, with: "M1   아이맥")
+        dismissKeyboard(app)
+        XCTAssertTrue(hint.waitForExistence(timeout: 5))
+
+        let beforeSave = try await events()
+        XCTAssertFalse(beforeSave.contains { $0["path"] as? String == "/user-fair-prices/upsert" })
+        let save = app.buttons["settings.save.\(key)"]
+        scrollTo(save, in: app)
+        save.tap()
+        XCTAssertTrue(app.alerts["설정"].waitForExistence(timeout: 10))
+        app.alerts.buttons["확인"].tap()
+        let requests = try await events()
+        let saved = requests.filter { $0["path"] as? String == "/user-fair-prices/upsert" }
+        XCTAssertEqual(saved.count, 1)
+        let body = try XCTUnwrap(saved.first?["body"] as? [String: Any])
+        XCTAssertEqual(body["product_type"] as? String, "iMac")
+        XCTAssertEqual(body["chip"] as? String, "M1")
+        XCTAssertEqual(body["screen_inch"] as? Int, 24)
+        XCTAssertEqual(body["ram_gb"] as? Int, 8)
+        XCTAssertEqual(body["ssd_gb"] as? Int, 256)
+        XCTAssertEqual(body["search_keyword"] as? String, "M1   아이맥")
+    }
+
     func testMacStudioUltraCatalogHasNoScreenSelection() async throws {
         try await resetFixture()
         let app = launchFixtureApp()
