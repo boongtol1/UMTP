@@ -70,6 +70,8 @@ class SpecParserIMacTest(unittest.TestCase):
             "모델명": "iMac M4 23.5인치", "CPU종류": "M4", "램 용량": "32GB", "SSD용량": "2TB",
         })
         self.assert_spec("아이맥 M1 판매", "M1", 16, 512, body_text="24인치 램16 SSD 512")
+        self.assert_spec("iMac M4 24인치 램 용량 24GB SSD 용량 512GB", "M4", 24, 512)
+        self.assert_spec("iMac M4 24인치 memory 24GB storage 512GB", "M4", 24, 512)
 
     def test_unsupported_models_and_unseeded_options_are_rejected(self):
         for text in (
@@ -80,15 +82,24 @@ class SpecParserIMacTest(unittest.TestCase):
             "iMac M5 24인치 16GB 256GB", "iMac M10 24인치 8GB 256GB",
             "iMac M1 24인치 24GB 256GB", "iMac M4 24인치 8GB 256GB",
             "iMac M3 24인치 16GB 4TB", "iMac Pro M1 24인치 8GB 256GB",
+            "iMac M4 24인치 RAM12GB SSD256GB", "iMac M4 24인치 RAM16GB SSD128GB",
+            "iMac M4 24인치 12GB 256GB", "iMac M3 24인치 16GB 1.5TB",
+            "iMac M4 24인치 RAM12 SSD256", "iMac M3 24인치 16GB 250GB",
         ):
             with self.subTest(text=text):
                 self.assertFalse(parse_listing_title(text)["parse_success"])
+
+    def test_unseeded_structured_capacity_cannot_fall_back_to_base(self):
+        for ram, ssd in (("12", "256"), ("16", "128"), ("12GB", "256GB"), ("16", "1.5TB")):
+            parsed = parse_listing_text("아이맥 M4", self_check_fields={"램 용량": ram, "SSD용량": ssd})
+            self.assertFalse(parsed["parse_success"], parsed)
 
     def test_mixed_products_chips_and_displays_are_rejected(self):
         for text in (
             "아이맥 맥미니 M1 24인치 8GB 256GB", "아이맥 맥북에어 M1 24인치 8GB 256GB",
             "아이맥 맥북프로 M1 24인치 8GB 256GB", "iMac M1 M3 24인치 8GB 256GB",
             "iMac M1 24인치 27인치 8GB 256GB",
+            "iMac Mac Studio M1 24인치 8GB 256GB", "아이맥 맥북네오 M1 24인치 8GB 256GB",
         ):
             with self.subTest(text=text):
                 self.assertFalse(parse_listing_title(text)["parse_success"])
