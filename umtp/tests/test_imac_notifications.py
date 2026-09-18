@@ -65,17 +65,22 @@ class IMacNotificationsTest(unittest.TestCase):
 
     def test_each_chip_dispatches_same_telegram_format_with_complete_specs(self):
         for chip, ram, ssd in (("M1", 8, 256), ("M3", 24, 1024), ("M4", 32, 2048)):
-            result, create_alert, send = self.analyze(f"아이맥 {chip} 24인치 {ram}GB {ssd}GB", 1000000)
-            self.assertTrue(result["alert_created"], result)
-            self.assertEqual(result["alert_dispatch_status"], "sent")
-            self.assertEqual(create_alert.call_args.kwargs["parsed_spec"]["product_type"], "iMac")
-            send.assert_called_once()
-            message = send.call_args.args[0]
-            for field in ("제품 분류\niMac", f"칩\n{chip}", "화면 크기\n24인치", f"RAM\n{ram}GB", f"SSD\n{ssd}GB",
-                          "등록 가격\n1,000,000원", "내가 생각한 시장가\n1,500,000원", "알림 기준 가격\n1,200,000원"):
-                self.assertIn(field, message)
-            self.assertEqual(send.call_args.kwargs["chat_id"], "123456")
-            self.assertFalse(send.call_args.kwargs["allow_global_fallback"])
+            for title in (
+                f"아이맥 {chip} 24인치 {ram}GB {ssd}GB",
+                f"iMac {chip} 24-inch {ram}GB {ssd}GB",
+            ):
+                with self.subTest(chip=chip, title=title):
+                    result, create_alert, send = self.analyze(title, 1000000)
+                    self.assertTrue(result["alert_created"], result)
+                    self.assertEqual(result["alert_dispatch_status"], "sent")
+                    self.assertEqual(create_alert.call_args.kwargs["parsed_spec"]["product_type"], "iMac")
+                    send.assert_called_once()
+                    message = send.call_args.args[0]
+                    for field in ("제품 분류\niMac", f"칩\n{chip}", "화면 크기\n24인치", f"RAM\n{ram}GB", f"SSD\n{ssd}GB",
+                                  "등록 가격\n1,000,000원", "내가 생각한 시장가\n1,500,000원", "알림 기준 가격\n1,200,000원"):
+                        self.assertIn(field, message)
+                    self.assertEqual(send.call_args.kwargs["chat_id"], "123456")
+                    self.assertFalse(send.call_args.kwargs["allow_global_fallback"])
 
     def test_price_threshold_and_disabled_settings_prevent_delivery(self):
         for price, enabled, reason in ((1300000, True, "drop_rate_below_threshold"), (1000000, False, "user_target_disabled")):
