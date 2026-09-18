@@ -165,7 +165,7 @@ def reset():
         if unit["product_type"] == "MacBook Neo":
             price = MACBOOK_NEO_PRICES[tuple(unit[key] for key in ("chip", "screen_inch", "ram_gb", "ssd_gb"))]
         name = {"MacBook Air": "맥북 에어", "Mac mini": "맥미니", "MacBook Pro": "맥북 프로", "MacBook Neo": "맥북 네오"}[unit["product_type"]]
-        keyword = f"{name} {unit['chip']}"
+        keyword = "맥북 네오" if unit["product_type"] == "MacBook Neo" else f"{name} {unit['chip']}"
         STATE["settings"].append(dict(**unit, id=index + 1, system_fair_price_krw=price,
             user_fair_price_krw=price, effective_fair_price_krw=price, user_alert_drop_rate_percent=20,
             effective_alert_drop_rate_percent=20, effective_target_buy_price_krw=price * 4 // 5,

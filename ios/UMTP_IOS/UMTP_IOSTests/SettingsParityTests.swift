@@ -9,7 +9,7 @@ final class SettingsParityTests: XCTestCase {
         let neo = [256, 512].map { ssd -> UserFairPriceItem in
             var item = UserFairPriceItem(unit: MacUnit(product_type: "MacBook Neo", chip: "A18 Pro", screen_inch: 13, ram_gb: 8, ssd_gb: ssd))
             item.system_fair_price_krw = ssd == 256 ? 850_000 : 900_000
-            item.recommended_search_keyword = "a18pro 맥북네오"
+            item.recommended_search_keyword = "맥북 네오"
             return item
         }
         let api = SettingsTestAPI(items: Array(neo.reversed()) + [UserFairPriceItem(unit: unit)])
@@ -31,7 +31,7 @@ final class SettingsParityTests: XCTestCase {
         let neo = MacUnit(product_type: "MacBook Neo", chip: "A18 Pro", screen_inch: 13, ram_gb: 8, ssd_gb: 512)
         var item = UserFairPriceItem(unit: neo)
         item.system_fair_price_krw = 900_000
-        item.recommended_search_keyword = "a18pro 맥북네오"
+        item.recommended_search_keyword = "맥북 네오"
         let api = SettingsTestAPI(items: [item])
         let model = SettingsViewModel(api: api)
         await model.load(userID: "neo-user")

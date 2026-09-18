@@ -44,7 +44,7 @@ class MacBookNeoSettingsTest(unittest.TestCase):
         self.assertEqual([item["system_fair_price_krw"] for item in neo], [850000, 900000])
         self.assertEqual([item["effective_target_buy_price_krw"] for item in neo], [680000, 720000])
         self.assertTrue(all(not item["enabled"] and not item["has_user_override"] for item in neo))
-        self.assertTrue(all(item["recommended_search_keyword"] == "a18pro 맥북네오" for item in neo))
+        self.assertTrue(all(item["recommended_search_keyword"] == "맥북 네오" for item in neo))
         self.assertTrue(all("MacBook Neo" in params for _, params in cursor.executed))
 
     def test_override_wins_over_seed_and_save_normalizes_a18_pro(self):
@@ -72,7 +72,7 @@ class MacBookNeoSettingsTest(unittest.TestCase):
                 self.assertTrue(connection.committed)
                 insert = next(params for query, params in cursor.executed if query.startswith("insert into user_fair_prices"))
                 self.assertEqual(insert[1:6], unit_key(row))
-                self.assertEqual(insert[13], "a18pro 맥북네오")
+                self.assertEqual(insert[13], "맥북 네오")
 
     def test_invalid_specs_reject_before_database_access(self):
         with patch.object(settings, "get_connection") as connection:
@@ -106,11 +106,15 @@ class MacBookNeoSettingsTest(unittest.TestCase):
         self.assertTrue(all(params[11] is False for params in inserts))
 
     def test_keywords_keep_korean_product_and_canonical_chip(self):
-        self.assertEqual(build_default_keyword_for_watch_rule({"product_type": "MacBook Neo"}), "맥북네오")
+        self.assertEqual(build_default_keyword_for_watch_rule({"product_type": "MacBook Neo"}), "맥북 네오")
+        self.assertEqual(
+            build_default_keyword_for_watch_rule({"product_type": "MacBook Neo", "chip": "A18 Pro"}),
+            "맥북 네오",
+        )
         keywords = build_recommended_keywords_for_spec("MacBook Neo", "a18pro", 8, 512)
-        self.assertEqual(keywords[0], "a18pro 맥북네오")
+        self.assertEqual(keywords[0], "맥북 네오")
         self.assertIn("MacBook Neo A18 Pro", keywords)
-        self.assertIn("맥북네오 A18 Pro 8 512", keywords)
+        self.assertIn("맥북 네오 A18 Pro", keywords)
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ MacBook Pro 회귀 검증은 저장소 루트에서 `python3 -m unittest discove
 ## 실리콘 MacBook Neo 지원
 
 - `sql/seed_silicon_macbook_neo_fair_prices.sql`의 두 사양만 추가합니다: `MacBook Neo / A18 Pro / 13인치 / 8GB / 256·512GB`. 시스템 시장가는 각각 850,000원과 900,000원이며 시드의 호가 기반 초기 기준값을 그대로 사용합니다.
-- 기존 `/silicon-mac-units`, `/macbook-air-units`, 사용자 설정·감시 조건·개별/일괄 저장·초기화 경로에 포함됩니다. 신규 조건은 감시 OFF이고, 저장한 사용자 시장가·검색어·우선순위가 우선합니다. 기본 검색어는 `a18pro 맥북네오`입니다.
+- 기존 `/silicon-mac-units`, `/macbook-air-units`, 사용자 설정·감시 조건·개별/일괄 저장·초기화 경로에 포함됩니다. 신규 조건은 감시 OFF이고, 저장한 사용자 시장가·검색어·우선순위가 우선합니다. 칩이나 세부 사양을 붙이지 않은 기본 검색어 `맥북 네오`를 사용합니다.
 - 제목·본문·자가점검 사양의 한글/영문 제품명과 `A18 Pro` 칩을 처리합니다. 누락된 화면·RAM·SSD는 기존 규칙에 따라 시드의 13인치/8GB/256GB를 사용하지만 명시한 미지원 사양이나 상충한 사양은 거절합니다. 칩의 `18`을 RAM으로 처리하지 않습니다.
 - 텔레그램은 기존 사용자별 발송 경로와 제품·칩·화면·RAM·SSD·가격 형식을 사용합니다. 읽은 알림에서 `A18 Pro`는 기존 M 계열 칩 뒤에 정렬합니다.
 - 적용하려는 DB에서 `umtp` 디렉터리 기준 `mysql -u <DB_USER> -p < sql/seed_silicon_macbook_neo_fair_prices.sql`을 실행하면 기존 동일 사양 가격을 시드 가격으로 갱신합니다. API·polling/analysis/notification worker를 같은 코드로 반영하고 iPhone 앱을 다시 빌드하세요. 이번 작업에서는 운영 DB 적용이나 배포를 수행하지 않았습니다.

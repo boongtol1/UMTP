@@ -41,7 +41,7 @@ final class SettingsFlowUITests: XCTestCase {
         XCTAssertEqual(body["ram_gb"] as? Int, 8)
         XCTAssertEqual(body["ssd_gb"] as? Int, 512)
         XCTAssertEqual(body["fair_price_krw"] as? Int, 1000000)
-        XCTAssertEqual(body["search_keyword"] as? String, "맥북 네오 A18 Pro")
+        XCTAssertEqual(body["search_keyword"] as? String, "맥북 네오")
     }
 
     func testMacBookProBaseChipUsesThirteenInchSeedCatalog() async throws {

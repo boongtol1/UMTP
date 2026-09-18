@@ -49,7 +49,7 @@ class MacBookNeoNotificationsTest(unittest.TestCase):
             return {"created": True, "alert_id": 72}
 
         job = dict(id=1, user_id="neo-user", product_id="1001", url="https://web.joongna.com/product/1001",
-                   title=title, price_krw=price, trigger_reason="new", search_keyword="a18pro 맥북네오")
+                   title=title, price_krw=price, trigger_reason="new", search_keyword="맥북 네오")
         page = dict(title=title, description="정상 판매합니다.", listing_price_krw=price, self_check_fields={})
         with ExitStack() as stack:
             for module, name, value in [
