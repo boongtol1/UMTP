@@ -44,6 +44,8 @@ class SettingsCursor:
     def fetchone(self):
         if self.query.startswith("select current_timestamp"):
             return (datetime(2026, 9, 18, 12, 0),)
+        if self.query.startswith("select id from user_fair_prices "):
+            return (14,)
         return None
 
     def fetchall(self):

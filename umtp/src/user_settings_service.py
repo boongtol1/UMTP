@@ -2607,6 +2607,7 @@ def upsert_user_fair_price_setting(
     condition_change_notice_created = False
     condition_change_notice_error = None
     rule_id = None
+    existing_rule_id = None
     old_rule_snapshot = None
     new_rule_snapshot = _build_rule_snapshot(
         fair_price_krw=normalized_fair_price_krw,
@@ -2663,6 +2664,7 @@ def upsert_user_fair_price_setting(
             previous_saved_at = _coerce_datetime(existing_rule_state.get("previous_saved_at"))
             old_rule_snapshot = existing_rule_state.get("rule_snapshot")
             rule_id = _safe_int(existing_rule_state.get("rule_id"))
+        existing_rule_id = rule_id
         save_action_type = "update_watch_rule" if rule_id is not None else "create_watch_rule"
 
         try:
@@ -3051,6 +3053,39 @@ def upsert_user_fair_price_setting(
             if not handled_unknown_column and "alert_price_direction" not in lowered_exc:
                 raise
 
+        # The pre-save lookup has no ID for a newly created rule. Read the
+        # persisted row by its unique key for both INSERT and duplicate-key
+        # UPDATE, including no-op saves and legacy-column fallback paths.
+        # A locking/current read also sees a concurrent insert when the
+        # duplicate-key update did not change any values in this transaction.
+        cursor.execute(
+            """
+            SELECT id
+            FROM user_fair_prices
+            WHERE user_id = %s
+              AND product_type = %s
+              AND chip = %s
+              AND screen_inch = %s
+              AND ram_gb = %s
+              AND ssd_gb = %s
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (
+                normalized_user_id,
+                normalized_product_type,
+                normalized_chip,
+                normalized_screen_inch,
+                normalized_ram_gb,
+                normalized_ssd_gb,
+            ),
+        )
+        saved_rule_row = cursor.fetchone()
+        saved_rule_id = _safe_int(saved_rule_row[0]) if saved_rule_row else None
+        if saved_rule_id is None or saved_rule_id <= 0:
+            raise RuntimeError("Saved user fair price rule ID could not be resolved")
+        rule_id = saved_rule_id
+
         try:
             cursor.execute(
                 """
@@ -3388,7 +3423,8 @@ def upsert_user_fair_price_setting(
 
         _insert_user_settings_save_log(
             user_id=normalized_user_id,
-            watch_rule_id=rule_id,
+            # A new rule's ID is not valid after its INSERT is rolled back.
+            watch_rule_id=existing_rule_id,
             action_type=save_action_type,
             request_payload=request_payload,
             response_payload=None,

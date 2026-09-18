@@ -27,6 +27,8 @@ class _HistoryFakeCursor:
         lowered = " ".join((self._last_query or "").lower().split())
         if lowered.startswith("select current_timestamp"):
             return (datetime(2026, 5, 20, 17, 0, 0),)
+        if lowered.startswith("select id from user_fair_prices "):
+            return (self.existing_row[0],) if self.existing_row else (14,)
         if "from user_fair_prices" in lowered and "limit 1" in lowered and not self._existing_fetched:
             self._existing_fetched = True
             return self.existing_row

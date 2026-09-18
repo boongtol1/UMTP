@@ -25,6 +25,8 @@ class _FakeCursor:
         lowered = " ".join((self._last_query or "").lower().split())
         if lowered.startswith("select current_timestamp"):
             return (datetime(2026, 5, 18, 16, 0, 0),)
+        if lowered.startswith("select id from user_fair_prices "):
+            return (14,)
         return None
 
     def fetchall(self):

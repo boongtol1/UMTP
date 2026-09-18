@@ -22,6 +22,8 @@ class _UpsertFakeCursor:
     def fetchone(self):
         if "select current_timestamp" in self._last_query:
             return (datetime(2026, 5, 20, 20, 0, 0),)
+        if self._last_query.startswith("select id from user_fair_prices "):
+            return (14,)
         return None
 
     def close(self):
