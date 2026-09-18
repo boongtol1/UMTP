@@ -41,6 +41,9 @@ class _FakeCursor:
     def fetchone(self):
         return self._fetchone_result
 
+    def fetchall(self):
+        return []
+
     def close(self):
         return None
 

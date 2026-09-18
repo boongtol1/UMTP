@@ -260,7 +260,7 @@ def _normalize_item(item):
     product_url = f"https://web.joongna.com/product/{seq}" if seq is not None else ""
     store_seq = _extract_store_seq(item)
 
-    return {
+    normalized = {
         "seq": seq,
         "product_id": seq,
         "title": title,
@@ -278,6 +278,20 @@ def _normalize_item(item):
         "store_seq": store_seq,
         "storeSeq": store_seq,
     }
+
+    # The search API sometimes includes a description; retain it when present.
+    for source in (item, item.get("data")):
+        if not isinstance(source, dict):
+            continue
+        for key in (
+            "body_text", "body", "content", "description", "desc",
+            "productDescription", "productDesc", "text",
+        ):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                normalized["body_text"] = value.strip()
+                return normalized
+    return normalized
 
 
 def _build_search_payload(search_word, page, quantity):

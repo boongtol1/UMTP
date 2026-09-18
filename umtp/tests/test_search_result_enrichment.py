@@ -49,6 +49,19 @@ class SearchResultEnrichmentTest(unittest.TestCase):
         self.assertEqual(params[1], "상세 본문")
         self.assertEqual(params[5], 77)
         self.assertEqual(params[6], "판매자")
+        fill_query, fill_params = cursor.executed[1]
+        self.assertIn("body_fetched_at = current_timestamp", fill_query)
+        self.assertIn("body_text is null or body_text regexp", fill_query)
+        self.assertEqual(fill_params, ("상세 본문", build_body_hash("상세 본문"), "1001"))
+        self.assertEqual(result["filled_missing_count"], 1)
+
+    def test_empty_detail_body_does_not_fill_or_erase_existing_bodies(self):
+        cursor = Cursor()
+        result = persist_latest_search_result_enrichment(cursor, "1001", body_text=" \n ")
+
+        self.assertEqual(len(cursor.executed), 1)
+        self.assertIsNone(cursor.executed[0][1][1])
+        self.assertEqual(result["filled_missing_count"], 0)
 
 
 if __name__ == "__main__":

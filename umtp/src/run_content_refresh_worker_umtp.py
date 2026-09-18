@@ -10,8 +10,10 @@ if PROJECT_ROOT not in sys.path:
 
 try:
     from src.content_refresh_service import process_next_content_refresh
+    from src.search_body_backfill import process_next_search_body_backfill
 except ModuleNotFoundError:
     from content_refresh_service import process_next_content_refresh
+    from search_body_backfill import process_next_search_body_backfill
 
 
 DEFAULT_INTERVAL_SECONDS = 5
@@ -19,7 +21,7 @@ DEFAULT_INTERVAL_SECONDS = 5
 
 def parse_args():
     parser = argparse.ArgumentParser(description="UMTP low-priority listing content refresh worker")
-    parser.add_argument("--once", action="store_true", help="최대 한 건을 처리한 후 종료")
+    parser.add_argument("--once", action="store_true", help="내용 갱신과 누락 본문 보강을 각각 최대 한 건 처리한 후 종료")
     parser.add_argument(
         "--interval",
         type=int,
@@ -38,9 +40,11 @@ def main():
         while True:
             result = process_next_content_refresh()
             print(f"[content_refresh_worker] {result}")
+            body_result = process_next_search_body_backfill()
+            print(f"[search_body_backfill_worker] {body_result}")
             if args.once:
                 return
-            if not result.get("processed"):
+            if not result.get("processed") and not body_result.get("processed"):
                 time.sleep(args.interval)
     except KeyboardInterrupt:
         print("사용자 요청으로 content refresh worker를 종료합니다.")

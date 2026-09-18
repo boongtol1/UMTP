@@ -671,7 +671,7 @@ python src/run_url_parse_umtp.py
 - HTML 파싱: `BeautifulSoup`
 - 0.7 구현을 위해 의존성 `requests`, `beautifulsoup4`를 requirements에 추가
 - 제목 추출: `meta name="twitter:title"`의 `content`
-- 본문 추출: `meta name="twitter:description"`의 `content`
+- 본문 추출: `twitter:description` → `og:description` → 해당 상품의 Product JSON-LD → 상품 페이지의 일반 description 순서로 확인합니다. 홈페이지 소개·삭제 안내는 본문으로 저장하지 않습니다.
 - 가격 추출: `whitespace-pre-line`, `text-32`, `font-bold`, `max-md:text-24` class 토큰을 모두 포함한 `span`
 - 셀프검수 추출(선택): `dl` 내부 `dt/dd`에서 모델명/램 용량/SSD용량/CPU종류/컬러를 우선 추출
 - 셀프검수 영역이 없으면 기존처럼 `title + description`만으로 스펙 파싱
@@ -963,6 +963,11 @@ python src/run_analysis_worker_umtp.py --once
 python src/run_analysis_worker_umtp.py --interval 5
 python src/run_content_refresh_worker_umtp.py --once
 python src/run_content_refresh_worker_umtp.py --interval 5
+
+# 기존 검색 기록의 누락 본문 확인 / 한 차례 전체 보강
+python -m src.search_body_backfill --dry-run
+python -m src.search_body_backfill --report /tmp/umtp-search-body-backfill.json
+# 특정 매물만 처리하려면 --product-id <상품번호>, 처리 수 제한은 --limit <개수>
 python src/run_notification_worker_umtp.py --once
 python src/run_notification_worker_umtp.py --interval 3
 python src/run_fraud_store_monitor_umtp.py --once
@@ -996,8 +1001,11 @@ python src/run_joongna_polling_umtp.py --once --search-word m1맥북에어
 - 설정 저장 시 `enabled=true`이면 `force_poll=true`, `last_poll_requested_at=NOW()`, `last_polled_at=NULL`이 되어 즉시 due 대상이 됩니다.
 - polling worker는 due 설정을 읽어 검색하며, 같은 검색어를 여러 사용자가 켜도 Search API는 검색어당 1회만 호출합니다.
 - polling worker는 조회한 그룹 결과를 `search_queries`/`search_results`에도 저장해 후속 집계와 디버깅에 재사용할 수 있습니다.
-- polling worker는 검색 스냅샷만 저장하고 상세 본문/판매자 API를 호출하지 않습니다. 신규·변경 매물의 상세 본문은 analysis worker가 매물당 한 번 조회해 `search_results.body_text/body_hash`에 저장합니다.
-- content refresh worker는 analysis backlog가 없을 때만 기존 매물을 한 건씩 재확인합니다. 본문 또는 자체점검 hash가 달라지면 `body_changed`/`self_check_changed` 분석 작업을 생성합니다.
+- polling worker는 상세 본문/판매자 API를 호출하지 않습니다. 검색 응답에 본문이 있으면 보존하고, 없으면 같은 매물의 최신 비어 있지 않은 본문을 재사용합니다. 본문 보강은 검색 결과의 변경 판정에 포함하지 않으며 캐시의 `body_fetched_at`을 유지합니다.
+- analysis worker가 상세 본문을 수집하면 최신 검색 기록을 갱신하고 같은 매물의 과거 빈 본문도 채웁니다. 과거 기록에 이미 저장된 본문은 유지합니다. 보강된 과거 행의 본문은 최초 검색 당시 원문이라는 의미가 아니며, 확보 시각은 `body_fetched_at`으로 구분합니다.
+- content refresh worker의 기존 변경 감지는 analysis backlog가 없을 때 매물을 한 건씩 재확인합니다. 본문 또는 자체점검 hash가 달라지면 `body_changed`/`self_check_changed` 분석 작업을 생성합니다.
+- 같은 worker는 매 주기 누락 본문도 한 매물씩 별도 보강합니다. 누락 보강은 analysis backlog·조건 저장 시각·최근 7일 제한과 관계없이 동작하며 알림이나 분석 작업을 만들지 않습니다. 저장된 본문을 먼저 재사용하고, 없으면 상세 페이지에서 본문만 추출하므로 제목·가격 추출 실패에도 본문을 확보할 수 있습니다.
+- 누락 본문 조회 실패는 프로세스 내에서 5분부터 최대 6시간까지 재시도를 늦춥니다. 본문이 없는 응답은 6시간, HTTP 404/410은 7일 뒤 재시도합니다. worker를 재시작하면 이 재시도 대기 상태는 초기화됩니다.
 - content refresh 기본 주기는 등록 1시간 이내 3분, 24시간 이내 20분, 이후 7일까지 6시간이며 `CONTENT_REFRESH_*` 환경변수로 조정할 수 있습니다.
 - 판매자 프로필은 `storeSeq`별 24시간 TTL 캐시를 사용하며 analysis/content refresh worker가 필요할 때만 갱신합니다.
 - 참고 알림/놓친 후보 집계 성능을 위해 `analysis_jobs`에 `(user_id, source, search_keyword, created_at)` 및 `(user_id, source, search_keyword, product_id, created_at)` 조회 인덱스를 적용합니다.

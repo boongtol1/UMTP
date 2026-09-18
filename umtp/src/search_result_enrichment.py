@@ -34,6 +34,109 @@ def build_body_hash(body_text):
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def load_latest_search_result_bodies(cursor, product_ids):
+    """Read each product's freshest known nonblank body in one round trip."""
+    product_ids = list(dict.fromkeys(
+        normalized for value in product_ids or []
+        if (normalized := _text(value)) is not None
+    ))
+    if cursor is None or not product_ids:
+        return {}
+    requested = " UNION ALL ".join(["SELECT %s AS product_id"] * len(product_ids))
+    for metadata_columns, body_order in (
+        ("sr.body_hash, sr.body_fetched_at", "cached.body_fetched_at DESC,"),
+        ("NULL AS body_hash, NULL AS body_fetched_at", ""),
+    ):
+        try:
+            cursor.execute(
+                f"""
+                SELECT sr.product_id, sr.body_text, {metadata_columns},
+                    EXISTS (
+                        SELECT 1 FROM search_results missing
+                        WHERE missing.product_id = requested.product_id
+                          AND (missing.body_text IS NULL
+                               OR missing.body_text REGEXP '^[[:space:]]*$')
+                    ) AS has_missing
+                FROM ({requested}) requested
+                JOIN search_results sr ON sr.id = (
+                    SELECT cached.id
+                    FROM search_results cached
+                    WHERE cached.product_id = requested.product_id
+                      AND cached.body_text IS NOT NULL
+                      AND cached.body_text NOT REGEXP '^[[:space:]]*$'
+                    ORDER BY {body_order} cached.fetched_at DESC, cached.id DESC
+                    LIMIT 1
+                )
+                """,
+                tuple(product_ids),
+            )
+            return {
+                str(_row_value(row, "product_id", 0)): {
+                    "body_text": _text(_row_value(row, "body_text", 1)),
+                    "body_hash": _row_value(row, "body_hash", 2)
+                    or build_body_hash(_row_value(row, "body_text", 1)),
+                    "body_fetched_at": _row_value(row, "body_fetched_at", 3),
+                    "has_missing": bool(_row_value(row, "has_missing", 4)),
+                }
+                for row in cursor.fetchall()
+            }
+        except Exception as exc:
+            if not _is_missing_schema_error(exc):
+                raise
+    return {}
+
+
+def _fill_missing_search_result_bodies(
+    cursor, product_id, body_text, *, body_fetched_at=None, fetched_now=False,
+):
+    normalized_body = _text(body_text)
+    if cursor is None or product_id is None or normalized_body is None:
+        return 0
+    timestamp_sql = "CURRENT_TIMESTAMP" if fetched_now else "%s"
+    params = [normalized_body, build_body_hash(normalized_body)]
+    if not fetched_now:
+        params.append(body_fetched_at)
+    params.append(str(product_id))
+    try:
+        cursor.execute(
+            f"""
+            UPDATE search_results
+            SET body_text = %s, body_hash = %s, body_fetched_at = {timestamp_sql}
+            WHERE product_id = %s
+              AND (body_text IS NULL OR body_text REGEXP '^[[:space:]]*$')
+            """,
+            tuple(params),
+        )
+        return max(int(getattr(cursor, "rowcount", 0) or 0), 0)
+    except Exception as exc:
+        if not _is_missing_schema_error(exc):
+            raise
+    try:
+        cursor.execute(
+            """
+            UPDATE search_results
+            SET body_text = %s
+            WHERE product_id = %s
+              AND (body_text IS NULL OR body_text REGEXP '^[[:space:]]*$')
+            """,
+            (normalized_body, str(product_id)),
+        )
+        return max(int(getattr(cursor, "rowcount", 0) or 0), 0)
+    except Exception as exc:
+        if not _is_missing_schema_error(exc):
+            raise
+    return 0
+
+
+def fill_missing_search_result_bodies(
+    cursor, product_id, body_text, *, body_fetched_at=None,
+):
+    """Fill only blank snapshots; an unknown source fetch time stays unknown."""
+    return _fill_missing_search_result_bodies(
+        cursor, product_id, body_text, body_fetched_at=body_fetched_at,
+    )
+
+
 def load_latest_search_result(cursor, product_id):
     if cursor is None or product_id is None:
         return None
@@ -185,7 +288,15 @@ def persist_latest_search_result_enrichment(
                 values[4], values[5], values[6], values[7], values[8], values[9],
             ),
         )
-        return {"updated": bool(getattr(cursor, "rowcount", 0)), "body_hash": body_hash}
+        updated = bool(getattr(cursor, "rowcount", 0))
+        filled_count = _fill_missing_search_result_bodies(
+            cursor, product_id, normalized_body, fetched_now=True,
+        )
+        return {
+            "updated": updated or bool(filled_count),
+            "body_hash": body_hash,
+            "filled_missing_count": filled_count,
+        }
     except Exception as exc:
         if not _is_missing_schema_error(exc):
             raise
@@ -215,9 +326,14 @@ def persist_latest_search_result_enrichment(
                 values[7], values[8], values[9],
             ),
         )
+        updated = bool(getattr(cursor, "rowcount", 0))
+        filled_count = _fill_missing_search_result_bodies(
+            cursor, product_id, normalized_body, fetched_now=True,
+        )
         return {
-            "updated": bool(getattr(cursor, "rowcount", 0)),
+            "updated": updated or bool(filled_count),
             "body_hash": body_hash,
+            "filled_missing_count": filled_count,
             "legacy_schema": True,
         }
     except Exception as exc:

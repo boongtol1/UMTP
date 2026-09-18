@@ -95,6 +95,9 @@ class _StoreProfileCacheCursor:
     def fetchone(self):
         return self._fetchone_result
 
+    def fetchall(self):
+        return []
+
 
 class _LegacyStoreProfileCacheCursor(_StoreProfileCacheCursor):
     def execute(self, query, params=None):

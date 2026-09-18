@@ -18,6 +18,11 @@ try:
         enqueue_analysis_for_product,
     )
     from src.listing_page_parser import fetch_html
+    from src.search_result_enrichment import (
+        build_body_hash,
+        fill_missing_search_result_bodies,
+        load_latest_search_result_bodies,
+    )
     from src.search_keyword_utils import (
         dedupe_keywords_keep_order,
         normalize_search_keyword,
@@ -40,6 +45,11 @@ except ModuleNotFoundError:
         enqueue_analysis_for_product,
     )
     from listing_page_parser import fetch_html
+    from search_result_enrichment import (
+        build_body_hash,
+        fill_missing_search_result_bodies,
+        load_latest_search_result_bodies,
+    )
     from search_keyword_utils import (
         dedupe_keywords_keep_order,
         normalize_search_keyword,
@@ -389,12 +399,17 @@ def _fetch_latest_search_result_content_signature(cursor, *, search_query_id, pr
             existing_signature = _safe_text(_row_value(row, "content_signature", 0))
             if existing_signature:
                 return existing_signature
+            raw_json = _safe_text(_row_value(row, "raw_json", 13)) or "{}"
+            try:
+                search_body = _extract_body_text_from_search_item(json.loads(raw_json))
+            except (TypeError, ValueError):
+                search_body = None
             return _build_search_result_content_signature(
                 title=_row_value(row, "title", 1),
                 price=_row_value(row, "price", 2),
                 sort_date=_row_value(row, "sort_date", 3),
                 url=_row_value(row, "url", 4),
-                body_text=_row_value(row, "body_text", 5),
+                body_text=search_body,
                 refresh_key=_row_value(row, "refresh_key", 6),
                 seller_store_seq=_row_value(row, "seller_store_seq", 7),
                 seller_store_name=_row_value(row, "seller_store_name", 8),
@@ -402,7 +417,7 @@ def _fetch_latest_search_result_content_signature(cursor, *, search_query_id, pr
                 seller_store_level=_row_value(row, "seller_store_level", 10),
                 seller_trust_score=_row_value(row, "seller_trust_score", 11),
                 seller_review_count=_row_value(row, "seller_review_count", 12),
-                raw_json=_safe_text(_row_value(row, "raw_json", 13)) or "{}",
+                raw_json=raw_json,
             )
         return None
     except Exception as exc:
@@ -510,70 +525,88 @@ def _insert_search_result_row(
     raw_json,
     content_signature,
     fetched_at,
+    body_fetched_at=None,
 ):
-    try:
-        cursor.execute(
-            """
-            INSERT INTO search_results (
-                search_query_id,
-                product_id,
-                title,
-                price,
-                sort_date,
-                url,
-                body_text,
-                refresh_key,
-                seller_store_seq,
-                seller_store_name,
-                seller_profile_image_url,
-                seller_store_level,
-                seller_trust_score,
-                seller_review_count,
-                raw_json,
-                content_signature,
-                fetched_at
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                fetched_at = GREATEST(fetched_at, VALUES(fetched_at)),
-                title = VALUES(title),
-                price = VALUES(price),
-                sort_date = VALUES(sort_date),
-                url = VALUES(url),
-                body_text = COALESCE(VALUES(body_text), body_text),
-                refresh_key = VALUES(refresh_key),
-                seller_store_seq = VALUES(seller_store_seq),
-                seller_store_name = VALUES(seller_store_name),
-                seller_profile_image_url = VALUES(seller_profile_image_url),
-                seller_store_level = VALUES(seller_store_level),
-                seller_trust_score = VALUES(seller_trust_score),
-                seller_review_count = VALUES(seller_review_count),
-                raw_json = VALUES(raw_json)
-            """,
-            (
-                search_query_id,
-                product_id,
-                title,
-                price,
-                sort_date,
-                url,
-                body_text,
-                refresh_key,
-                seller_store_seq,
-                seller_store_name,
-                seller_profile_image_url,
-                seller_store_level,
-                seller_trust_score,
-                seller_review_count,
-                raw_json,
-                content_signature,
-                fetched_at,
-            ),
+    for include_body_metadata in (True, False):
+        metadata_columns = ", body_hash, body_fetched_at" if include_body_metadata else ""
+        metadata_placeholders = ", %s, %s" if include_body_metadata else ""
+        metadata_values = (
+            (build_body_hash(body_text), body_fetched_at) if include_body_metadata else ()
         )
-        return int(cursor.rowcount or 0)
-    except Exception as exc:
-        if not _is_unknown_column_error(exc):
-            raise
+        # A repeated search signature can target an older snapshot. Preserve its
+        # existing body, and evaluate all metadata conditions before body_text changes.
+        metadata_updates = """
+            body_hash = CASE WHEN (body_text IS NULL OR body_text REGEXP '^[[:space:]]*$')
+                AND VALUES(body_text) IS NOT NULL THEN VALUES(body_hash) ELSE body_hash END,
+            body_fetched_at = CASE WHEN (body_text IS NULL OR body_text REGEXP '^[[:space:]]*$')
+                AND VALUES(body_text) IS NOT NULL
+                THEN VALUES(body_fetched_at) ELSE body_fetched_at END,
+        """ if include_body_metadata else ""
+        try:
+            cursor.execute(
+                f"""
+                INSERT INTO search_results (
+                    search_query_id,
+                    product_id,
+                    title,
+                    price,
+                    sort_date,
+                    url,
+                    body_text,
+                    refresh_key,
+                    seller_store_seq,
+                    seller_store_name,
+                    seller_profile_image_url,
+                    seller_store_level,
+                    seller_trust_score,
+                    seller_review_count,
+                    raw_json,
+                    content_signature,
+                    fetched_at{metadata_columns}
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s{metadata_placeholders})
+                ON DUPLICATE KEY UPDATE
+                    fetched_at = GREATEST(fetched_at, VALUES(fetched_at)),
+                    title = VALUES(title),
+                    price = VALUES(price),
+                    sort_date = VALUES(sort_date),
+                    url = VALUES(url),
+                    {metadata_updates}
+                    body_text = CASE WHEN body_text IS NULL OR body_text REGEXP '^[[:space:]]*$'
+                        THEN COALESCE(VALUES(body_text), body_text) ELSE body_text END,
+                    refresh_key = VALUES(refresh_key),
+                    seller_store_seq = VALUES(seller_store_seq),
+                    seller_store_name = VALUES(seller_store_name),
+                    seller_profile_image_url = VALUES(seller_profile_image_url),
+                    seller_store_level = VALUES(seller_store_level),
+                    seller_trust_score = VALUES(seller_trust_score),
+                    seller_review_count = VALUES(seller_review_count),
+                    raw_json = VALUES(raw_json)
+                """,
+                (
+                    search_query_id,
+                    product_id,
+                    title,
+                    price,
+                    sort_date,
+                    url,
+                    body_text,
+                    refresh_key,
+                    seller_store_seq,
+                    seller_store_name,
+                    seller_profile_image_url,
+                    seller_store_level,
+                    seller_trust_score,
+                    seller_review_count,
+                    raw_json,
+                    content_signature,
+                    fetched_at,
+                ) + metadata_values,
+            )
+            return int(cursor.rowcount or 0)
+        except Exception as exc:
+            if not _is_unknown_column_error(exc):
+                raise
 
     try:
         cursor.execute(
@@ -1456,7 +1489,18 @@ def save_group_search_results(
     inserted_count = 0
     skipped_unchanged_count = 0
     latest_signature_by_product = {}
-    for item in items or []:
+    items = list(items or [])
+    cached_bodies = load_latest_search_result_bodies(
+        cursor,
+        [
+            item.get("product_id") or item.get("seq")
+            for item in items
+            if isinstance(item, dict) and _extract_body_text_from_search_item(item) is None
+        ],
+    )
+    fresh_body_fetched_at = None
+    fresh_body_timestamp_loaded = False
+    for item in items:
         if not isinstance(item, dict):
             continue
 
@@ -1502,10 +1546,9 @@ def save_group_search_results(
         url = _safe_text(item.get("product_url")) or ""
         refresh_key = _safe_text(item.get("refresh_key"))
         body_text = _extract_body_text_from_search_item(item)
-        if body_text is None and enrich_details:
-            body_text = resolve_search_result_body_text(item, url=url)
         if body_text is not None:
             item["body_text"] = body_text
+        # Fingerprints describe the search response, never cached/detail enrichment.
         raw_json = _safe_json_dumps(item)
         content_signature = _build_search_result_content_signature(
             title=title,
@@ -1522,6 +1565,33 @@ def save_group_search_results(
             body_text=body_text,
             raw_json=raw_json,
         )
+
+        body_fetched_at = None
+        fresh_body = body_text is not None
+        cached_body = cached_bodies.get(product_id) or {}
+        if body_text is None:
+            body_text = cached_body.get("body_text")
+            body_fetched_at = cached_body.get("body_fetched_at")
+        if body_text is None and enrich_details:
+            body_text = resolve_search_result_body_text(item, url=url)
+            fresh_body = body_text is not None
+        if fresh_body:
+            if not fresh_body_timestamp_loaded:
+                # Use the DB session clock for its TIMESTAMP column, not the host timezone.
+                cursor.execute("SELECT CURRENT_TIMESTAMP AS body_fetched_at")
+                fresh_body_fetched_at = _row_value(cursor.fetchone(), "body_fetched_at", 0)
+                fresh_body_timestamp_loaded = True
+            body_fetched_at = fresh_body_fetched_at
+        if body_text is not None:
+            if fresh_body or cached_body.get("has_missing"):
+                fill_missing_search_result_bodies(
+                    cursor, product_id, body_text, body_fetched_at=body_fetched_at,
+                )
+            cached_bodies[product_id] = {
+                "body_text": body_text,
+                "body_fetched_at": body_fetched_at,
+                "has_missing": False,
+            }
 
         previous_signature = latest_signature_by_product.get(product_id)
         if previous_signature is None:
@@ -1555,6 +1625,7 @@ def save_group_search_results(
             raw_json=raw_json,
             content_signature=content_signature,
             fetched_at=normalized_fetched_at,
+            body_fetched_at=body_fetched_at,
         )
 
         if row_count == 1:
