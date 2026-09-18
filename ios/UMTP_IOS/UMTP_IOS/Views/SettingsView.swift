@@ -338,7 +338,7 @@ private struct SettingsUnitCard: View {
     private var searchAndPriority: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("커스텀 검색어").font(.caption).foregroundStyle(.secondary)
-            TextField(item?.recommended_search_keyword ?? "예: m1맥북에어", text: binding(\.keyword))
+            TextField(item?.recommended_search_keyword ?? "예: \(unit.chip) \(unit.product_type)", text: binding(\.keyword))
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
             Text("알림 속도").font(.caption).foregroundStyle(.secondary)

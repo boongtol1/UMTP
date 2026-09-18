@@ -9,7 +9,7 @@
 - `MainTabView`: 알림 / 읽음 보관함 / 거래 입력 / 설정의 네 탭. 알림과 보관함은 상태를 공유하고, 거래 입력 초안은 탭을 바꿔도 유지합니다.
 - 알림: 상세·본문·이미지·가격·위험 정보, 선택/전체 검토 완료, 읽음 보관함 그룹·삭제, 실패 재시도. 상세를 여는 것만으로 읽음 처리하지 않습니다. 화면이 활성화된 foreground에서 10초 간격으로 갱신하고 복귀 시 재조회합니다.
 - 거래: URL·상품 ID·알림·보관함에서 시작, 사전 입력, 구매/판매 기록, 검증 및 변경 필드 저장, 거래 내역·삭제. 기존 초안을 다른 알림으로 교체할 때 확인합니다.
-- 설정: 제품·칩·화면·메모리·저장장치별 조건, 기준/희망 가격, 키워드, 우선순위·활성화, 후보 알림, 일괄 적용·초기화·규칙 갱신.
+- 설정: MacBook Air·Mac mini·MacBook Pro의 제품·칩·화면·메모리·저장장치별 조건, 기준/희망 가격, 키워드, 우선순위·활성화, 후보 알림, 일괄 적용·초기화·규칙 갱신. MacBook Pro는 M1~M5의 기본·Pro·Max 칩을 세대순으로 표시하며 화면 크기와 RAM/SSD 조합은 서버 카탈로그를 따릅니다.
 - 세션: 기존 `umtp_user_id`를 보존합니다. 기기 식별자는 기존 값과 호환되도록 UserDefaults와 Keychain에 고정하며, 로그아웃으로 기기 식별자를 바꾸지 않습니다.
 - 원격 알림: 권한 요청, FCM 토큰 등록, 알림 클릭 후 상세 이동을 연결합니다. Firebase 설정 없이도 나머지 앱 기능은 동작하지만 실서비스 푸시 수신은 별도 설정과 서버 대응이 필요합니다.
 
@@ -57,6 +57,10 @@ xcodebuild -project ios/UMTP_IOS/UMTP_IOS.xcodeproj \
 
 UI 테스트는 실제 서비스 대신 Python 표준 라이브러리로 작성된 메모리 기반 fixture를 사용합니다. 별도 터미널에서 같은 Simulator UUID를 지정한 뒤 서버를 계속 실행해 둡니다.
 
+MacBook Pro 설정 fixture는 저장소의 `umtp/sql/seed_silicon_macbook_pro_fair_prices.sql`에서 사양과 시스템 시장가를 읽습니다. `SettingsFlowUITests`는 13인치 기본 칩 탐색과 14/16인치 Max 칩 선택·개별 저장을 기존 Air·mini 흐름과 함께 확인합니다.
+
+2026-09-18 MacBook Pro 확장 검증은 Xcode 27.0 / iOS 26.5 Simulator에서 단위 90개와 설정 UI 5개를 통과했습니다(실패·skip 0). 실제 서비스에 쓰지 않는 loopback fixture의 SQL 시드 276개 조합으로 확인했으며, 배포·실기기·APNs 검증은 포함하지 않습니다.
+
 ```sh
 export UMTP_SIMULATOR_ID="사용할 Simulator UUID"
 python3 ios/UMTP_IOS/TestsSupport/parity_server.py
@@ -79,7 +83,7 @@ UI 테스트가 앱의 `UMTP_TEST_BASE_URL`을 `http://127.0.0.1:18765`로 설�
 
 cold 시작은 `GET /__cold-launch-status`로 설치 앱의 bundle ID·Simulator 플랫폼·정확한 fixture URL·DEBUG 조건을 먼저 검사합니다. 실제 로컬 등록 요청과 세션 저장을 확인하고 앱을 종료한 뒤, 이후 `launch`/`activate` 없이 OS 알림 tap만으로 시작시킵니다. alert101 상세 표시·미읽음 유지·새 GET 요청을 확인합니다. OS 시작에는 XCTest 환경변수가 전달되지 않으므로 위 `UMTP_PARITY_FIXTURE_URL` 설정이 필요하며 영구 UserDefaults API override는 만들지 않습니다.
 
-2026-09-15 최종 앱 commit은 `974762970a1ba566356bf5db7131c34419cf7bc7`(C15)입니다. commit 후 `integrated-final-4` 전체106개(단위86+UI20)가 통과·실패0·skip0·exit0이며 UI는620.650초였습니다. 단위는 Core9·Alerts12·DNS9·Push9·Settings20·Trade27입니다. 수동 거래 키보드/저장·삭제·설정 초안/탐색 보존·안내 전체 표시·외부 링크·실제 시스템 권한 OFF/ON·warm/cold OS 알림 클릭을 포함하며 이후 앱 소스 변경은 없습니다. 로컬 구현·검증 완료와 실서비스/원격 APNs/실기기 검증은 구분합니다. C14의 전체103개 `integrated-final-3`(UI594.045초), C15 격리 검증88개 `cold-launch-2`(UI33.543초) 성공도 별도 이력으로 보존합니다.
+2026-09-15 패리티 작업의 앱 commit은 `974762970a1ba566356bf5db7131c34419cf7bc7`(C15)입니다. commit 후 `integrated-final-4` 전체106개(단위86+UI20)가 통과·실패0·skip0·exit0이며 UI는620.650초였습니다. 단위는 Core9·Alerts12·DNS9·Push9·Settings20·Trade27입니다. 수동 거래 키보드/저장·삭제·설정 초안/탐색 보존·안내 전체 표시·외부 링크·실제 시스템 권한 OFF/ON·warm/cold OS 알림 클릭을 포함한 당시 결과입니다. 로컬 구현·검증 완료와 실서비스/원격 APNs/실기기 검증은 구분합니다. C14의 전체103개 `integrated-final-3`(UI594.045초), C15 격리 검증88개 `cold-launch-2`(UI33.543초) 성공도 별도 이력으로 보존합니다.
 
 첫 `integrated-final-1`은 잘못된 단위 오류 타입 기대값1개로 102통과/1실패였고 이후 기대값만 수정해 재검증했습니다. `integrated-final-2`는 수정 전 binary여서 중단했습니다. `cold-launch-1`은 cold/warm UI2개가 통과했지만 fixture HTTP 기본값에 의존한 DNS 단위2개가 실패하여 전체88개는 실패했습니다. DNS mock에 명시적 HTTPS를 주입한 뒤 `cold-launch-2`가 모두 통과했습니다. 각 실패/중단은 후속 성공과 별도 이력으로 유지합니다.
 
