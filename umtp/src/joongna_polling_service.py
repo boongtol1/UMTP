@@ -18,7 +18,12 @@ try:
         enqueue_analysis_for_product,
     )
     from src.listing_page_parser import fetch_html
-    from src.search_keyword_utils import dedupe_keywords_keep_order, normalize_search_keyword
+    from src.search_keyword_utils import (
+        build_default_keyword_for_watch_rule,
+        build_recommended_keywords_for_spec,
+        dedupe_keywords_keep_order,
+        normalize_search_keyword,
+    )
     from src.user_settings_service import (
         get_due_user_fair_price_polling_targets as get_due_watch_rules,
         mark_user_fair_prices_polled as mark_watch_rules_polled,
@@ -36,7 +41,12 @@ except ModuleNotFoundError:
         enqueue_analysis_for_product,
     )
     from listing_page_parser import fetch_html
-    from search_keyword_utils import dedupe_keywords_keep_order, normalize_search_keyword
+    from search_keyword_utils import (
+        build_default_keyword_for_watch_rule,
+        build_recommended_keywords_for_spec,
+        dedupe_keywords_keep_order,
+        normalize_search_keyword,
+    )
     from user_settings_service import (
         get_due_user_fair_price_polling_targets as get_due_watch_rules,
         mark_user_fair_prices_polled as mark_watch_rules_polled,
@@ -1680,7 +1690,22 @@ def _filter_targets_by_saved_window(observed_product, targets):
     return eligible_targets
 
 
-def match_saved_listings_to_watch_rules(saved_listing_states, targets, *, stats):
+def _target_listing_identity(observed_product, target):
+    product_id = _safe_text((observed_product or {}).get("product_id"))
+    user_id = _normalize_optional_user_id((target or {}).get("user_id"))
+    setting_id = (target or {}).get("setting_id") or (target or {}).get("rule_id")
+    if product_id is None or user_id is None or setting_id is None:
+        return None
+    return product_id, user_id, setting_id
+
+
+def match_saved_listings_to_watch_rules(
+    saved_listing_states,
+    targets,
+    *,
+    stats,
+    matched_target_listing_keys=None,
+):
     matches = []
     for item in saved_listing_states:
         observed_product = item.get("observed_product") or {}
@@ -1688,6 +1713,19 @@ def match_saved_listings_to_watch_rules(saved_listing_states, targets, *, stats)
         eligible_targets = _filter_targets_by_saved_window(observed_product, targets)
         if not eligible_targets:
             stats["skipped_before_saved_at"] += len(targets or [])
+            continue
+
+        if matched_target_listing_keys is not None:
+            unique_targets = []
+            for target in eligible_targets:
+                identity = _target_listing_identity(observed_product, target)
+                if identity is not None and identity in matched_target_listing_keys:
+                    continue
+                if identity is not None:
+                    matched_target_listing_keys.add(identity)
+                unique_targets.append(target)
+            eligible_targets = unique_targets
+        if not eligible_targets:
             continue
 
         stats["matched_watch_rules"] += len(eligible_targets)
@@ -1810,6 +1848,32 @@ def select_matches_for_analysis(matches, *, cursor=None, stats=None):
     return selected_matches
 
 
+def _polling_search_keywords_for_rule(rule):
+    saved_keyword = normalize_search_keyword((rule or {}).get("search_keyword"))
+    if not saved_keyword:
+        return []
+
+    if (rule or {}).get("product_type") != "iMac":
+        return [saved_keyword]
+
+    default_keyword = build_default_keyword_for_watch_rule(rule)
+    if not default_keyword or saved_keyword.lower() != default_keyword.lower():
+        # A user-entered keyword remains authoritative.
+        return [saved_keyword]
+
+    recommended = build_recommended_keywords_for_spec(
+        "iMac",
+        (rule or {}).get("chip"),
+        ram_gb=(rule or {}).get("ram_gb"),
+        ssd_gb=(rule or {}).get("ssd_gb"),
+    )
+    english_alias = next(
+        (keyword for keyword in recommended if keyword.lower().startswith("imac ")),
+        None,
+    )
+    return dedupe_keywords_keep_order([saved_keyword, english_alias])
+
+
 def _build_keyword_targets_from_user_fair_prices(watch_rules):
     keyword_targets = {}
     target_keys = set()
@@ -1820,27 +1884,28 @@ def _build_keyword_targets_from_user_fair_prices(watch_rules):
         if "last_poll_requested_at" in rule and rule.get("last_poll_requested_at") is None:
             continue
 
-        search_keyword = normalize_search_keyword(rule.get("search_keyword"))
         user_id = _normalize_optional_user_id(rule.get("user_id"))
-        if not search_keyword or not user_id:
+        search_keywords = _polling_search_keywords_for_rule(rule)
+        if not search_keywords or not user_id:
             continue
 
         setting_id = rule.get("id")
-        target_key = (search_keyword.lower(), user_id, setting_id)
-        if target_key in target_keys:
-            continue
-        target_keys.add(target_key)
+        for search_keyword in search_keywords:
+            target_key = (search_keyword.lower(), user_id, setting_id)
+            if target_key in target_keys:
+                continue
+            target_keys.add(target_key)
 
-        target = {
-            "user_id": user_id,
-            "rule_id": setting_id,
-            "setting_id": setting_id,
-            "setting_ids": [setting_id] if setting_id is not None else [],
-            "saved_at": rule.get("saved_at"),
-            "search_keyword": search_keyword,
-            "watch_rule": None,
-        }
-        keyword_targets.setdefault(search_keyword, []).append(target)
+            target = {
+                "user_id": user_id,
+                "rule_id": setting_id,
+                "setting_id": setting_id,
+                "setting_ids": [setting_id] if setting_id is not None else [],
+                "saved_at": rule.get("saved_at"),
+                "search_keyword": search_keyword,
+                "watch_rule": None,
+            }
+            keyword_targets.setdefault(search_keyword, []).append(target)
 
     return keyword_targets
 
@@ -1914,7 +1979,9 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
     seen_db_ready = False
     search_cache_db_ready = False
     processed_products = {}
+    matched_target_listing_keys = set()
     store_profile_cache = {}
+    marked_rule_ids = set()
 
     def disable_seen_db(reason):
         nonlocal connection, cursor, seen_db_ready, search_cache_db_ready
@@ -1938,7 +2005,7 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
         if target_source != "settings":
             return
 
-        marked_rule_ids = set()
+        pending_rule_ids = set()
         for target in targets:
             setting_ids = target.get("setting_ids")
             if not setting_ids:
@@ -1948,18 +2015,19 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
             for setting_id in setting_ids:
                 if setting_id is None or setting_id in marked_rule_ids:
                     continue
-                marked_rule_ids.add(setting_id)
+                pending_rule_ids.add(setting_id)
 
-        if not marked_rule_ids:
+        if not pending_rule_ids:
             return
         try:
-            marked_count = mark_watch_rules_polled(sorted(marked_rule_ids))
+            marked_count = mark_watch_rules_polled(sorted(pending_rule_ids))
+            marked_rule_ids.update(pending_rule_ids)
             stats["settings_marked"] += int(marked_count or 0)
         except Exception as exc:
             stats["db_errors"] += 1
             print(
                 "[polling] setting polled_at 일괄 갱신 실패 "
-                f"(count={len(marked_rule_ids)}): {exc}"
+                f"(count={len(pending_rule_ids)}): {exc}"
             )
 
     try:
@@ -2138,6 +2206,7 @@ def poll_once(user_id=None, search_words=None, *, inline_process=False, inline_p
                     saved_listing_states,
                     targets_for_word,
                     stats=stats,
+                    matched_target_listing_keys=matched_target_listing_keys,
                 )
                 immediate_covered_target_keys_by_match_key = {}
                 if _is_immediate_analysis_enqueue_enabled():
