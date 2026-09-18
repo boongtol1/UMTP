@@ -1108,6 +1108,21 @@ MySQL 환경에서 `ADD COLUMN IF NOT EXISTS`가 제한되면, 컬럼 존재 여
 `sql/drop_users_nickname_column.sql`은 users 테이블의 `nickname` 컬럼이 남아 있을 때만 삭제합니다.
 `sql/add_user_settings_save_logs.sql`은 설정 저장 요청/응답/부분실패 정보를 추적하는 `user_settings_save_logs` 테이블을 생성합니다.
 
+#### 기존 맥 라인업 저장 로그의 누락된 설정 ID 보정
+
+최초 저장 시 INSERT 후 발급된 ID를 읽지 않던 버그로 `watch_rule_id`와 응답 `item.id`가 NULL일 수 있었습니다.
+수정된 서버는 신규/수정 저장 모두 실제 `user_fair_prices.id`를 확인한 뒤 응답과 로그에 기록합니다.
+코드 배포 및 API 재시작 후, 기존 DB의 로그는 백업하고 아래 SQL로 별도 보정할 수 있습니다(`umtp` 디렉터리에서 실행).
+
+```bash
+mysql -u <DB_USER> -p -h <DB_HOST> UMTP_RB < sql/migrate_user_settings_save_logs_watch_rule_id.sql
+```
+
+이 SQL은 맥북 프로·맥북 네오·아이맥·맥 스튜디오의 성공 로그 중 `watch_rule_id`가 NULL인 건만 대상으로 합니다.
+사용자, 제품, 칩, 화면 크기, RAM, SSD가 모두 일치하고 설정 생성 시각이 로그 시각보다 늦지 않은 건만 연결하며, 재실행해도 안전합니다.
+원본 요청/응답 JSON은 당시 기록 그대로 보존합니다. 실패했거나 설정이 삭제되어 연결을 확인할 수 없는 로그의 NULL은 유지합니다.
+현재 참조 대상은 `user_fair_prices.id`이며, 폐기된 `user_watch_rules`를 다시 만들 필요는 없습니다.
+
 #### 2) 실행 방법
 
 ```bash
