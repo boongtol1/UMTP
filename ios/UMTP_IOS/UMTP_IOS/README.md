@@ -61,6 +61,8 @@ MacBook Pro 설정 fixture는 저장소의 `umtp/sql/seed_silicon_macbook_pro_fa
 
 iMac fixture는 `umtp/sql/seed_silicon_imac_fair_prices.sql`의 32개 사양·공정가를 그대로 읽고 신규 조건은 감시 OFF로 시작합니다. `SettingsParityTests`는 제품/칩/24인치 그룹, 시드 가격·저장 요청, 제품/칩별 일괄 설정 범위를 검증하고 `AlertsParityTests`는 알림 사양 표시를 확인합니다. `SettingsFlowUITests/testIMacSeedCatalogAndIndividualSaveReachTheAPI`는 `iMac → M4 → 24인치` 탐색과 150만원 기본 시장가, 개별 저장 API 요청을 검증합니다.
 
+2026-09-18 iMac 확장 검증: Xcode 27.0 / iOS 26.5 Simulator에서 전체 설정 UI 6개가 실패 없이 통과했습니다. 단위 테스트의 `effective_search_keyword` fixture 누락을 실제 API 응답에 맞춰 수정한 뒤 전체 단위 94개를 재실행해 실패·skip 없이 통과했습니다. 이 수정은 테스트 데이터에만 적용했고 앱 코드와 UI 테스트는 바꾸지 않았습니다. 서버는 417개 통과·DB 의존 15개 skip이며 DB/ML 의존 모듈 2개는 제외했습니다. 시드 32개 사양 일치와 기존 제품을 포함한 파싱 표현 1,407건도 확인했습니다. 검증은 loopback fixture와 테스트 환경에서 수행했으며 운영 DB 적용·배포·실기기·APNs 검증은 포함하지 않습니다.
+
 2026-09-18 MacBook Pro 확장 검증은 Xcode 27.0 / iOS 26.5 Simulator에서 단위 90개와 설정 UI 5개를 통과했습니다(실패·skip 0). 실제 서비스에 쓰지 않는 loopback fixture의 SQL 시드 276개 조합으로 확인했으며, 배포·실기기·APNs 검증은 포함하지 않습니다.
 
 ```sh

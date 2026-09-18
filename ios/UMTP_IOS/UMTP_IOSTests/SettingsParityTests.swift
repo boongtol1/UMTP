@@ -31,6 +31,9 @@ final class SettingsParityTests: XCTestCase {
         var item = UserFairPriceItem(unit: imac)
         item.system_fair_price_krw = 2_650_000
         item.recommended_search_keyword = "m4 아이맥"
+        // The settings API supplies the recommended keyword as the effective
+        // keyword when this newly introduced unit has no user override.
+        item.effective_search_keyword = item.recommended_search_keyword
         let api = SettingsTestAPI(items: [item])
         let model = SettingsViewModel(api: api)
         await model.load(userID: "imac-user")
