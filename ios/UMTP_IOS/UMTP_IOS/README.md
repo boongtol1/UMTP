@@ -13,6 +13,8 @@
 - 세션: 기존 `umtp_user_id`를 보존합니다. 기기 식별자는 기존 값과 호환되도록 UserDefaults와 Keychain에 고정하며, 로그아웃으로 기기 식별자를 바꾸지 않습니다.
 - 원격 알림: 권한 요청, FCM 토큰 등록, 알림 클릭 후 상세 이동을 연결합니다. Firebase 설정 없이도 나머지 앱 기능은 동작하지만 실서비스 푸시 수신은 별도 설정과 서버 대응이 필요합니다.
 
+Mac Studio는 서버의 SQL 시드 80개 조합을 표시합니다. M1/M2 Max·Ultra, M3 Ultra, M4 Max를 세대순으로 정렬하며 Mac mini와 같이 화면 선택 없이 RAM/SSD 설정으로 이동합니다. 개별 저장과 현재 칩/제품 전체 일괄 적용에서 화면 값은 0을 유지하며, 제목과 알림 사양에는 0인치를 표시하지 않습니다.
+
 프로젝트 주변 경로:
 
 ```text
@@ -57,9 +59,11 @@ xcodebuild -project ios/UMTP_IOS/UMTP_IOS.xcodeproj \
 
 UI 테스트는 실제 서비스 대신 Python 표준 라이브러리로 작성된 메모리 기반 fixture를 사용합니다. 별도 터미널에서 같은 Simulator UUID를 지정한 뒤 서버를 계속 실행해 둡니다.
 
-MacBook Pro 설정 fixture는 저장소의 `umtp/sql/seed_silicon_macbook_pro_fair_prices.sql`에서 사양과 시스템 시장가를 읽습니다. `SettingsFlowUITests`는 13인치 기본 칩 탐색과 14/16인치 Max 칩 선택·개별 저장을 기존 Air·mini 흐름과 함께 확인합니다.
+MacBook Pro와 Mac Studio 설정 fixture는 저장소의 각 `seed_silicon_*_fair_prices.sql`에서 사양과 시스템 시장가를 읽습니다. `SettingsFlowUITests`는 13인치 기본 칩 탐색과 14/16인치 Max 칩 선택·개별 저장에 더해 Studio Max/Ultra의 화면 선택 생략과 저장 요청을 확인합니다. Studio 단위 테스트는 512GB RAM·16TB SSD 직렬화와 제품/칩 일괄 적용 범위를 확인합니다.
 
 2026-09-18 MacBook Pro 확장 검증은 Xcode 27.0 / iOS 26.5 Simulator에서 단위 90개와 설정 UI 5개를 통과했습니다(실패·skip 0). 실제 서비스에 쓰지 않는 loopback fixture의 SQL 시드 276개 조합으로 확인했으며, 배포·실기기·APNs 검증은 포함하지 않습니다.
+
+2026-09-18 Mac Studio 확장 검증은 Xcode 27.0 / iOS 26.5 Simulator에서 단위 94개와 설정 UI 7개, 총 101개를 통과했습니다(실패·skip 0). loopback fixture로 Max/Ultra의 화면 선택 생략과 설정 저장을 확인했습니다. 서버는 412개 통과·DB 의존 15개 skip이며 환경 의존 DB/ML 모듈 2개는 제외했습니다. 시드 80개 사양의 정확한 일치와 기존 Air/Mini/Pro를 포함한 1,551개 사양 표현을 별도로 검증했습니다. 운영 DB 변경·배포·실제 메시지 발송은 수행하지 않았습니다.
 
 ```sh
 export UMTP_SIMULATOR_ID="사용할 Simulator UUID"

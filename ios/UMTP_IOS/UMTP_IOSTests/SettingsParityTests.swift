@@ -5,6 +5,69 @@ import XCTest
 final class SettingsParityTests: XCTestCase {
     private let unit = MacUnit(product_type: "MacBook Air", chip: "M2", screen_inch: 13, ram_gb: 16, ssd_gb: 512)
 
+    func testMacStudioCatalogSortsUltraAndSkipsScreenSelection() async {
+        let chips = ["M1 Max", "M1 Ultra", "M2 Max", "M2 Ultra", "M3 Ultra", "M4 Max"]
+        let studios = chips.reversed().map { MacUnit(product_type: "Mac Studio", chip: $0, screen_inch: 0, ram_gb: 64, ssd_gb: 1024) }
+        let model = SettingsViewModel(api: SettingsTestAPI(items: ([unit] + studios).map { UserFairPriceItem(unit: $0) }))
+        await model.load(userID: "studio-user")
+        XCTAssertEqual(model.products, ["MacBook Air", "Mac Studio"])
+        XCTAssertEqual(model.chips(product: "Mac Studio"), chips)
+        XCTAssertEqual(model.screens(product: "Mac Studio", chip: "M3 Ultra"), [])
+        XCTAssertFalse(MacUnit.hasBuiltInDisplay("Mac Studio"))
+        XCTAssertFalse(MacUnit.hasBuiltInDisplay("Mac mini"))
+        XCTAssertTrue(MacUnit.hasBuiltInDisplay("MacBook Pro"))
+        XCTAssertEqual(MacUnit.chipOrder("m3 ultra"), MacUnit.chipOrder("M3 Ultra"))
+    }
+
+    func testMacStudioSavePreserves512GBRAMAnd16TBStorage() async throws {
+        let studio = MacUnit(product_type: "Mac Studio", chip: "M3 Ultra", screen_inch: 0, ram_gb: 512, ssd_gb: 16384)
+        var item = UserFairPriceItem(unit: studio)
+        item.system_fair_price_krw = 29_500_000
+        item.effective_fair_price_krw = 29_500_000
+        item.recommended_search_keyword = "m3ultra 맥스튜디오"
+        let api = SettingsTestAPI(items: [item])
+        let model = SettingsViewModel(api: api)
+        await model.load(userID: "studio-user")
+        XCTAssertEqual(model.draft(for: studio).targetText, "23600000")
+        model.edit(studio) { $0.enabled = true; $0.priority = .fast }
+        let saved = await model.save(studio)
+        XCTAssertTrue(saved)
+        let request = try XCTUnwrap(api.requests.first)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        XCTAssertEqual(body["product_type"] as? String, "Mac Studio")
+        XCTAssertEqual(body["chip"] as? String, "M3 Ultra")
+        XCTAssertEqual(body["screen_inch"] as? Int, 0)
+        XCTAssertEqual(body["ram_gb"] as? Int, 512)
+        XCTAssertEqual(body["ssd_gb"] as? Int, 16384)
+        XCTAssertEqual(body["fair_price_krw"] as? Int, 29_500_000)
+        XCTAssertEqual(body["priority"] as? String, "FAST")
+    }
+
+    func testMacStudioBulkScopeIsolatesChipsAndOtherProducts() async {
+        let units = [
+            MacUnit(product_type: "Mac Studio", chip: "M1 Max", screen_inch: 0, ram_gb: 32, ssd_gb: 512),
+            MacUnit(product_type: "Mac Studio", chip: "M1 Max", screen_inch: 0, ram_gb: 64, ssd_gb: 1024),
+            MacUnit(product_type: "Mac Studio", chip: "M3 Ultra", screen_inch: 0, ram_gb: 512, ssd_gb: 16384),
+            MacUnit(product_type: "MacBook Pro", chip: "M1 Max", screen_inch: 14, ram_gb: 32, ssd_gb: 1024), unit,
+        ]
+        let items = units.map { unit in
+            var item = UserFairPriceItem(unit: unit)
+            item.system_fair_price_krw = 1_800_000
+            item.enabled = true
+            return item
+        }
+        let api = SettingsTestAPI(items: items)
+        let model = SettingsViewModel(api: api)
+        await model.load(userID: "studio-user")
+        await model.apply(.alerts(false), scope: SettingsScope(product: "Mac Studio", chip: "M1 Max", screen: nil))
+        XCTAssertEqual(api.requests.count, 2)
+        XCTAssertTrue(api.requests.allSatisfy { $0.product_type == "Mac Studio" && $0.chip == "M1 Max" && $0.screen_inch == 0 })
+        api.requests = []
+        await model.apply(.priority(.fast), scope: SettingsScope(product: "Mac Studio", chip: nil, screen: nil))
+        XCTAssertEqual(api.requests.count, 3)
+        XCTAssertTrue(api.requests.allSatisfy { $0.product_type == "Mac Studio" && $0.priority == "FAST" })
+    }
+
     func testMacBookProCatalogGroupsEverySiliconGenerationAndUsesServerScreenSizes() async {
         let expectedChips = ["M1", "M1 Pro", "M1 Max", "M2", "M2 Pro", "M2 Max",
                              "M3", "M3 Pro", "M3 Max", "M4", "M4 Pro", "M4 Max",

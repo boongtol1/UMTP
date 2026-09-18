@@ -43,7 +43,7 @@ struct SettingsView: View {
                         SettingsRefreshStatus(viewModel: viewModel)
                         Section("칩 선택") {
                             ForEach(viewModel.chips(product: product), id: \.self) { chip in
-                                NavigationLink(chip, value: product == "Mac mini"
+                                NavigationLink(chip, value: !MacUnit.hasBuiltInDisplay(product)
                                                ? SettingsDestination.combinations(product, chip, 0)
                                                : SettingsDestination.chip(product, chip))
                             }
@@ -142,7 +142,7 @@ private struct SettingsCombinationsView: View {
     @State private var inputError: String?
     private var scope: SettingsScope {
         SettingsScope(product: product, chip: productScope ? nil : chip,
-                      screen: productScope || product == "Mac mini" ? nil : screen)
+                      screen: productScope || !MacUnit.hasBuiltInDisplay(product) ? nil : screen)
     }
     private var scopedItems: [UserFairPriceItem] { viewModel.scopedSettings(scope) }
     private var enabledOverrides: [UserFairPriceItem] { scopedItems.filter(\.has_user_override) }
@@ -213,12 +213,12 @@ private struct SettingsCombinationsView: View {
         }
     }
 
-    private var scopeTitle: String { product == "Mac mini" ? "\(chip) \(product) 설정" : "\(chip) \(product) \(screen)인치 설정" }
+    private var scopeTitle: String { !MacUnit.hasBuiltInDisplay(product) ? "\(chip) \(product) 설정" : "\(chip) \(product) \(screen)인치 설정" }
 
     private var bulkSection: some View {
         Section("일괄 설정") {
             Picker("적용 범위", selection: $productScope) {
-                Text(product == "Mac mini" ? "현재 칩" : "현재 칩/인치").tag(false)
+                Text(!MacUnit.hasBuiltInDisplay(product) ? "현재 칩" : "현재 칩/인치").tag(false)
                 Text("제품 전체").tag(true)
             }.pickerStyle(.segmented)
             Text("\(scope.label) 범위에 적용됩니다.").font(.caption).foregroundStyle(.secondary)

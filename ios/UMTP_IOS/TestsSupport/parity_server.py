@@ -131,6 +131,16 @@ for chip, screen, ram, ssd, price in re.findall(
     MACBOOK_PRO_PRICES[(chip, int(screen), int(ram), int(ssd))] = int(price)
 if not MACBOOK_PRO_PRICES:
     raise ValueError("MacBook Pro fixture requires the fair-price SQL seed")
+MAC_STUDIO_SEED = Path(__file__).resolve().parents[3] / "umtp/sql/seed_silicon_mac_studio_fair_prices.sql"
+MAC_STUDIO_PRICES = {}
+for chip, screen, ram, ssd, price in re.findall(
+        r"\('Mac Studio', '([^']+)', (\d+), (\d+), (\d+), (\d+)\)",
+        MAC_STUDIO_SEED.read_text(encoding="utf-8")):
+    unit = dict(product_type="Mac Studio", chip=chip, screen_inch=int(screen), ram_gb=int(ram), ssd_gb=int(ssd))
+    UNITS.append(unit)
+    MAC_STUDIO_PRICES[(chip, int(screen), int(ram), int(ssd))] = int(price)
+if len(MAC_STUDIO_PRICES) != 80:
+    raise ValueError("Mac Studio fixture requires all 80 fair-price seed rows")
 ALERT = dict(id=101, alert_event_id=101, user_id="parity-fixture-user", title="검증용 맥북 에어 M1",
              product_type="MacBook Air", chip="M1", screen_inch=13, ram_gb=8, ssd_gb=256,
              listing_price_krw=500000, user_market_price_krw=800000, fair_price_krw=800000,
@@ -153,7 +163,9 @@ def reset():
     for index, unit in enumerate(UNITS):
         price = MACBOOK_PRO_PRICES.get(tuple(unit[key] for key in ("chip", "screen_inch", "ram_gb", "ssd_gb")), 800000) \
             if unit["product_type"] == "MacBook Pro" else 800000
-        name = {"MacBook Air": "맥북 에어", "Mac mini": "맥미니", "MacBook Pro": "맥북 프로"}[unit["product_type"]]
+        if unit["product_type"] == "Mac Studio":
+            price = MAC_STUDIO_PRICES[tuple(unit[key] for key in ("chip", "screen_inch", "ram_gb", "ssd_gb"))]
+        name = {"MacBook Air": "맥북 에어", "Mac mini": "맥미니", "MacBook Pro": "맥북 프로", "Mac Studio": "맥스튜디오"}[unit["product_type"]]
         keyword = f"{name} {unit['chip']}"
         STATE["settings"].append(dict(**unit, id=index + 1, system_fair_price_krw=price,
             user_fair_price_krw=price, effective_fair_price_krw=price, user_alert_drop_rate_percent=20,

@@ -86,7 +86,7 @@ struct SettingsScope: Equatable, Hashable {
         unit.product_type == product && (chip == nil || unit.chip == chip) && (screen == nil || unit.screen_inch == screen)
     }
     var label: String {
-        [chip, product, screen.map { "\($0)인치" }].compactMap { $0 }.joined(separator: " ")
+        [chip, product, screen.flatMap { $0 > 0 ? "\($0)인치" : nil }].compactMap { $0 }.joined(separator: " ")
     }
 }
 

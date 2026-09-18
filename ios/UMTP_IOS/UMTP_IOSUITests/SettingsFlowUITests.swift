@@ -5,6 +5,46 @@ final class SettingsFlowUITests: XCTestCase {
     private let baseURL = "http://127.0.0.1:18765"
     private let unitKey = "MacBook Air|M1|13|8|256"
 
+    func testMacStudioMaxSkipsScreenAndSavesSeedPrice() async throws {
+        try await resetFixture()
+        let app = launchFixtureApp()
+        openStudioSettings(app, chip: "M1 Max")
+        XCTAssertTrue(app.buttons["현재 칩"].exists)
+        XCTAssertFalse(app.buttons["0인치"].exists)
+        let key = "Mac Studio|M1 Max|0|32|512"
+        let market = app.textFields["settings.market.\(key)"]
+        scrollTo(market, in: app)
+        XCTAssertEqual(market.value as? String, "1800000")
+        replace(market, with: "2000000")
+        dismissKeyboard(app)
+        let save = app.buttons["settings.save.\(key)"]
+        scrollTo(save, in: app)
+        save.tap()
+        XCTAssertTrue(app.alerts["설정"].waitForExistence(timeout: 10))
+        app.alerts.buttons["확인"].tap()
+        let requests = try await events()
+        let body = try XCTUnwrap(requests.first { $0["path"] as? String == "/user-fair-prices/upsert" }?["body"] as? [String: Any])
+        XCTAssertEqual(body["product_type"] as? String, "Mac Studio")
+        XCTAssertEqual(body["chip"] as? String, "M1 Max")
+        XCTAssertEqual(body["screen_inch"] as? Int, 0)
+        XCTAssertEqual(body["ram_gb"] as? Int, 32)
+        XCTAssertEqual(body["ssd_gb"] as? Int, 512)
+        XCTAssertEqual(body["fair_price_krw"] as? Int, 2000000)
+        XCTAssertEqual(body["search_keyword"] as? String, "맥스튜디오 M1 Max")
+    }
+
+    func testMacStudioUltraCatalogHasNoScreenSelection() async throws {
+        try await resetFixture()
+        let app = launchFixtureApp()
+        openStudioSettings(app, chip: "M3 Ultra")
+        XCTAssertTrue(app.buttons["현재 칩"].exists)
+        XCTAssertFalse(app.buttons["0인치"].exists)
+        XCTAssertFalse(app.buttons["14인치"].exists)
+        let market = app.textFields["settings.market.Mac Studio|M3 Ultra|0|96|1024"]
+        scrollTo(market, in: app)
+        XCTAssertEqual(market.value as? String, "8000000")
+    }
+
     func testMacBookProBaseChipUsesThirteenInchSeedCatalog() async throws {
         try await resetFixture()
         let app = launchFixtureApp()
@@ -207,6 +247,16 @@ final class SettingsFlowUITests: XCTestCase {
         scrollTo(selectedChip, in: app)
         selectedChip.tap()
         XCTAssertTrue(app.navigationBars["\(chip) MacBook Pro 선택"].waitForExistence(timeout: 5))
+    }
+
+    private func openStudioSettings(_ app: XCUIApplication, chip: String) {
+        app.tabBars.buttons["설정"].tap()
+        let studio = app.buttons["Mac Studio"]
+        XCTAssertTrue(studio.waitForExistence(timeout: 10)); studio.tap()
+        let selectedChip = app.buttons[chip]
+        scrollTo(selectedChip, in: app)
+        selectedChip.tap()
+        XCTAssertTrue(app.navigationBars["\(chip) Mac Studio 설정"].waitForExistence(timeout: 5))
     }
 
     private func navigateAirTree(_ app: XCUIApplication) {
