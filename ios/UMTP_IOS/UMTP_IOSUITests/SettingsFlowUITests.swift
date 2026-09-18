@@ -5,6 +5,45 @@ final class SettingsFlowUITests: XCTestCase {
     private let baseURL = "http://127.0.0.1:18765"
     private let unitKey = "MacBook Air|M1|13|8|256"
 
+    func testMacBookNeoSeedCatalogAndSaveReachTheAPI() async throws {
+        try await resetFixture()
+        let app = launchFixtureApp()
+        app.tabBars.buttons["설정"].tap()
+        let product = app.buttons["MacBook Neo"]
+        XCTAssertTrue(product.waitForExistence(timeout: 10))
+        product.tap()
+        app.buttons["A18 Pro"].tap()
+        XCTAssertTrue(app.buttons["13인치"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["14인치"].exists)
+        app.buttons["13인치"].tap()
+        XCTAssertTrue(app.navigationBars["A18 Pro MacBook Neo 13인치 설정"].waitForExistence(timeout: 5))
+        let baseMarket = app.textFields["settings.market.MacBook Neo|A18 Pro|13|8|256"]
+        scrollTo(baseMarket, in: app)
+        XCTAssertEqual(baseMarket.value as? String, "850000")
+        let key = "MacBook Neo|A18 Pro|13|8|512"
+        let market = app.textFields["settings.market.\(key)"]
+        scrollTo(market, in: app)
+        XCTAssertEqual(market.value as? String, "900000")
+        replace(market, with: "1000000")
+        dismissKeyboard(app)
+        let save = app.buttons["settings.save.\(key)"]
+        scrollTo(save, in: app)
+        save.tap()
+        XCTAssertTrue(app.alerts["설정"].waitForExistence(timeout: 10))
+        app.alerts.buttons["확인"].tap()
+        let requests = try await events()
+        let saved = requests.filter { $0["path"] as? String == "/user-fair-prices/upsert" }
+        XCTAssertEqual(saved.count, 1)
+        let body = try XCTUnwrap(saved.first?["body"] as? [String: Any])
+        XCTAssertEqual(body["product_type"] as? String, "MacBook Neo")
+        XCTAssertEqual(body["chip"] as? String, "A18 Pro")
+        XCTAssertEqual(body["screen_inch"] as? Int, 13)
+        XCTAssertEqual(body["ram_gb"] as? Int, 8)
+        XCTAssertEqual(body["ssd_gb"] as? Int, 512)
+        XCTAssertEqual(body["fair_price_krw"] as? Int, 1000000)
+        XCTAssertEqual(body["search_keyword"] as? String, "맥북 네오 A18 Pro")
+    }
+
     func testMacBookProBaseChipUsesThirteenInchSeedCatalog() async throws {
         try await resetFixture()
         let app = launchFixtureApp()
