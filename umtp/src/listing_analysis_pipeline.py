@@ -91,7 +91,7 @@ DUPLICATE_ENTRY_ERROR_CODE = 1062
 ALERT_BODY_EXCERPT_MAX_LEN = 500
 
 _MAC_PRODUCT_NAME_PATTERN = re.compile(
-    r"(맥북에어|맥북|맥\s*미니|맥미니|맥\s*스튜디오|맥스튜디오|macbook(?:\s*air)?|mac\s*mini|mac\s*studio|macmini|macstudio)",
+    r"(맥북에어|맥북|맥\s*미니|맥미니|맥\s*스튜디오|맥스튜디오|아이\s*맥|i\s*mac|macbook(?:\s*air)?|mac\s*mini|mac\s*studio|macmini|macstudio)",
     flags=re.IGNORECASE,
 )
 _TITLE_CHIP_SPEC_PATTERN = re.compile(
