@@ -131,6 +131,14 @@ for chip, screen, ram, ssd, price in re.findall(
     MACBOOK_PRO_PRICES[(chip, int(screen), int(ram), int(ssd))] = int(price)
 if not MACBOOK_PRO_PRICES:
     raise ValueError("MacBook Pro fixture requires the fair-price SQL seed")
+IMAC_SEED = Path(__file__).resolve().parents[3] / "umtp/sql/seed_silicon_imac_fair_prices.sql"
+IMAC_PRICES = {}
+for chip, screen, ram, ssd, price in re.findall(
+        r"\('iMac', '([^']+)', (\d+), (\d+), (\d+), (\d+)\)", IMAC_SEED.read_text(encoding="utf-8")):
+    UNITS.append(dict(product_type="iMac", chip=chip, screen_inch=int(screen), ram_gb=int(ram), ssd_gb=int(ssd)))
+    IMAC_PRICES[(chip, int(screen), int(ram), int(ssd))] = int(price)
+if len(IMAC_PRICES) != 32:
+    raise ValueError("iMac fixture requires the complete 32-spec fair-price SQL seed")
 ALERT = dict(id=101, alert_event_id=101, user_id="parity-fixture-user", title="검증용 맥북 에어 M1",
              product_type="MacBook Air", chip="M1", screen_inch=13, ram_gb=8, ssd_gb=256,
              listing_price_krw=500000, user_market_price_krw=800000, fair_price_krw=800000,
@@ -153,7 +161,9 @@ def reset():
     for index, unit in enumerate(UNITS):
         price = MACBOOK_PRO_PRICES.get(tuple(unit[key] for key in ("chip", "screen_inch", "ram_gb", "ssd_gb")), 800000) \
             if unit["product_type"] == "MacBook Pro" else 800000
-        name = {"MacBook Air": "맥북 에어", "Mac mini": "맥미니", "MacBook Pro": "맥북 프로"}[unit["product_type"]]
+        if unit["product_type"] == "iMac":
+            price = IMAC_PRICES[tuple(unit[key] for key in ("chip", "screen_inch", "ram_gb", "ssd_gb"))]
+        name = {"MacBook Air": "맥북 에어", "Mac mini": "맥미니", "MacBook Pro": "맥북 프로", "iMac": "아이맥"}[unit["product_type"]]
         keyword = f"{name} {unit['chip']}"
         STATE["settings"].append(dict(**unit, id=index + 1, system_fair_price_krw=price,
             user_fair_price_krw=price, effective_fair_price_krw=price, user_alert_drop_rate_percent=20,
@@ -161,6 +171,9 @@ def reset():
             user_target_buy_price_krw=price * 4 // 5, enabled=True, has_user_override=True,
             priority="NORMAL", recommended_search_keyword=keyword, effective_search_keyword=keyword,
             user_alert_price_direction="BELOW_OR_EQUAL", poll_interval_seconds=60))
+        if unit["product_type"] == "iMac":
+            STATE["settings"][-1].update(user_fair_price_krw=None, user_target_buy_price_krw=None,
+                                         enabled=False, has_user_override=False)
 
 
 def seed_trade_history():

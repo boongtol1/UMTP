@@ -5,6 +5,45 @@ final class SettingsFlowUITests: XCTestCase {
     private let baseURL = "http://127.0.0.1:18765"
     private let unitKey = "MacBook Air|M1|13|8|256"
 
+    func testIMacSeedCatalogAndIndividualSaveReachTheAPI() async throws {
+        try await resetFixture()
+        let app = launchFixtureApp()
+        app.tabBars.buttons["설정"].tap()
+        let imac = app.buttons["iMac"]
+        XCTAssertTrue(imac.waitForExistence(timeout: 10)); imac.tap()
+        XCTAssertTrue(app.buttons["M1"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["M3"].exists)
+        XCTAssertTrue(app.buttons["M4"].exists)
+        XCTAssertFalse(app.buttons["M2"].exists)
+        app.buttons["M4"].tap()
+        XCTAssertTrue(app.buttons["24인치"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["27인치"].exists)
+        app.buttons["24인치"].tap()
+        XCTAssertTrue(app.navigationBars["M4 iMac 24인치 설정"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["현재 칩/인치"].exists)
+        let key = "iMac|M4|24|16|256"
+        let market = app.textFields["settings.market.\(key)"]
+        scrollTo(market, in: app)
+        XCTAssertEqual(market.value as? String, "1500000")
+        replace(market, with: "1600000")
+        dismissKeyboard(app)
+        let save = app.buttons["settings.save.\(key)"]
+        scrollTo(save, in: app); save.tap()
+        XCTAssertTrue(app.alerts["설정"].waitForExistence(timeout: 10))
+        app.alerts.buttons["확인"].tap()
+        let requests = try await events()
+        let saved = try XCTUnwrap(requests.last { $0["path"] as? String == "/user-fair-prices/upsert" })
+        let body = try XCTUnwrap(saved["body"] as? [String: Any])
+        XCTAssertEqual(body["product_type"] as? String, "iMac")
+        XCTAssertEqual(body["chip"] as? String, "M4")
+        XCTAssertEqual(body["screen_inch"] as? Int, 24)
+        XCTAssertEqual(body["ram_gb"] as? Int, 16)
+        XCTAssertEqual(body["ssd_gb"] as? Int, 256)
+        XCTAssertEqual(body["fair_price_krw"] as? Int, 1600000)
+        XCTAssertEqual(body["search_keyword"] as? String, "아이맥 M4")
+        XCTAssertEqual(body["enabled"] as? Bool, false)
+    }
+
     func testMacBookProBaseChipUsesThirteenInchSeedCatalog() async throws {
         try await resetFixture()
         let app = launchFixtureApp()
