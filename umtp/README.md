@@ -30,6 +30,16 @@ MacBook Pro 회귀 검증은 저장소 루트에서 `python3 -m unittest discove
 
 MacBook Neo 회귀 검증: `python3 -m unittest discover -s umtp/tests -p '*macbook_neo*.py'`. 2026-09-18 기준 서버 테스트 418개 통과·DB 의존 15개 skip; 별도 DB 마이그레이션 및 joblib 미설치 ML 학습 모듈 2개는 실행 대상에서 제외했습니다. 실제 알림 전송은 mock으로 대체했습니다.
 
+## 실리콘 iMac 지원
+
+- `sql/seed_silicon_imac_fair_prices.sql`의 M1·M3·M4, 24인치, RAM/SSD 32개 조합을 기존 설정·분석·알림 흐름에 추가합니다. M2·Intel·iMac Pro와 시드에 없는 옵션은 제외합니다. 23.5인치 표기는 24인치로 정규화하며, 화면의 24와 RAM 24GB를 구분합니다.
+- `/silicon-mac-units`, 호환 경로 `/macbook-air-units`, `/user-fair-prices`에서 노출됩니다. 기본 검색어는 `m1 아이맥` 형식이며 신규 조건은 감시 OFF, 사용자 가격·조건은 시스템 기본값보다 우선합니다.
+- 기본 검색어를 사용하는 아이맥 조건은 칩별로 `m1 아이맥`과 `imac m1`처럼 한글·영문 검색을 각각 실행합니다. 양쪽에서 같은 게시글이 나오면 중고나라 상품 ID와 설정 ID로 합쳐 한 번만 분석하며, 사용자가 직접 입력한 검색어는 별칭을 추가하지 않고 그대로 사용합니다.
+- 공정가 초기 적용은 `umtp`에서 `mysql -u <DB_USER> -p < sql/seed_silicon_imac_fair_prices.sql`로 실행합니다. 시드는 같은 사양의 시스템 공정가를 갱신하므로 수동 수정한 가격이 있으면 적용 전에 확인하세요. API와 polling/analysis/notification worker를 같은 버전으로 반영해야 합니다.
+- iPhone은 `iMac → 칩 → 24인치 → RAM/SSD` 순서로 기존과 같은 개별·일괄 설정을 사용하고, 텔레그램은 제품·칩·화면·RAM·SSD·가격을 기존 형식으로 표시합니다.
+
+회귀 검증: 저장소 루트에서 `python3 -m unittest discover -s umtp/tests -p 'test_*imac*.py'`. 테스트는 SQL 시드 전체 사양·가격과 설정 저장/초기화, 파싱, 텔레그램 발송 경계를 검증합니다. 실제 DB 적용·배포는 별도 운영 단계입니다.
+
 ## UMTP MVP Progress
 
 | Version | Summary | Run |

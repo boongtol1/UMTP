@@ -9,7 +9,7 @@
 - `MainTabView`: 알림 / 읽음 보관함 / 거래 입력 / 설정의 네 탭. 알림과 보관함은 상태를 공유하고, 거래 입력 초안은 탭을 바꿔도 유지합니다.
 - 알림: 상세·본문·이미지·가격·위험 정보, 선택/전체 검토 완료, 읽음 보관함 그룹·삭제, 실패 재시도. 상세를 여는 것만으로 읽음 처리하지 않습니다. 화면이 활성화된 foreground에서 10초 간격으로 갱신하고 복귀 시 재조회합니다.
 - 거래: URL·상품 ID·알림·보관함에서 시작, 사전 입력, 구매/판매 기록, 검증 및 변경 필드 저장, 거래 내역·삭제. 기존 초안을 다른 알림으로 교체할 때 확인합니다.
-- 설정: MacBook Air·Mac mini·MacBook Pro의 제품·칩·화면·메모리·저장장치별 조건, 기준/희망 가격, 키워드, 우선순위·활성화, 후보 알림, 일괄 적용·초기화·규칙 갱신. MacBook Pro는 M1~M5의 기본·Pro·Max 칩을 세대순으로 표시하며 화면 크기와 RAM/SSD 조합은 서버 카탈로그를 따릅니다.
+- 설정: MacBook Air·Mac mini·MacBook Pro·iMac의 제품·칩·화면·메모리·저장장치별 조건, 기준/희망 가격, 키워드, 우선순위·활성화, 후보 알림, 일괄 적용·초기화·규칙 갱신. MacBook Pro는 M1~M5의 기본·Pro·Max 칩을 세대순으로 표시하며 화면 크기와 RAM/SSD 조합은 서버 카탈로그를 따릅니다. iMac은 M1·M3·M4의 24인치, SQL 시드의 32개 조합을 같은 방식으로 표시합니다.
 - 세션: 기존 `umtp_user_id`를 보존합니다. 기기 식별자는 기존 값과 호환되도록 UserDefaults와 Keychain에 고정하며, 로그아웃으로 기기 식별자를 바꾸지 않습니다.
 - 원격 알림: 권한 요청, FCM 토큰 등록, 알림 클릭 후 상세 이동을 연결합니다. Firebase 설정 없이도 나머지 앱 기능은 동작하지만 실서비스 푸시 수신은 별도 설정과 서버 대응이 필요합니다.
 
@@ -58,6 +58,10 @@ xcodebuild -project ios/UMTP_IOS/UMTP_IOS.xcodeproj \
 UI 테스트는 실제 서비스 대신 Python 표준 라이브러리로 작성된 메모리 기반 fixture를 사용합니다. 별도 터미널에서 같은 Simulator UUID를 지정한 뒤 서버를 계속 실행해 둡니다.
 
 MacBook Pro 설정 fixture는 저장소의 `umtp/sql/seed_silicon_macbook_pro_fair_prices.sql`에서 사양과 시스템 시장가를 읽습니다. `SettingsFlowUITests`는 13인치 기본 칩 탐색과 14/16인치 Max 칩 선택·개별 저장을 기존 Air·mini 흐름과 함께 확인합니다.
+
+iMac fixture는 `umtp/sql/seed_silicon_imac_fair_prices.sql`의 32개 사양·공정가를 그대로 읽고 신규 조건은 감시 OFF로 시작합니다. `SettingsParityTests`는 제품/칩/24인치 그룹, 시드 가격·저장 요청, 제품/칩별 일괄 설정 범위를 검증하고 `AlertsParityTests`는 알림 사양 표시를 확인합니다. `SettingsFlowUITests/testIMacSeedCatalogAndIndividualSaveReachTheAPI`는 `iMac → M4 → 24인치` 탐색과 150만원 기본 시장가, 개별 저장 API 요청을 검증합니다.
+
+2026-09-18 iMac 확장 검증: Xcode 27.0 / iOS 26.5 Simulator에서 전체 설정 UI 6개가 실패 없이 통과했습니다. 단위 테스트의 `effective_search_keyword` fixture 누락을 실제 API 응답에 맞춰 수정한 뒤 전체 단위 94개를 재실행해 실패·skip 없이 통과했습니다. 이 수정은 테스트 데이터에만 적용했고 앱 코드와 UI 테스트는 바꾸지 않았습니다. 서버는 417개 통과·DB 의존 15개 skip이며 DB/ML 의존 모듈 2개는 제외했습니다. 시드 32개 사양 일치와 기존 제품을 포함한 파싱 표현 1,407건도 확인했습니다. 검증은 loopback fixture와 테스트 환경에서 수행했으며 운영 DB 적용·배포·실기기·APNs 검증은 포함하지 않습니다.
 
 2026-09-18 MacBook Pro 확장 검증은 Xcode 27.0 / iOS 26.5 Simulator에서 단위 90개와 설정 UI 5개를 통과했습니다(실패·skip 0). 실제 서비스에 쓰지 않는 loopback fixture의 SQL 시드 276개 조합으로 확인했으며, 배포·실기기·APNs 검증은 포함하지 않습니다.
 

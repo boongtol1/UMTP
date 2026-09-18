@@ -49,6 +49,76 @@ final class SettingsParityTests: XCTestCase {
         XCTAssertEqual(body["enabled"] as? Bool, true)
     }
 
+    func testIMacCatalogUsesAllSeedCombinationsAndOnlyTwentyFourInches() async {
+        let options: [(String, [Int])] = [("M4", [16, 24, 32]), ("M1", [8, 16]), ("M3", [8, 16, 24])]
+        var units = options.flatMap { chip, memory in
+            memory.flatMap { ram in
+                [256, 512, 1024, 2048].map { ssd in
+                    MacUnit(product_type: "iMac", chip: chip, screen_inch: 24, ram_gb: ram, ssd_gb: ssd)
+                }
+            }
+        }
+        XCTAssertEqual(units.count, 32)
+        units += [unit, MacUnit(product_type: "Mac mini", chip: "M4", screen_inch: 0, ram_gb: 16, ssd_gb: 256),
+                  MacUnit(product_type: "MacBook Pro", chip: "M3", screen_inch: 14, ram_gb: 8, ssd_gb: 512)]
+        let model = SettingsViewModel(api: SettingsTestAPI(items: units.map { UserFairPriceItem(unit: $0) }))
+        await model.load(userID: "u")
+        XCTAssertEqual(model.products, ["MacBook Air", "Mac mini", "MacBook Pro", "iMac"])
+        XCTAssertEqual(model.chips(product: "iMac"), ["M1", "M3", "M4"])
+        for chip in ["M1", "M3", "M4"] {
+            XCTAssertEqual(model.screens(product: "iMac", chip: chip), [24])
+        }
+    }
+
+    func testIMacSaveUsesSeedPriceDisabledDefaultAndCanonicalSpecification() async throws {
+        let imac = MacUnit(product_type: "iMac", chip: "M4", screen_inch: 24, ram_gb: 32, ssd_gb: 1024)
+        var item = UserFairPriceItem(unit: imac)
+        item.system_fair_price_krw = 2_650_000
+        item.recommended_search_keyword = "m4 아이맥"
+        // The settings API supplies the recommended keyword as the effective
+        // keyword when this newly introduced unit has no user override.
+        item.effective_search_keyword = item.recommended_search_keyword
+        let api = SettingsTestAPI(items: [item])
+        let model = SettingsViewModel(api: api)
+        await model.load(userID: "imac-user")
+        XCTAssertFalse(model.draft(for: imac).enabled)
+        XCTAssertEqual(model.draft(for: imac).targetText, "2120000")
+        model.edit(imac) { $0.enabled = true; $0.priority = .fast }
+        let saved = await model.save(imac)
+        XCTAssertTrue(saved)
+        let request = try XCTUnwrap(api.requests.first)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        XCTAssertEqual(body["product_type"] as? String, "iMac")
+        XCTAssertEqual(body["chip"] as? String, "M4")
+        XCTAssertEqual(body["screen_inch"] as? Int, 24)
+        XCTAssertEqual(body["ram_gb"] as? Int, 32)
+        XCTAssertEqual(body["ssd_gb"] as? Int, 1024)
+        XCTAssertEqual(body["fair_price_krw"] as? Int, 2_650_000)
+        XCTAssertEqual(body["search_keyword"] as? String, "m4 아이맥")
+        XCTAssertEqual(body["enabled"] as? Bool, true)
+        XCTAssertEqual(body["priority"] as? String, "FAST")
+    }
+
+    func testIMacBulkChangesRespectChipAndProductScope() async {
+        let units = [MacUnit(product_type: "iMac", chip: "M1", screen_inch: 24, ram_gb: 8, ssd_gb: 256),
+                     MacUnit(product_type: "iMac", chip: "M4", screen_inch: 24, ram_gb: 16, ssd_gb: 256), unit]
+        let api = SettingsTestAPI(items: units.map { unit in
+            var item = UserFairPriceItem(unit: unit)
+            item.system_fair_price_krw = 1_000_000
+            return item
+        })
+        let model = SettingsViewModel(api: api)
+        await model.load(userID: "u")
+        await model.apply(.alerts(true), scope: SettingsScope(product: "iMac", chip: "M1", screen: 24))
+        XCTAssertEqual(api.requests.count, 1)
+        XCTAssertEqual(api.requests.first?.chip, "M1")
+        XCTAssertEqual(api.requests.first?.enabled, true)
+        api.requests = []
+        await model.apply(.priority(.fast), scope: SettingsScope(product: "iMac", chip: nil, screen: nil))
+        XCTAssertEqual(api.requests.count, 2)
+        XCTAssertTrue(api.requests.allSatisfy { $0.product_type == "iMac" && $0.screen_inch == 24 && $0.priority == "FAST" })
+    }
+
     func testMacBookProCatalogGroupsEverySiliconGenerationAndUsesServerScreenSizes() async {
         let expectedChips = ["M1", "M1 Pro", "M1 Max", "M2", "M2 Pro", "M2 Max",
                              "M3", "M3 Pro", "M3 Max", "M4", "M4 Pro", "M4 Max",

@@ -9,6 +9,7 @@ try:
         VALID_MACBOOK_PRO_UNITS,
         SUPPORTED_PRODUCT_TYPES,
         MAC_MINI_PRODUCT_TYPE,
+        IMAC_PRODUCT_TYPE,
         get_product_base_spec,
         is_valid_silicon_unit,
     )
@@ -21,6 +22,7 @@ except ImportError:
         VALID_MACBOOK_PRO_UNITS,
         SUPPORTED_PRODUCT_TYPES,
         MAC_MINI_PRODUCT_TYPE,
+        IMAC_PRODUCT_TYPE,
         get_product_base_spec,
         is_valid_silicon_unit,
     )
@@ -30,6 +32,7 @@ except ImportError:
 PRODUCT_TYPE = MACBOOK_AIR_PRODUCT_TYPE
 DEFAULT_SCREEN_INCH = 13
 DEFAULT_MAC_MINI_SCREEN_INCH = 0
+DEFAULT_IMAC_SCREEN_INCH = 24
 SUPPORTED_CHIPS = ("M1", "M2", "M3", "M4", "M5")
 SUPPORTED_MAC_MINI_CHIPS = ("M1", "M2", "M2 Pro", "M4", "M4 Pro")
 SUPPORTED_RAM_GB = (8, 16, 18, 24, 32, 36, 48, 64, 96, 128)
@@ -102,6 +105,8 @@ SPEC_CONTEXT_KEYWORDS = [
     "맥 미니",
     "mac mini",
     "macmini",
+    "imac",
+    "아이맥",
     "gb",
     "기가",
     "tb",
@@ -153,6 +158,7 @@ _STRONG_NOISE_PATTERNS = (
 
 _SPEC_SPAN_PATTERNS = (
     re.compile(r"(?<![a-z0-9])a\s*18\s*-?\s*(?:pro|프로)(?![a-z0-9])", flags=re.IGNORECASE),
+    re.compile(r"(?<![\d.])(?:23\.5|24)\s*(?:인치|inch|형|\"|”|''|′′|-inch)(?!\d)", flags=re.IGNORECASE),
     re.compile(r"m\s*[1-5]\s*[-]?\s*(?:pro|max|프로|맥스)", flags=re.IGNORECASE),
     re.compile(r"m[1-5]", flags=re.IGNORECASE),
     re.compile(r"(?<!\d)(13(?:\.\d+)?|14(?:\.\d+)?|15(?:\.\d+)?|16(?:\.\d+)?)\s*(?:인치|inch|형|\"|”|''|′′)(?!\d)", flags=re.IGNORECASE),
@@ -221,9 +227,20 @@ def _normalize_screen_inch_value(raw_value):
     return None
 
 
-def _extract_screen_inch_candidates_from_text(text):
+def _extract_screen_inch_candidates_from_text(text, product_type=None):
     if not isinstance(text, str) or not text:
         return []
+
+    if product_type == IMAC_PRODUCT_TYPE:
+        # Preserve unsupported display sizes so validation rejects them instead
+        # of silently defaulting an Intel-era 21.5/27-inch listing to 24 inches.
+        candidates = []
+        for match in re.finditer(r"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:인치|inch|형|\"|”|''|′′|-inch)(?!\d)", text, flags=re.IGNORECASE):
+            value = float(match.group(1))
+            normalized = 24 if value in (23.5, 24) else value
+            if normalized not in candidates:
+                candidates.append(normalized)
+        return candidates
 
     candidates = []
     patterns = (
@@ -370,7 +387,7 @@ def _normalize_self_check_fields(self_check_fields):
     return normalized
 
 
-def _collect_self_check_spec_segments(normalized_self_check):
+def _collect_self_check_spec_segments(normalized_self_check, label_capacities=False):
     if not isinstance(normalized_self_check, dict):
         return []
 
@@ -378,6 +395,10 @@ def _collect_self_check_spec_segments(normalized_self_check):
     for key in SELF_CHECK_SPEC_SOURCE_KEYS:
         value = normalized_self_check.get(key)
         if value:
+            if label_capacities and key in ("램 용량", "SSD용량"):
+                # The source field already establishes the number's role.
+                # In particular, a bare RAM field of 24 is not a display.
+                value = ("RAM " if key == "램 용량" else "SSD ") + value
             segments.append(value)
     return segments
 
@@ -402,6 +423,12 @@ def _detect_product_types(text):
         detected.append(MACBOOK_PRO_PRODUCT_TYPE)
     if "macbookneo" in normalized or "맥북네오" in normalized:
         detected.append(MACBOOK_NEO_PRODUCT_TYPE)
+    if "아이맥" in normalized or re.search(r"(?<![a-z])i\s*mac(?![a-z])", lowered):
+        detected.append(IMAC_PRODUCT_TYPE)
+    # Recognize Studio to reject mixed-product listings before that independent
+    # lineup is merged.
+    if "macstudio" in normalized or "맥스튜디오" in normalized:
+        detected.append("Mac Studio")
     if (
         "mac mini" in lowered
         or "macmini" in normalized
@@ -482,11 +509,57 @@ def _extract_chip_candidates_for_product(text, product_type):
             if candidate not in candidates:
                 candidates.append(candidate)
         return candidates
+    if product_type == IMAC_PRODUCT_TYPE:
+        if not isinstance(text, str):
+            return []
+        # Keep unsupported chips and Intel markers as candidates, avoiding
+        # accidental acceptance of M2, Pro/Max/Ultra, or mixed Intel listings.
+        candidates = []
+        pattern = r"(?<![a-z0-9])m\s*(\d+)(?:\s*-?\s*(pro|max|ultra|프로|맥스|울트라))?"
+        for match in re.finditer(pattern, text.lower()):
+            tier = {"pro": "Pro", "프로": "Pro", "max": "Max", "맥스": "Max", "ultra": "Ultra", "울트라": "Ultra"}.get(match.group(2))
+            candidates.append(f"M{match.group(1)}" + (f" {tier}" if tier else ""))
+        if re.search(r"intel|인텔|(?<![a-z0-9])i[3579](?!\d)|xeon|제온", text, flags=re.IGNORECASE):
+            candidates.append("Intel")
+        if re.search(r"(?:i\s*mac|아이\s*맥)\s*(?:pro|프로)", text, flags=re.IGNORECASE):
+            candidates.append("iMac Pro")
+        return list(dict.fromkeys(candidates))
     if product_type == MACBOOK_PRO_PRODUCT_TYPE:
         return _extract_unique_macbook_pro_chip_candidates(text)
     if product_type == MAC_MINI_PRODUCT_TYPE:
         return _extract_unique_mac_mini_chip_candidates(text)
     return _extract_unique_chip_candidates(text)
+
+
+def _imac_has_unsupported_explicit_capacity(text, ram_raw, ssd_raw):
+    """Do not let an unrecognized explicit option turn into a base fallback."""
+    ram_values, ssd_values = {8, 16, 24, 32}, {256, 512, 1024, 2048}
+    number = r"(\d+(?:\.\d+)?)"
+    for raw, allowed in ((ram_raw, ram_values), (ssd_raw, ssd_values)):
+        if isinstance(raw, str):
+            match = re.search(rf"(?<![\d.]){number}\s*(tb|테라|t)?", raw, flags=re.IGNORECASE)
+            if match and float(match.group(1)) * (1024 if match.group(2) else 1) not in allowed:
+                return True
+    for match in re.finditer(rf"(?<![\d.]){number}\s*/\s*{number}\s*(tb|테라|t)?(?!\d)", text, flags=re.IGNORECASE):
+        ram = float(match.group(1))
+        ssd = float(match.group(2)) * (1024 if match.group(3) else 1)
+        if ram not in ram_values or ssd not in ssd_values:
+            return True
+    for match in re.finditer(rf"(?:램|ram|메모리|memory)\s*(?:용량\s*)?{number}|(?<![a-z가-힣\d.]){number}\s*(?:램|ram)(?![a-z]|\s*\d)", text, flags=re.IGNORECASE):
+        if float(match.group(1) or match.group(2)) not in ram_values:
+            return True
+    for match in re.finditer(rf"(?:ssd|저장공간|storage)\s*(?:용량\s*)?{number}\s*(tb|t|테라)?|(?<![a-z가-힣\d.]){number}\s*ssd(?!\s*\d)", text, flags=re.IGNORECASE):
+        value = float(match.group(1) or match.group(3)) * (1024 if match.group(2) else 1)
+        if value not in ssd_values:
+            return True
+    for match in re.finditer(rf"(?<![\d.]){number}\s*(gb|기가|g|tb|테라|t)(?![a-z0-9])", text, flags=re.IGNORECASE):
+        value = float(match.group(1))
+        if match.group(2).lower() in ("tb", "테라", "t"):
+            if value * 1024 not in ssd_values:
+                return True
+        elif value not in ram_values | ssd_values:
+            return True
+    return False
 
 
 def _extract_screen_inch_from_text(text):
@@ -595,7 +668,10 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
     if isinstance(self_check_text, str) and self_check_text.strip():
         self_check_segments.append(self_check_text)
     # 가격 판단용 핵심 스펙 키만 자동 파싱 재료로 사용한다.
-    self_check_segments.extend(_collect_self_check_spec_segments(normalized_self_check))
+    self_check_segments.extend(_collect_self_check_spec_segments(
+        normalized_self_check,
+        label_capacities=IMAC_PRODUCT_TYPE in _detect_product_types(title + " " + (model_name_raw or "")),
+    ))
 
     combined_text = _normalize_text(" ".join([title, body_text or "", " ".join(self_check_segments)]))
     normalized_text, removed_noise_fragments = _normalize_for_spec_parsing_with_meta(combined_text)
@@ -614,6 +690,7 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
     ssd_gb = None
     screen_inch_defaulted = False
     mini_screen_conflict = False
+    unsupported_imac_capacity = False
     screen_ambiguous = False
     ram_ambiguous = False
     ssd_ambiguous = False
@@ -713,7 +790,7 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         ssd_ambiguous = True
         _record_conflict(detected_conflicts, "ssd_gb", "unresolved", None, "self_check", ssd_self_candidates)
 
-    model_screen_candidates = _extract_screen_inch_candidates_from_text(normalize_for_spec_parsing(model_name_raw))
+    model_screen_candidates = _extract_screen_inch_candidates_from_text(normalize_for_spec_parsing(model_name_raw), product_type)
     model_screen_candidate, model_screen_ambiguous = _choose_numeric_candidate(model_screen_candidates)
     if model_screen_candidate is not None:
         screen_inch = model_screen_candidate
@@ -735,7 +812,7 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         chip_ambiguous = True
         _record_conflict(detected_conflicts, "chip", "unresolved", None, "text", text_chip_candidates)
 
-    text_screen_candidates = _extract_screen_inch_candidates_from_text(parsing_text)
+    text_screen_candidates = _extract_screen_inch_candidates_from_text(parsing_text, product_type)
     if product_type == MACBOOK_NEO_PRODUCT_TYPE:
         # Do not replace an explicitly unsupported size (for example 27-inch)
         # with the Neo's default 13-inch screen.
@@ -784,8 +861,19 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         ssd_ambiguous = True
         _record_conflict(detected_conflicts, "ssd_gb", "unresolved", None, "text", text_ssd_candidates)
 
+    if product_type == IMAC_PRODUCT_TYPE:
+        unsupported_imac_capacity = _imac_has_unsupported_explicit_capacity(parsing_text, ram_raw, ssd_raw)
+
     numeric_screens = (13, 14, 16) if product_type == MACBOOK_PRO_PRODUCT_TYPE else (13, 15)
-    numeric_candidates = extract_numeric_candidates(parsing_text, screen_values=numeric_screens)
+    numeric_text = parsing_text
+    if product_type == IMAC_PRODUCT_TYPE:
+        numeric_screens = (24,)
+        # Explicit display units belong exclusively to the display. In
+        # particular, 24-inch must never supply the 24GB RAM value.
+        numeric_text = re.sub(r"(?<![\d.])\d+(?:\.\d+)?\s*(?:인치|inch|형|\"|”|''|′′|-inch)(?!\d)", " ", numeric_text, flags=re.IGNORECASE)
+        if screen_inch == 24:
+            numeric_text += " 24인치"
+    numeric_candidates = extract_numeric_candidates(numeric_text, screen_values=numeric_screens)
     if numeric_candidates["screen_ram_ambiguous"]:
         screen_ambiguous = True
 
@@ -852,6 +940,10 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         screen_inch = DEFAULT_SCREEN_INCH
         screen_inch_defaulted = True
         _record_pattern(detected_patterns, "screen_inch", DEFAULT_SCREEN_INCH, "default", None)
+    elif product_type == IMAC_PRODUCT_TYPE and screen_inch is None and not screen_ambiguous:
+        screen_inch = DEFAULT_IMAC_SCREEN_INCH
+        screen_inch_defaulted = True
+        _record_pattern(detected_patterns, "screen_inch", screen_inch, "default", None)
     elif product_type == MACBOOK_PRO_PRODUCT_TYPE and screen_inch is None:
         # Only base chips have one unambiguous display size. Pro/Max require the
         # listing's screen size because 14-inch and 16-inch have different prices.
@@ -925,6 +1017,9 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         chip = None
         unit_validation_reason = MULTIPLE_CHIPS_REASON
         ambiguous_reasons.append(MULTIPLE_CHIPS_REASON)
+    elif unsupported_imac_capacity:
+        parse_success = False
+        unit_validation_reason = INVALID_UNIT_REASON
     elif not parse_success:
         unit_validation_reason = MISSING_REQUIRED_REASON
     elif product_type == MAC_MINI_PRODUCT_TYPE and mini_screen_conflict:
