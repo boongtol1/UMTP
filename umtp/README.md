@@ -40,6 +40,14 @@ MacBook Neo 회귀 검증: `python3 -m unittest discover -s umtp/tests -p '*macb
 
 회귀 검증: 저장소 루트에서 `python3 -m unittest discover -s umtp/tests -p 'test_*imac*.py'`. 테스트는 SQL 시드 전체 사양·가격과 설정 저장/초기화, 파싱, 텔레그램 발송 경계를 검증합니다. 실제 DB 적용·배포는 별도 운영 단계입니다.
 
+## 실리콘 Mac Studio 지원
+
+- `sql/seed_silicon_mac_studio_fair_prices.sql`의 80개 사양과 DB 시장가를 사용합니다. 칩은 M1 Max/Ultra, M2 Max/Ultra, M3 Ultra, M4 Max이며, 시드에 없는 M3 Max·M4 Ultra·M5는 추가하지 않습니다.
+- 내장 화면이 없는 제품이므로 `screen_inch=0`을 유지합니다. iPhone 설정은 Mac mini처럼 칩에서 RAM/SSD 조합으로 바로 이동하며, 텔레그램은 기존 제품과 같은 사양·가격 형식을 사용합니다.
+- M3 Ultra의 256/512GB 메모리와 최대 16TB(16384GB) 저장장치를 구분합니다. 명시한 사양이 시드에 없거나 제품·칩이 중복되는 매물은 알림 대상으로 처리하지 않습니다.
+- 배포 시 대상 DB에 이 시드를 적용하고 API 및 polling/analysis/notification worker와 앱을 함께 갱신합니다. 시드는 동일 사양의 가격만 갱신하며 기존 사용자 설정은 유지됩니다. 파일 주석의 O/E/L 근거와 저신뢰 가격 표시를 확인하세요.
+- 서버 회귀 검증: `python3 -m unittest discover -s umtp/tests -p 'test_mac_studio*.py'`. DB/메시지 전송은 테스트 대역을 사용하며 실제 운영 적용은 별도입니다.
+
 ## UMTP MVP Progress
 
 | Version | Summary | Run |

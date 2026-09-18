@@ -60,7 +60,7 @@ def _canonical_chip(chip):
     lowered_compact = normalized_chip.lower().replace(" ", "")
     if lowered_compact == "a18pro":
         return "A18 Pro"
-    match = re.fullmatch(r"m([1-5])(pro|max)", lowered_compact)
+    match = re.fullmatch(r"m([1-5])(pro|max|ultra)", lowered_compact)
     if match:
         return f"M{match.group(1)} {match.group(2).title()}"
     return normalized_chip
@@ -102,6 +102,8 @@ def build_default_keyword_for_watch_rule(rule):
 
     if product_type == "iMac" and compact_chip:
         return normalize_search_keyword(f"{compact_chip} 아이맥")
+    if product_type == "Mac Studio":
+        return normalize_search_keyword(f"{compact_chip} 맥스튜디오" if compact_chip else "맥스튜디오")
 
     if chip and product_type:
         return normalize_search_keyword(f"{product_type} {chip}")
@@ -146,15 +148,17 @@ def build_recommended_keywords_for_spec(product_type, chip, ram_gb=None, ssd_gb=
             keywords.append(f"{compact_chip} {product_name} {ram_gb} {ssd_gb}")
             keywords.append(f"{product_name} {normalized_chip} {ram_gb} {ssd_gb}")
 
-    if normalized_product_type == "Mac mini" and normalized_chip and compact_chip:
-        keywords.append(f"{compact_chip} 맥미니")
-        keywords.append(f"맥미니 {normalized_chip}")
-        keywords.append(f"mac mini {compact_chip}")
+    if normalized_product_type in ("Mac mini", "Mac Studio") and normalized_chip and compact_chip:
+        product_name = "맥스튜디오" if normalized_product_type == "Mac Studio" else "맥미니"
+        english_name = normalized_product_type.lower()
+        keywords.append(f"{compact_chip} {product_name}")
+        keywords.append(f"{product_name} {normalized_chip}")
+        keywords.append(f"{english_name} {compact_chip}")
 
         if ram_gb is not None and ssd_gb is not None:
-            keywords.append(f"{compact_chip} 맥미니 {ram_gb} {ssd_gb}")
-            keywords.append(f"맥미니 {normalized_chip} {ram_gb} {ssd_gb}")
-            keywords.append(f"mac mini {compact_chip} {ram_gb} {ssd_gb}")
+            keywords.append(f"{compact_chip} {product_name} {ram_gb} {ssd_gb}")
+            keywords.append(f"{product_name} {normalized_chip} {ram_gb} {ssd_gb}")
+            keywords.append(f"{english_name} {compact_chip} {ram_gb} {ssd_gb}")
 
     if normalized_product_type == "iMac" and normalized_chip and compact_chip:
         keywords.extend((f"{compact_chip} 아이맥", f"아이맥 {normalized_chip}", f"imac {compact_chip}"))
@@ -167,7 +171,7 @@ def build_recommended_keywords_for_spec(product_type, chip, ram_gb=None, ssd_gb=
     if normalized_product_type:
         keywords.append(normalized_product_type)
 
-    if normalized_chip and normalized_product_type != "iMac":
+    if normalized_chip and normalized_product_type not in ("iMac", "Mac Studio"):
         keywords.append(f"맥북 {normalized_chip}")
 
     return dedupe_keywords_keep_order(keywords)

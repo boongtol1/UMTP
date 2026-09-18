@@ -31,9 +31,9 @@ from src.search_keyword_utils import (
 
 
 CHIP_SORT_ORDER = {
-    f"M{generation}{tier}": generation * 3 + tier_index
+    f"M{generation}{tier}": generation * 4 + tier_index
     for generation in range(1, 6)
-    for tier_index, tier in enumerate(("", " Pro", " Max"))
+    for tier_index, tier in enumerate(("", " Pro", " Max", " Ultra"))
 }
 PRODUCT_TYPE_SORT_ORDER = {name: index for index, name in enumerate(SUPPORTED_PRODUCT_TYPES, start=1)}
 CHIP_SORT_ORDER["A18 Pro"] = 18

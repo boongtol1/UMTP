@@ -3,6 +3,7 @@ MACBOOK_PRO_PRODUCT_TYPE = "MacBook Pro"
 MACBOOK_NEO_PRODUCT_TYPE = "MacBook Neo"
 MAC_MINI_PRODUCT_TYPE = "Mac mini"
 IMAC_PRODUCT_TYPE = "iMac"
+MAC_STUDIO_PRODUCT_TYPE = "Mac Studio"
 PRODUCT_TYPE = MACBOOK_AIR_PRODUCT_TYPE
 SUPPORTED_PRODUCT_TYPES = (
     MACBOOK_AIR_PRODUCT_TYPE,
@@ -10,6 +11,7 @@ SUPPORTED_PRODUCT_TYPES = (
     MACBOOK_PRO_PRODUCT_TYPE,
     MACBOOK_NEO_PRODUCT_TYPE,
     IMAC_PRODUCT_TYPE,
+    MAC_STUDIO_PRODUCT_TYPE,
 )
 
 VALID_MACBOOK_AIR_UNITS = {
@@ -131,12 +133,27 @@ VALID_IMAC_UNITS = {
     for chip, ram in (("M1", (8, 16)), ("M3", (8, 16, 24)), ("M4", (16, 24, 32)))
 }
 
+# Exact options from seed_silicon_mac_studio_fair_prices.sql. A Studio has no
+# built-in display; the seed intentionally excludes unpriced chip generations.
+VALID_MAC_STUDIO_UNITS = {
+    chip: {0: {"ram_gb": list(ram), "ssd_gb": list(ssd)}}
+    for chip, ram, ssd in (
+        ("M1 Max", (32, 64), (512, 1024, 2048, 4096, 8192)),
+        ("M1 Ultra", (64, 128), (1024, 2048, 4096, 8192)),
+        ("M2 Max", (32, 64, 96), (512, 1024, 2048, 4096, 8192)),
+        ("M2 Ultra", (64, 128, 192), (1024, 2048, 4096, 8192)),
+        ("M3 Ultra", (96, 256, 512), (1024, 2048, 4096, 8192, 16384)),
+        ("M4 Max", (36, 48, 64, 128), (512, 1024, 2048, 4096, 8192)),
+    )
+}
+
 VALID_SILICON_UNITS_BY_PRODUCT = {
     MACBOOK_AIR_PRODUCT_TYPE: VALID_MACBOOK_AIR_UNITS,
     MAC_MINI_PRODUCT_TYPE: VALID_MAC_MINI_UNITS,
     MACBOOK_PRO_PRODUCT_TYPE: VALID_MACBOOK_PRO_UNITS,
     MACBOOK_NEO_PRODUCT_TYPE: VALID_MACBOOK_NEO_UNITS,
     IMAC_PRODUCT_TYPE: VALID_IMAC_UNITS,
+    MAC_STUDIO_PRODUCT_TYPE: VALID_MAC_STUDIO_UNITS,
 }
 BASE_FAIR_PRICE_KRW = 550000
 

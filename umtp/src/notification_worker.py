@@ -4025,10 +4025,10 @@ def _chip_group_sort_key(chip_key):
     normalized = (_normalize_optional_text(chip_key) or "").upper()
     if re.fullmatch(r"A18\s*PRO", normalized):
         return (0, 60, normalized)
-    silicon_chip = re.fullmatch(r"M([1-5])\s*(PRO|MAX)?", normalized)
+    silicon_chip = re.fullmatch(r"M([1-5])\s*(PRO|MAX|ULTRA)?", normalized)
     if silicon_chip:
         generation = int(silicon_chip.group(1))
-        tier = {None: 0, "PRO": 1, "MAX": 2}[silicon_chip.group(2)]
+        tier = {None: 0, "PRO": 1, "MAX": 2, "ULTRA": 3}[silicon_chip.group(2)]
         return (0, generation * 10 + tier, normalized)
     if normalized == "기타":
         return (2, 999, normalized)

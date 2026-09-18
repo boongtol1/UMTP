@@ -8,13 +8,17 @@ struct MacUnit: Codable, Equatable, Hashable, Identifiable {
     var ssd_gb: Int
     var id: String { "\(product_type)|\(chip)|\(screen_inch)|\(ram_gb)|\(ssd_gb)" }
     static func productOrder(_ value: String) -> Int {
-        ["MacBook Air": 1, "Mac mini": 2, "MacBook Pro": 3, "MacBook Neo": 4, "iMac": 5][value] ?? 99
+        ["MacBook Air": 1, "Mac mini": 2, "MacBook Pro": 3, "MacBook Neo": 4, "iMac": 5, "Mac Studio": 6][value] ?? 99
     }
     static func chipOrder(_ value: String) -> Int {
-        let chips = ["M1", "M1 PRO", "M1 MAX", "M2", "M2 PRO", "M2 MAX",
-                     "M3", "M3 PRO", "M3 MAX", "M4", "M4 PRO", "M4 MAX",
+        let chips = ["M1", "M1 PRO", "M1 MAX", "M1 ULTRA", "M2", "M2 PRO", "M2 MAX", "M2 ULTRA",
+                     "M3", "M3 PRO", "M3 MAX", "M3 ULTRA", "M4", "M4 PRO", "M4 MAX",
                      "M5", "M5 PRO", "M5 MAX", "A18 PRO"]
         return chips.firstIndex(of: value.uppercased()) ?? 99
+    }
+
+    static func hasBuiltInDisplay(_ product: String) -> Bool {
+        !["Mac mini", "Mac Studio"].contains(product)
     }
 }
 
