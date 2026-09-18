@@ -4023,6 +4023,8 @@ def clear_selected_read_alert_events_for_user(*, user_id, alert_event_ids):
 
 def _chip_group_sort_key(chip_key):
     normalized = (_normalize_optional_text(chip_key) or "").upper()
+    if re.fullmatch(r"A18\s*PRO", normalized):
+        return (0, 60, normalized)
     silicon_chip = re.fullmatch(r"M([1-5])\s*(PRO|MAX)?", normalized)
     if silicon_chip:
         generation = int(silicon_chip.group(1))
