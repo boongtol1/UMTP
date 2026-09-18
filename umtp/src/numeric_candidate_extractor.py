@@ -54,7 +54,10 @@ def extract_numeric_candidates(text, screen_values=SCREEN_VALUES):
     lowered_text = text.lower()
     # Explicit units own their numbers: 16-inch is never RAM, 16GB is never a
     # display, and the 8 in 8TB is never 8GB RAM.
-    occupied = []
+    # Chip generations (notably A18) must not become 18GB RAM candidates.
+    occupied = [match.span() for match in re.finditer(
+        r"(?<![a-z0-9])a\s*\d+(?:\s*-?\s*(?:pro|프로))?(?![a-z0-9])", lowered_text
+    )]
 
     def overlaps(match):
         return any(match.start() < end and start < match.end() for start, end in occupied)

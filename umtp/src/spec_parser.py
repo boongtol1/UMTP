@@ -5,6 +5,7 @@ try:
     from src.macbook_air_units import (
         MACBOOK_AIR_PRODUCT_TYPE,
         MACBOOK_PRO_PRODUCT_TYPE,
+        MACBOOK_NEO_PRODUCT_TYPE,
         VALID_MACBOOK_PRO_UNITS,
         SUPPORTED_PRODUCT_TYPES,
         MAC_MINI_PRODUCT_TYPE,
@@ -16,6 +17,7 @@ except ImportError:
     from macbook_air_units import (
         MACBOOK_AIR_PRODUCT_TYPE,
         MACBOOK_PRO_PRODUCT_TYPE,
+        MACBOOK_NEO_PRODUCT_TYPE,
         VALID_MACBOOK_PRO_UNITS,
         SUPPORTED_PRODUCT_TYPES,
         MAC_MINI_PRODUCT_TYPE,
@@ -150,6 +152,7 @@ _STRONG_NOISE_PATTERNS = (
 )
 
 _SPEC_SPAN_PATTERNS = (
+    re.compile(r"(?<![a-z0-9])a\s*18\s*-?\s*(?:pro|프로)(?![a-z0-9])", flags=re.IGNORECASE),
     re.compile(r"m\s*[1-5]\s*[-]?\s*(?:pro|max|프로|맥스)", flags=re.IGNORECASE),
     re.compile(r"m[1-5]", flags=re.IGNORECASE),
     re.compile(r"(?<!\d)(13(?:\.\d+)?|14(?:\.\d+)?|15(?:\.\d+)?|16(?:\.\d+)?)\s*(?:인치|inch|형|\"|”|''|′′)(?!\d)", flags=re.IGNORECASE),
@@ -397,6 +400,8 @@ def _detect_product_types(text):
         detected.append(MACBOOK_AIR_PRODUCT_TYPE)
     if "macbookpro" in normalized or "맥북프로" in normalized:
         detected.append(MACBOOK_PRO_PRODUCT_TYPE)
+    if "macbookneo" in normalized or "맥북네오" in normalized:
+        detected.append(MACBOOK_NEO_PRODUCT_TYPE)
     if (
         "mac mini" in lowered
         or "macmini" in normalized
@@ -465,6 +470,18 @@ def _extract_unique_macbook_pro_chip_candidates(text):
 
 
 def _extract_chip_candidates_for_product(text, product_type):
+    if product_type == MACBOOK_NEO_PRODUCT_TYPE:
+        # Keep unsupported chips visible to validation and reject mixed-chip
+        # listings instead of silently reducing them to the supported A18 Pro.
+        if not isinstance(text, str):
+            return []
+        candidates = _extract_unique_macbook_pro_chip_candidates(text)
+        pattern = r"(?<![a-z0-9])a\s*(\d+)(?:\s*-?\s*(pro|프로))?(?![a-z0-9])"
+        for match in re.finditer(pattern, text.lower()):
+            candidate = f"A{match.group(1)}" + (" Pro" if match.group(2) else "")
+            if candidate not in candidates:
+                candidates.append(candidate)
+        return candidates
     if product_type == MACBOOK_PRO_PRODUCT_TYPE:
         return _extract_unique_macbook_pro_chip_candidates(text)
     if product_type == MAC_MINI_PRODUCT_TYPE:
@@ -491,6 +508,48 @@ def _extract_ssd_gb_from_text(text):
     if len(ssd_candidates) != 1:
         return None
     return ssd_candidates[0]
+
+
+def _neo_explicit_capacity_candidates(text, field, structured=False):
+    """Retain unsupported explicit sizes so Neo cannot fall back past them."""
+    if not isinstance(text, str):
+        return []
+    result = []
+    labels = r"(?:ram|램|메모리|memory|ssd|storage|저장공간)(?:\s*용량)?"
+    unit = r"(?:gb|기가|g|tb|테라|t)"
+    occupied = []
+
+    def overlaps(match):
+        return any(match.start() < end and start < match.end() for start, end in occupied)
+
+    def capacity(match):
+        size = float(match.group("size"))
+        return size * (1024 if (match.group("unit") or "").lower() in ("t", "tb", "테라") else 1)
+
+    # The earliest complete labelled fragment owns its span, supporting both
+    # "memory 8GB storage 512GB" and "8GB RAM 512GB SSD" without stealing values.
+    patterns = [rf"(?P<label>{labels})\s*[:：]?\s*(?P<size>\d+(?:\.\d+)?)\s*(?P<unit>{unit})?",
+                rf"(?<![a-z0-9.])(?P<size>\d+(?:\.\d+)?)\s*(?P<unit>{unit})?\s*(?P<label>{labels})"]
+    matches = [match for pattern in patterns for match in re.finditer(pattern, text, re.IGNORECASE)]
+    for match in sorted(matches, key=lambda match: (match.start(), -match.end())):
+        if overlaps(match):
+            continue
+        occupied.append(match.span())
+        is_ram = re.match(r"(?:ram|램|메모리|memory)", match.group("label"), re.IGNORECASE) is not None
+        if (field == "ram_gb") == is_ram:
+            result.append(capacity(match))
+    if structured:
+        match = re.fullmatch(rf"\s*(?P<size>\d+(?:\.\d+)?)\s*(?P<unit>{unit})?\s*", text, re.IGNORECASE)
+        if match:
+            result.append(capacity(match))
+    else:
+        for match in re.finditer(rf"(?<![a-z0-9.])(?P<size>\d+(?:\.\d+)?)\s*(?P<unit>{unit})(?![a-z0-9가-힣])", text, re.IGNORECASE):
+            if overlaps(match):
+                continue
+            value = capacity(match)
+            if (field == "ram_gb" and value <= 128) or (field == "ssd_gb" and value > 128):
+                result.append(value)
+    return list(dict.fromkeys(int(value) if value.is_integer() else value for value in result))
 
 
 def _record_pattern(detected_patterns, field_name, value, source, raw):
@@ -631,6 +690,9 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         _record_conflict(detected_conflicts, "chip", "unresolved", None, "self_check", cpu_chip_candidates)
 
     ram_self_candidates = _extract_ram_gb_candidates_from_text(normalize_for_spec_parsing(ram_raw))
+    if product_type == MACBOOK_NEO_PRODUCT_TYPE:
+        ram_self_candidates += _neo_explicit_capacity_candidates(ram_raw, "ram_gb", structured=True)
+        ram_self_candidates = list(dict.fromkeys(ram_self_candidates))
     ram_self_candidate, ram_self_ambiguous = _choose_numeric_candidate(ram_self_candidates)
     if ram_self_candidate is not None:
         ram_gb = ram_self_candidate
@@ -640,6 +702,9 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         _record_conflict(detected_conflicts, "ram_gb", "unresolved", None, "self_check", ram_self_candidates)
 
     ssd_self_candidates = _extract_ssd_gb_candidates_from_text(normalize_for_spec_parsing(ssd_raw))
+    if product_type == MACBOOK_NEO_PRODUCT_TYPE:
+        ssd_self_candidates += _neo_explicit_capacity_candidates(ssd_raw, "ssd_gb", structured=True)
+        ssd_self_candidates = list(dict.fromkeys(ssd_self_candidates))
     ssd_self_candidate, ssd_self_ambiguous = _choose_numeric_candidate(ssd_self_candidates)
     if ssd_self_candidate is not None:
         ssd_gb = ssd_self_candidate
@@ -671,6 +736,13 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         _record_conflict(detected_conflicts, "chip", "unresolved", None, "text", text_chip_candidates)
 
     text_screen_candidates = _extract_screen_inch_candidates_from_text(parsing_text)
+    if product_type == MACBOOK_NEO_PRODUCT_TYPE:
+        # Do not replace an explicitly unsupported size (for example 27-inch)
+        # with the Neo's default 13-inch screen.
+        for match in re.finditer(r"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:인치|inch|형|-inch)(?!\d)", parsing_text):
+            explicit_screen = int(float(match.group(1)))
+            if explicit_screen not in text_screen_candidates:
+                text_screen_candidates.append(explicit_screen)
     text_screen_candidate, text_screen_ambiguous = _choose_numeric_candidate(text_screen_candidates)
     if screen_inch is None and text_screen_candidate is not None:
         screen_inch = text_screen_candidate
@@ -683,6 +755,9 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         _record_conflict(detected_conflicts, "screen_inch", "unresolved", None, "text", text_screen_candidates)
 
     text_ram_candidates = _extract_ram_gb_candidates_from_text(parsing_text)
+    if product_type == MACBOOK_NEO_PRODUCT_TYPE:
+        text_ram_candidates += _neo_explicit_capacity_candidates(parsing_text, "ram_gb")
+        text_ram_candidates = list(dict.fromkeys(text_ram_candidates))
     text_ram_candidate, text_ram_ambiguous = _choose_numeric_candidate(text_ram_candidates)
     if ram_gb is None and text_ram_candidate is not None:
         ram_gb = text_ram_candidate
@@ -695,6 +770,9 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         _record_conflict(detected_conflicts, "ram_gb", "unresolved", None, "text", text_ram_candidates)
 
     text_ssd_candidates = _extract_ssd_gb_candidates_from_text(parsing_text)
+    if product_type == MACBOOK_NEO_PRODUCT_TYPE:
+        text_ssd_candidates += _neo_explicit_capacity_candidates(parsing_text, "ssd_gb")
+        text_ssd_candidates = list(dict.fromkeys(text_ssd_candidates))
     text_ssd_candidate, text_ssd_ambiguous = _choose_numeric_candidate(text_ssd_candidates)
     if ssd_gb is None and text_ssd_candidate is not None:
         ssd_gb = text_ssd_candidate
@@ -770,7 +848,7 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         ssd_ambiguous = True
         _record_conflict(detected_conflicts, "ssd_gb", "unresolved", None, "text", numeric_candidates["ssd_candidates"])
 
-    if product_type == MACBOOK_AIR_PRODUCT_TYPE and screen_inch is None:
+    if product_type in (MACBOOK_AIR_PRODUCT_TYPE, MACBOOK_NEO_PRODUCT_TYPE) and screen_inch is None:
         screen_inch = DEFAULT_SCREEN_INCH
         screen_inch_defaulted = True
         _record_pattern(detected_patterns, "screen_inch", DEFAULT_SCREEN_INCH, "default", None)
