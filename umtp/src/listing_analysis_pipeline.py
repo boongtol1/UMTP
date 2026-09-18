@@ -95,7 +95,7 @@ _MAC_PRODUCT_NAME_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 _TITLE_CHIP_SPEC_PATTERN = re.compile(
-    r"(?<![a-z0-9])m\s*[1-5](?:\s*[-]?\s*(?:pro|max|프로|맥스))?(?![a-z0-9])",
+    r"(?<![a-z0-9])m\s*[1-5](?:\s*[-]?\s*(?:pro|max|ultra|프로|맥스|울트라))?(?![a-z0-9])",
     flags=re.IGNORECASE,
 )
 _TITLE_RAM_SPEC_PATTERN = re.compile(
@@ -162,6 +162,14 @@ def _title_has_explicit_core_specs(title):
     normalized_title = _normalize_optional_text(title)
     if normalized_title is None:
         return False
+
+    if re.search(r"(?:mac\s*studio|맥\s*스튜디오)", normalized_title, re.IGNORECASE):
+        # Use the parser's role-aware high-memory handling: RAM512 is not SSD512.
+        parsed = parse_listing_title(normalized_title)
+        return bool(parsed.get("parse_success") and all(
+            parsed.get("detected_patterns", {}).get(field, {}).get("source") != "fallback_base_model"
+            for field in ("ram_gb", "ssd_gb")
+        ))
 
     return bool(
         _TITLE_CHIP_SPEC_PATTERN.search(normalized_title)
