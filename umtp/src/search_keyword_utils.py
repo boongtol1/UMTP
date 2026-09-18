@@ -95,6 +95,9 @@ def build_default_keyword_for_watch_rule(rule):
     if product_type == "Mac mini" and compact_chip:
         return normalize_search_keyword(f"{compact_chip} 맥미니")
 
+    if product_type == "iMac" and compact_chip:
+        return normalize_search_keyword(f"{compact_chip} 아이맥")
+
     if chip and product_type:
         return normalize_search_keyword(f"{product_type} {chip}")
 
@@ -106,6 +109,9 @@ def build_default_keyword_for_watch_rule(rule):
 
     if product_type == "MacBook Pro":
         return "맥북프로"
+
+    if product_type == "iMac":
+        return "아이맥"
 
     if product_type:
         return normalize_search_keyword(product_type)
@@ -140,13 +146,18 @@ def build_recommended_keywords_for_spec(product_type, chip, ram_gb=None, ssd_gb=
             keywords.append(f"맥미니 {normalized_chip} {ram_gb} {ssd_gb}")
             keywords.append(f"mac mini {compact_chip} {ram_gb} {ssd_gb}")
 
+    if normalized_product_type == "iMac" and normalized_chip and compact_chip:
+        keywords.extend((f"{compact_chip} 아이맥", f"아이맥 {normalized_chip}", f"imac {compact_chip}"))
+        if ram_gb is not None and ssd_gb is not None:
+            keywords.extend((f"{compact_chip} 아이맥 {ram_gb} {ssd_gb}", f"아이맥 {normalized_chip} {ram_gb} {ssd_gb}"))
+
     if normalized_product_type and normalized_chip:
         keywords.append(f"{normalized_product_type} {normalized_chip}")
 
     if normalized_product_type:
         keywords.append(normalized_product_type)
 
-    if normalized_chip:
+    if normalized_chip and normalized_product_type != "iMac":
         keywords.append(f"맥북 {normalized_chip}")
 
     return dedupe_keywords_keep_order(keywords)

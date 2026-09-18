@@ -75,7 +75,8 @@ def extract_numeric_candidates(text, screen_values=SCREEN_VALUES):
         _add_candidate(result, "ssd_gb", _parse_ssd_token(match.group(2)), match.group())
         occupied.append(match.span())
 
-    screen_pattern = rf"(?<![\d.])({SCREEN_PATTERN})(?:\s*{SCREEN_UNIT_PATTERN}|-inch)(?!\d)"
+    allowed_screen_pattern = "|".join(map(str, sorted(set(SCREEN_VALUES) | set(screen_values))))
+    screen_pattern = rf"(?<![\d.])((?:{allowed_screen_pattern})(?:\.\d+)?)(?:\s*{SCREEN_UNIT_PATTERN}|-inch)(?!\d)"
     for match in re.finditer(screen_pattern, lowered_text):
         screen = int(float(match.group(1)))
         if screen in screen_values:
