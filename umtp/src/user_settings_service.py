@@ -31,11 +31,9 @@ from src.search_keyword_utils import (
 
 
 CHIP_SORT_ORDER = {
-    "M1": 1,
-    "M2": 2,
-    "M3": 3,
-    "M4": 4,
-    "M5": 5,
+    f"M{generation}{tier}": generation * 3 + tier_index
+    for generation in range(1, 6)
+    for tier_index, tier in enumerate(("", " Pro", " Max"))
 }
 PRODUCT_TYPE_SORT_ORDER = {name: index for index, name in enumerate(SUPPORTED_PRODUCT_TYPES, start=1)}
 DEFAULT_SYSTEM_ALERT_DROP_RATE_PERCENT = 20.0
@@ -289,11 +287,10 @@ def _normalize_chip_for_setting(chip):
     if normalized is None:
         return ""
 
-    compact_lower = normalized.lower().replace(" ", "")
-    if compact_lower == "m2pro":
-        return "M2 Pro"
-    if compact_lower == "m4pro":
-        return "M4 Pro"
+    compact_lower = "".join(normalized.lower().split())
+    for canonical_chip in CHIP_SORT_ORDER:
+        if canonical_chip.lower().replace(" ", "") == compact_lower:
+            return canonical_chip
 
     return normalized.upper()
 

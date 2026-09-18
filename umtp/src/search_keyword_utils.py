@@ -58,10 +58,9 @@ def _canonical_chip(chip):
         return None
 
     lowered_compact = normalized_chip.lower().replace(" ", "")
-    if lowered_compact == "m2pro":
-        return "M2 Pro"
-    if lowered_compact == "m4pro":
-        return "M4 Pro"
+    match = re.fullmatch(r"m([1-5])(pro|max)", lowered_compact)
+    if match:
+        return f"M{match.group(1)} {match.group(2).title()}"
     return normalized_chip
 
 
@@ -90,6 +89,9 @@ def build_default_keyword_for_watch_rule(rule):
     if product_type == "MacBook Air" and compact_chip:
         return normalize_search_keyword(f"{compact_chip} 맥북에어")
 
+    if product_type == "MacBook Pro" and compact_chip:
+        return normalize_search_keyword(f"{compact_chip} 맥북프로")
+
     if product_type == "Mac mini" and compact_chip:
         return normalize_search_keyword(f"{compact_chip} 맥미니")
 
@@ -101,6 +103,9 @@ def build_default_keyword_for_watch_rule(rule):
 
     if product_type == "MacBook Air":
         return "맥북에어"
+
+    if product_type == "MacBook Pro":
+        return "맥북프로"
 
     if product_type:
         return normalize_search_keyword(product_type)
@@ -115,14 +120,15 @@ def build_recommended_keywords_for_spec(product_type, chip, ram_gb=None, ssd_gb=
 
     keywords = []
 
-    if normalized_product_type == "MacBook Air" and normalized_chip and compact_chip:
-        keywords.append(f"{compact_chip} 맥북에어")
-        keywords.append(f"맥북에어 {normalized_chip}")
+    if normalized_product_type in ("MacBook Air", "MacBook Pro") and normalized_chip and compact_chip:
+        product_name = "맥북프로" if normalized_product_type == "MacBook Pro" else "맥북에어"
+        keywords.append(f"{compact_chip} {product_name}")
+        keywords.append(f"{product_name} {normalized_chip}")
         keywords.append(f"맥북 {normalized_chip}")
 
         if ram_gb is not None and ssd_gb is not None:
-            keywords.append(f"{compact_chip} 맥북에어 {ram_gb} {ssd_gb}")
-            keywords.append(f"맥북에어 {normalized_chip} {ram_gb} {ssd_gb}")
+            keywords.append(f"{compact_chip} {product_name} {ram_gb} {ssd_gb}")
+            keywords.append(f"{product_name} {normalized_chip} {ram_gb} {ssd_gb}")
 
     if normalized_product_type == "Mac mini" and normalized_chip and compact_chip:
         keywords.append(f"{compact_chip} 맥미니")

@@ -5,6 +5,87 @@ import XCTest
 final class SettingsParityTests: XCTestCase {
     private let unit = MacUnit(product_type: "MacBook Air", chip: "M2", screen_inch: 13, ram_gb: 16, ssd_gb: 512)
 
+    func testMacBookProCatalogGroupsEverySiliconGenerationAndUsesServerScreenSizes() async {
+        let expectedChips = ["M1", "M1 Pro", "M1 Max", "M2", "M2 Pro", "M2 Max",
+                             "M3", "M3 Pro", "M3 Max", "M4", "M4 Pro", "M4 Max",
+                             "M5", "M5 Pro", "M5 Max"]
+        // Representative seed configurations deliberately arrive out of order.
+        var units = expectedChips.reversed().flatMap { chip -> [MacUnit] in
+            let screens = chip.contains(" ") ? [16, 14] : [chip == "M1" || chip == "M2" ? 13 : 14]
+            let ram = chip.contains("Max") ? 64 : chip == "M3 Pro" ? 18 : ["M4 Pro", "M5 Pro"].contains(chip) ? 24 : 16
+            let ssd = chip == "M5 Max" ? 2048 : 1024
+            return screens.map { MacUnit(product_type: "MacBook Pro", chip: chip, screen_inch: $0, ram_gb: ram, ssd_gb: ssd) }
+        }
+        units += [unit, MacUnit(product_type: "Mac mini", chip: "M4", screen_inch: 0, ram_gb: 16, ssd_gb: 256)]
+        let model = SettingsViewModel(api: SettingsTestAPI(items: units.map { UserFairPriceItem(unit: $0) }))
+        await model.load(userID: "u")
+
+        XCTAssertEqual(model.products, ["MacBook Air", "Mac mini", "MacBook Pro"])
+        XCTAssertEqual(model.chips(product: "MacBook Pro"), expectedChips)
+        XCTAssertEqual(model.screens(product: "MacBook Pro", chip: "M1"), [13])
+        XCTAssertEqual(model.screens(product: "MacBook Pro", chip: "M2"), [13])
+        XCTAssertEqual(model.screens(product: "MacBook Pro", chip: "M5"), [14])
+        XCTAssertEqual(model.screens(product: "MacBook Pro", chip: "M3 Pro"), [14, 16])
+        XCTAssertEqual(model.screens(product: "MacBook Pro", chip: "M5 Max"), [14, 16])
+        XCTAssertEqual(model.chips(product: "MacBook Air"), ["M2"])
+        XCTAssertEqual(MacUnit.chipOrder("m3 max"), MacUnit.chipOrder("M3 Max"))
+        XCTAssertLessThan(MacUnit.chipOrder("M5 Max"), MacUnit.chipOrder("unknown"))
+    }
+
+    func testMacBookProSavePreservesMaxChipAndHighCapacitySeedSpecification() async throws {
+        let pro = MacUnit(product_type: "MacBook Pro", chip: "M5 Max", screen_inch: 16, ram_gb: 128, ssd_gb: 8192)
+        var item = UserFairPriceItem(unit: pro)
+        item.system_fair_price_krw = 10_250_000
+        item.effective_fair_price_krw = 10_250_000
+        item.effective_alert_drop_rate_percent = 20
+        item.recommended_search_keyword = "맥북프로 M5 Max"
+        let api = SettingsTestAPI(items: [item])
+        let model = SettingsViewModel(api: api)
+        await model.load(userID: "pro-user")
+        XCTAssertEqual(model.draft(for: pro).targetText, "8200000")
+        model.edit(pro) { $0.enabled = true; $0.priority = .fast }
+        let saved = await model.save(pro)
+        XCTAssertTrue(saved)
+        let request = try XCTUnwrap(api.requests.first)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+        XCTAssertEqual(body["product_type"] as? String, "MacBook Pro")
+        XCTAssertEqual(body["chip"] as? String, "M5 Max")
+        XCTAssertEqual(body["screen_inch"] as? Int, 16)
+        XCTAssertEqual(body["ram_gb"] as? Int, 128)
+        XCTAssertEqual(body["ssd_gb"] as? Int, 8192)
+        XCTAssertEqual(body["fair_price_krw"] as? Int, 10_250_000)
+        XCTAssertEqual(body["alert_drop_rate_percent"] as? Double, 20)
+        XCTAssertEqual(body["enabled"] as? Bool, true)
+        XCTAssertEqual(body["priority"] as? String, "FAST")
+    }
+
+    func testMacBookProBulkScopeIsolatesScreenChipAndProduct() async {
+        let units = [
+            MacUnit(product_type: "MacBook Pro", chip: "M1 Pro", screen_inch: 14, ram_gb: 16, ssd_gb: 512),
+            MacUnit(product_type: "MacBook Pro", chip: "M1 Pro", screen_inch: 16, ram_gb: 16, ssd_gb: 512),
+            MacUnit(product_type: "MacBook Pro", chip: "M1 Max", screen_inch: 14, ram_gb: 32, ssd_gb: 1024),
+            unit, MacUnit(product_type: "Mac mini", chip: "M2 Pro", screen_inch: 0, ram_gb: 16, ssd_gb: 512)
+        ]
+        let items = units.map { unit in
+            var item = UserFairPriceItem(unit: unit)
+            item.system_fair_price_krw = 1_200_000
+            item.enabled = true
+            return item
+        }
+        let api = SettingsTestAPI(items: items)
+        let model = SettingsViewModel(api: api)
+        await model.load(userID: "u")
+        await model.apply(.alerts(false), scope: SettingsScope(product: "MacBook Pro", chip: "M1 Pro", screen: 14))
+        XCTAssertEqual(api.requests.count, 1)
+        XCTAssertEqual(api.requests.first?.screen_inch, 14)
+        XCTAssertEqual(api.requests.first?.chip, "M1 Pro")
+        XCTAssertEqual(api.requests.first?.enabled, false)
+        api.requests = []
+        await model.apply(.priority(.fast), scope: SettingsScope(product: "MacBook Pro", chip: nil, screen: nil))
+        XCTAssertEqual(api.requests.count, 3)
+        XCTAssertTrue(api.requests.allSatisfy { $0.product_type == "MacBook Pro" && $0.priority == "FAST" })
+    }
+
     func testAndroidPriceFormulaAndNegativeGapRoundTrip() throws {
         XCTAssertEqual(SettingsPriceMath.gap(market: 900_000, target: 700_000), 22.22)
         XCTAssertEqual(SettingsPriceMath.gap(market: 1_000_000, target: 1_155_000), -15.5)

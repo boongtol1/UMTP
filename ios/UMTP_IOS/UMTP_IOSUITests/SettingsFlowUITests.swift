@@ -5,6 +5,59 @@ final class SettingsFlowUITests: XCTestCase {
     private let baseURL = "http://127.0.0.1:18765"
     private let unitKey = "MacBook Air|M1|13|8|256"
 
+    func testMacBookProBaseChipUsesThirteenInchSeedCatalog() async throws {
+        try await resetFixture()
+        let app = launchFixtureApp()
+        openProSettings(app, chip: "M1")
+        XCTAssertTrue(app.buttons["13인치"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["14인치"].exists)
+        XCTAssertFalse(app.buttons["16인치"].exists)
+        app.buttons["13인치"].tap()
+        XCTAssertTrue(app.navigationBars["M1 MacBook Pro 13인치 설정"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["현재 칩/인치"].exists)
+        let market = app.textFields["settings.market.MacBook Pro|M1|13|8|256"]
+        scrollTo(market, in: app)
+        XCTAssertEqual(market.value as? String, "700000")
+    }
+
+    func testMacBookProMaxScreenSelectionAndSaveReachTheAPI() async throws {
+        try await resetFixture()
+        let app = launchFixtureApp()
+        openProSettings(app, chip: "M5 Max")
+        XCTAssertTrue(app.buttons["14인치"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["16인치"].exists)
+        XCTAssertFalse(app.buttons["13인치"].exists)
+        app.buttons["16인치"].tap()
+        XCTAssertTrue(app.navigationBars["M5 Max MacBook Pro 16인치 설정"].waitForExistence(timeout: 5))
+        let key = "MacBook Pro|M5 Max|16|36|2048"
+        let market = app.textFields["settings.market.\(key)"]
+        scrollTo(market, in: app)
+        XCTAssertEqual(market.value as? String, "5850000")
+        replace(market, with: "6000000")
+        dismissKeyboard(app)
+        let save = app.buttons["settings.save.\(key)"]
+        scrollTo(save, in: app)
+        save.tap()
+        XCTAssertTrue(app.alerts["설정"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.alerts.staticTexts["저장 완료. 즉시 검색을 요청했어요."].exists)
+        app.alerts.buttons["확인"].tap()
+
+        let requests = try await events()
+        let saved = requests.filter { $0["path"] as? String == "/user-fair-prices/upsert" }
+        XCTAssertEqual(saved.count, 1)
+        let body = try XCTUnwrap(saved.first?["body"] as? [String: Any])
+        XCTAssertEqual(body["product_type"] as? String, "MacBook Pro")
+        XCTAssertEqual(body["chip"] as? String, "M5 Max")
+        XCTAssertEqual(body["screen_inch"] as? Int, 16)
+        XCTAssertEqual(body["ram_gb"] as? Int, 36)
+        XCTAssertEqual(body["ssd_gb"] as? Int, 2048)
+        XCTAssertEqual(body["fair_price_krw"] as? Int, 6000000)
+        XCTAssertEqual(body["alert_drop_rate_percent"] as? Double, 22)
+        XCTAssertEqual(body["search_keyword"] as? String, "맥북 프로 M5 Max")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.navigationBars["M5 Max MacBook Pro 선택"].waitForExistence(timeout: 5))
+    }
+
     func testIndividualPriceDirectionAndBoundReachTheAPI() async throws {
         try await resetFixture()
         let app = launchFixtureApp()
@@ -144,6 +197,16 @@ final class SettingsFlowUITests: XCTestCase {
     private func openAirSettings(_ app: XCUIApplication) {
         app.tabBars.buttons["설정"].tap()
         navigateAirTree(app)
+    }
+
+    private func openProSettings(_ app: XCUIApplication, chip: String) {
+        app.tabBars.buttons["설정"].tap()
+        let pro = app.buttons["MacBook Pro"]
+        XCTAssertTrue(pro.waitForExistence(timeout: 10)); pro.tap()
+        let selectedChip = app.buttons[chip]
+        scrollTo(selectedChip, in: app)
+        selectedChip.tap()
+        XCTAssertTrue(app.navigationBars["\(chip) MacBook Pro 선택"].waitForExistence(timeout: 5))
     }
 
     private func navigateAirTree(_ app: XCUIApplication) {
