@@ -384,7 +384,7 @@ def _normalize_self_check_fields(self_check_fields):
     return normalized
 
 
-def _collect_self_check_spec_segments(normalized_self_check):
+def _collect_self_check_spec_segments(normalized_self_check, label_capacities=False):
     if not isinstance(normalized_self_check, dict):
         return []
 
@@ -392,6 +392,10 @@ def _collect_self_check_spec_segments(normalized_self_check):
     for key in SELF_CHECK_SPEC_SOURCE_KEYS:
         value = normalized_self_check.get(key)
         if value:
+            if label_capacities and key in ("램 용량", "SSD용량"):
+                # The source field already establishes the number's role.
+                # In particular, a bare RAM field of 24 is not a display.
+                value = ("RAM " if key == "램 용량" else "SSD ") + value
             segments.append(value)
     return segments
 
@@ -607,7 +611,10 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
     if isinstance(self_check_text, str) and self_check_text.strip():
         self_check_segments.append(self_check_text)
     # 가격 판단용 핵심 스펙 키만 자동 파싱 재료로 사용한다.
-    self_check_segments.extend(_collect_self_check_spec_segments(normalized_self_check))
+    self_check_segments.extend(_collect_self_check_spec_segments(
+        normalized_self_check,
+        label_capacities=IMAC_PRODUCT_TYPE in _detect_product_types(title + " " + (model_name_raw or "")),
+    ))
 
     combined_text = _normalize_text(" ".join([title, body_text or "", " ".join(self_check_segments)]))
     normalized_text, removed_noise_fragments = _normalize_for_spec_parsing_with_meta(combined_text)

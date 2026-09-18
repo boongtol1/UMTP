@@ -72,6 +72,7 @@ class SpecParserIMacTest(unittest.TestCase):
         self.assert_spec("아이맥 M1 판매", "M1", 16, 512, body_text="24인치 램16 SSD 512")
         self.assert_spec("iMac M4 24인치 램 용량 24GB SSD 용량 512GB", "M4", 24, 512)
         self.assert_spec("iMac M4 24인치 memory 24GB storage 512GB", "M4", 24, 512)
+        self.assert_spec("iMac M4", "M4", 24, 512, self_check_fields={"램 용량": "24", "SSD용량": "512"})
 
     def test_unsupported_models_and_unseeded_options_are_rejected(self):
         for text in (
