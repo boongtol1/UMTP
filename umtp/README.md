@@ -9,6 +9,17 @@ MySQL에 공정가를 저장하고, Python에서 가짜 매물을 분석한 뒤 
 - 현재 운영 기준(1.8 파이프라인)은 `UMTP 1.3~1.8 운영 MVP` 섹션의 SQL/실행/동작 규칙을 확인하세요.
 - 과거 단계별 동작은 `버전별 상세 이력`에서 확인할 수 있습니다.
 
+## 실리콘 MacBook Pro 지원
+
+- 기존 MacBook Air·Mac mini와 같은 설정/분석/알림 흐름에서 `MacBook Pro`를 지원합니다. `sql/seed_silicon_macbook_pro_fair_prices.sql`의 M1~M5 일반·Pro·Max 칩, 13/14/16인치, 총 276개 사양 조합을 사용하며 CPU/GPU 코어 수는 별도 구분하지 않습니다.
+- 공정가는 기존 제품과 같이 `mac_fair_prices`에서 읽습니다. 해당 DB에 시드가 아직 없다면 `umtp` 디렉터리에서 `mysql -u <DB_USER> -p < sql/seed_silicon_macbook_pro_fair_prices.sql`을 실행하세요. 이미 적용한 공정가를 다시 시드하면 SQL의 가격으로 갱신되므로, 시세를 직접 수정한 DB에서는 재실행 여부를 확인해야 합니다.
+- `/silicon-mac-units`와 호환 경로 `/macbook-air-units`, `/user-fair-prices`에 MacBook Pro가 포함됩니다. 신규 사양은 기존과 같이 감시 OFF로 표시되며 저장한 사용자 조건이 시스템 가격보다 우선합니다.
+- iPhone 앱의 설정에서 `MacBook Pro → 칩 → 화면 크기 → RAM/SSD` 순서로 선택하고 시장가·알림 기준·우선순위·활성화 등을 저장합니다. 기본 검색어는 `m1 맥북프로`, `m3pro 맥북프로`, `m5max 맥북프로` 형식입니다.
+- 텔레그램은 기존 발송 경로와 메시지 형식을 사용합니다. 앱에서 활성화한 조건에 맞는 매물에 제품·칩·화면·RAM·SSD·가격 정보를 표시하며, 기존 사용자별 수신 설정이 적용됩니다.
+- 서버 코드 적용 시 API와 polling/analysis/notification worker에 같은 버전을 반영하세요. iPhone 화면 변경은 앱을 다시 빌드해 적용합니다.
+
+MacBook Pro 회귀 검증은 저장소 루트에서 `python3 -m unittest discover -s umtp/tests -p 'test_*macbook_pro*.py'`로 실행합니다. iOS 빌드 및 로컬 fixture를 이용한 단위/UI 테스트 절차는 [iOS README](../ios/UMTP_IOS/UMTP_IOS/README.md)를 참고하세요.
+
 ## UMTP MVP Progress
 
 | Version | Summary | Run |

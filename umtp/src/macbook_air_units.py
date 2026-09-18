@@ -1,9 +1,11 @@
 MACBOOK_AIR_PRODUCT_TYPE = "MacBook Air"
+MACBOOK_PRO_PRODUCT_TYPE = "MacBook Pro"
 MAC_MINI_PRODUCT_TYPE = "Mac mini"
 PRODUCT_TYPE = MACBOOK_AIR_PRODUCT_TYPE
 SUPPORTED_PRODUCT_TYPES = (
     MACBOOK_AIR_PRODUCT_TYPE,
     MAC_MINI_PRODUCT_TYPE,
+    MACBOOK_PRO_PRODUCT_TYPE,
 )
 
 VALID_MACBOOK_AIR_UNITS = {
@@ -88,9 +90,36 @@ VALID_MAC_MINI_UNITS = {
     },
 }
 
+# Keep the available combinations aligned with seed_silicon_macbook_pro_fair_prices.sql.
+# RAM is the seed's union across CPU/GPU core variants; prices use this same key.
+VALID_MACBOOK_PRO_UNITS = {
+    chip: {
+        screen: {"ram_gb": list(ram), "ssd_gb": list(ssd)}
+        for screen in screens
+    }
+    for chip, screens, ram, ssd in (
+        ("M1", (13,), (8, 16), (256, 512, 1024, 2048)),
+        ("M1 Pro", (14, 16), (16, 32), (512, 1024, 2048, 4096, 8192)),
+        ("M1 Max", (14, 16), (32, 64), (1024, 2048, 4096, 8192)),
+        ("M2", (13,), (8, 16, 24), (256, 512, 1024, 2048)),
+        ("M2 Pro", (14, 16), (16, 32), (512, 1024, 2048, 4096, 8192)),
+        ("M2 Max", (14, 16), (32, 64, 96), (1024, 2048, 4096, 8192)),
+        ("M3", (14,), (8, 16, 24), (512, 1024, 2048)),
+        ("M3 Pro", (14, 16), (18, 36), (512, 1024, 2048, 4096)),
+        ("M3 Max", (14, 16), (36, 48, 64, 96, 128), (1024, 2048, 4096, 8192)),
+        ("M4", (14,), (16, 24, 32), (512, 1024, 2048)),
+        ("M4 Pro", (14, 16), (24, 48), (512, 1024, 2048, 4096)),
+        ("M4 Max", (14, 16), (36, 48, 64, 128), (1024, 2048, 4096, 8192)),
+        ("M5", (14,), (16, 24, 32), (512, 1024, 2048, 4096)),
+        ("M5 Pro", (14, 16), (24, 48, 64), (1024, 2048, 4096)),
+        ("M5 Max", (14, 16), (36, 48, 64, 128), (2048, 4096, 8192)),
+    )
+}
+
 VALID_SILICON_UNITS_BY_PRODUCT = {
     MACBOOK_AIR_PRODUCT_TYPE: VALID_MACBOOK_AIR_UNITS,
     MAC_MINI_PRODUCT_TYPE: VALID_MAC_MINI_UNITS,
+    MACBOOK_PRO_PRODUCT_TYPE: VALID_MACBOOK_PRO_UNITS,
 }
 BASE_FAIR_PRICE_KRW = 550000
 

@@ -93,13 +93,14 @@ class SpecParserBaseModelFallbackTest(unittest.TestCase):
         self.assertIsNone(parsed["ram_gb"])
         self.assertIsNone(parsed["ssd_gb"])
 
-    def test_macbook_pro_never_uses_air_fallback(self):
-        parsed = parse_listing_title("맥북프로 m1 기본형")
-        self.assertFalse(parsed["parse_success"])
-        self.assertIsNone(parsed["product_type"])
-        self.assertIsNone(parsed["chip"])
-        self.assertIsNone(parsed["ram_gb"])
-        self.assertIsNone(parsed["ssd_gb"])
+    def test_macbook_pro_uses_its_own_base_spec(self):
+        parsed = parse_listing_title("맥북프로 m5 기본형")
+        self.assertTrue(parsed["parse_success"])
+        self.assertEqual(parsed["product_type"], "MacBook Pro")
+        self.assertEqual(parsed["chip"], "M5")
+        self.assertEqual(parsed["screen_inch"], 14)
+        self.assertEqual(parsed["ram_gb"], 16)
+        self.assertEqual(parsed["ssd_gb"], 512)
 
     def test_air_word_only_does_not_pass_product_type_gate(self):
         parsed = parse_listing_title("air m1 8gb 256gb")

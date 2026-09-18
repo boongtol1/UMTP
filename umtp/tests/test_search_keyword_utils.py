@@ -48,6 +48,23 @@ class SearchKeywordUtilsTest(unittest.TestCase):
         self.assertIn("맥미니 M2 Pro", keywords)
         self.assertIn("mac mini m2pro", keywords)
 
+    def test_macbook_pro_default_keywords_keep_chip_tier(self):
+        for chip, expected in (("M1", "m1"), ("m3pro", "m3pro"), ("M5 Max", "m5max")):
+            with self.subTest(chip=chip):
+                self.assertEqual(
+                    build_default_keyword_for_watch_rule({"product_type": "MacBook Pro", "chip": chip}),
+                    f"{expected} 맥북프로",
+                )
+        self.assertEqual(build_default_keyword_for_watch_rule({"product_type": "MacBook Pro"}), "맥북프로")
+
+    def test_macbook_pro_recommendations_match_air_format(self):
+        keywords = build_recommended_keywords_for_spec("MacBook Pro", "m3max", ram_gb=96, ssd_gb=8192)
+        self.assertEqual(keywords[0], "m3max 맥북프로")
+        self.assertIn("맥북프로 M3 Max", keywords)
+        self.assertIn("m3max 맥북프로 96 8192", keywords)
+        self.assertIn("MacBook Pro M3 Max", keywords)
+        self.assertEqual(len(keywords), len(set(keyword.lower() for keyword in keywords)))
+
 
 if __name__ == "__main__":
     unittest.main()
