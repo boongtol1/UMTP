@@ -95,11 +95,11 @@ _MAC_PRODUCT_NAME_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 _TITLE_CHIP_SPEC_PATTERN = re.compile(
-    r"\bm\s*(?:1|2|3|4|5)\b|\bm\s*(?:2|4)\s*[-]?\s*pro\b",
+    r"(?<![a-z0-9])m\s*[1-5](?:\s*[-]?\s*(?:pro|max|프로|맥스))?(?![a-z0-9])",
     flags=re.IGNORECASE,
 )
 _TITLE_RAM_SPEC_PATTERN = re.compile(
-    r"(?:\b(?:8|16|24|32|48|64)\s*(?:gb|g)\b|(?:8|16|24|32|48|64)\s*기가|램\s*(?:8|16|24|32|48|64)|(?:8|16|24|32|48|64)\s*램)",
+    r"(?<!\d)(?:\b(?:8|16|18|24|32|36|48|64|96|128)\s*(?:gb|g)\b|(?:8|16|18|24|32|36|48|64|96|128)\s*기가|램\s*(?:8|16|18|24|32|36|48|64|96|128)(?!\d)|(?:8|16|18|24|32|36|48|64|96|128)\s*램)",
     flags=re.IGNORECASE,
 )
 _TITLE_SSD_SPEC_PATTERN = re.compile(

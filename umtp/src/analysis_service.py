@@ -138,6 +138,7 @@ def _build_telegram_message(
     risk_result,
     *,
     screen_inch_defaulted=False,
+    screen_inch=13,
 ):
     risk_level = risk_result.get("risk_level", "none")
     is_exchange_post = bool(risk_result.get("is_exchange_post", False))
@@ -152,8 +153,8 @@ def _build_telegram_message(
     header = "".join(prefix_parts)
 
     defaulted_message = ""
-    if screen_inch_defaulted:
-        defaulted_message = "화면 크기: 13인치 기본값 사용\n"
+    if screen_inch_defaulted and screen_inch is not None:
+        defaulted_message = f"화면 크기: {screen_inch}인치 기본값 사용\n"
 
     exclude_notice = ""
     if risk_level == "exclude":
@@ -500,6 +501,7 @@ def analyze_url_for_user(
                             url=url,
                             risk_result=risk_result,
                             screen_inch_defaulted=parsed_spec.get("screen_inch_defaulted", False),
+                            screen_inch=parsed_spec.get("screen_inch"),
                         ),
                         chat_id=user_chat_id,
                         allow_global_fallback=allow_global_fallback,
