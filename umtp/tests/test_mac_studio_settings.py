@@ -50,6 +50,23 @@ class MacStudioSettingsTest(unittest.TestCase):
         self.assertEqual((parsed["ram_gb"], parsed["ssd_gb"]), (512, 16384))
         self.assertEqual(parse_listing_title("맥스튜디오 M2맥스 기본형")["ram_gb"], 32)
 
+    def test_structured_family_uses_explicit_tier_or_a_single_catalog_option(self):
+        for title, cpu, chip in (("Mac Studio M1 Max 32GB 512GB", "M1", "M1 Max"),
+                                 ("Mac Studio M4 Max 36GB 512GB", "M4", "M4 Max"),
+                                 ("Mac Studio 36GB 512GB", "M4", "M4 Max")):
+            with self.subTest(title=title, cpu=cpu):
+                parsed = parse_listing_text(title, self_check_fields={"CPU종류": cpu})
+                self.assertTrue(parsed["parse_success"], parsed)
+                self.assertEqual(parsed["chip"], chip)
+                self.assertEqual(parsed["screen_inch"], 0)
+                self.assertEqual(parsed["detected_patterns"]["chip"]["source"], "inferred_structured_chip_family")
+        for title, cpu in (("Mac Studio 64GB 1TB", "M1"),
+                           ("Mac Studio M1 Max 32GB 512GB", "M2"),
+                           ("Mac Studio M1 Max 32GB 512GB", "M1 Ultra"),
+                           ("Mac Studio M4 Max 32GB 512GB", "M4")):
+            with self.subTest(title=title, cpu=cpu):
+                self.assertFalse(parse_listing_text(title, self_check_fields={"CPU종류": cpu})["parse_success"])
+
     def test_invalid_seed_combinations_and_ambiguous_listings_are_rejected(self):
         for title in ("Mac Studio M3 Max 36GB 1TB", "Mac Studio M4 Ultra 128GB 1TB",
                       "Mac Studio M5 Max 36GB 1TB", "Mac Studio M3 96GB 1TB",

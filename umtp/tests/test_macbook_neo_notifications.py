@@ -35,9 +35,9 @@ class MacBookNeoNotificationsTest(unittest.TestCase):
             groups = worker.list_grouped_read_alert_events_for_user("neo-user")
         self.assertEqual(list(groups), ["M1", "M5 MAX", "A18 PRO", "INTEL", "기타"])
 
-    def analyze(self, ssd, price, enabled=True, detail=None):
+    def analyze(self, ssd, price, enabled=True, detail=None, title=None, body=None, self_check_fields=None, drop_rate=20):
         fair_price = 850000 if ssd == 256 else 900000
-        title = "맥북네오 A18 Pro " + (detail or f"13인치 8GB {ssd}GB")
+        title = title or "맥북네오 A18 Pro " + (detail or f"13인치 8GB {ssd}GB")
         connection = Mock()
         connection.cursor.return_value.fetchone.return_value = None
         stored = {}
@@ -50,7 +50,7 @@ class MacBookNeoNotificationsTest(unittest.TestCase):
 
         job = dict(id=1, user_id="neo-user", product_id="1001", url="https://web.joongna.com/product/1001",
                    title=title, price_krw=price, trigger_reason="new", search_keyword="맥북 네오")
-        page = dict(title=title, description="정상 판매합니다.", listing_price_krw=price, self_check_fields={})
+        page = dict(title=title, description=body or "정상 판매합니다.", listing_price_krw=price, self_check_fields=self_check_fields or {})
         with ExitStack() as stack:
             for module, name, value in [
                 (pipeline, "get_connection", connection), (pipeline, "fetch_html", "<html></html>"),
@@ -58,7 +58,7 @@ class MacBookNeoNotificationsTest(unittest.TestCase):
                 (pipeline, "persist_latest_search_result_enrichment", None),
                 (pipeline, "update_seen_product_content_snapshot", None),
                 (pipeline, "is_user_fair_price_target_enabled", enabled),
-                (pipeline, "resolve_fair_price_for_user", dict(fair_price_krw=fair_price, alert_drop_rate_percent=20, source="mac_fair_prices")),
+                (pipeline, "resolve_fair_price_for_user", dict(fair_price_krw=fair_price, alert_drop_rate_percent=drop_rate, source="mac_fair_prices")),
                 (pipeline, "save_listing_analysis_result", {"diff_ratio": (fair_price - price) * 100 / fair_price}),
                 (pipeline, "save_success_log", None),
                 (worker, "mark_alert_event_sending", True), (worker, "get_alert_event_by_id", stored),
@@ -95,6 +95,54 @@ class MacBookNeoNotificationsTest(unittest.TestCase):
                 self.assertEqual(result["alert_skip_reason"], reason)
                 create.assert_not_called()
                 send.assert_not_called()
+
+    def test_chipless_neo_listings_reach_alert_and_telegram_when_price_matches(self):
+        for ssd, threshold in ((256, 680000), (512, 720000)):
+            for title in (f"맥북 네오 {ssd}GB 미개봉", f"MacBook Neo 8/{ssd}"):
+                with self.subTest(title=title):
+                    result, create, send = self.analyze(ssd, threshold, title=title)
+                    self.assertTrue(result["alert_created"], result)
+                    self.assertEqual(result["alert_dispatch_status"], "sent")
+                    parsed = create.call_args.kwargs["parsed_spec"]
+                    self.assertTrue(parsed["chip_defaulted"])
+                    self.assertEqual(parsed["chip"], "A18 Pro")
+                    self.assertEqual(parsed["ssd_gb"], ssd)
+                    send.assert_called_once()
+                    self.assertIn("칩\nA18 Pro", send.call_args.args[0])
+                    self.assertIn(f"SSD\n{ssd}GB", send.call_args.args[0])
+                    result, create, send = self.analyze(ssd, threshold + 1, title=title)
+                    self.assertFalse(result["is_alert_target"], result)
+                    create.assert_not_called()
+                    send.assert_not_called()
+
+    def test_chipless_unresolved_or_non_computer_listings_do_not_alert(self):
+        for title in ("맥북 네오 판매", "맥북 네오 256GB 케이스", "맥북 네오 256GB 박스만",
+                      "맥북 네오 256GB 구합니다", "맥북 네오 M6 8GB 256GB"):
+            with self.subTest(title=title):
+                result, create, send = self.analyze(256, 600000, title=title)
+                self.assertFalse(result["is_alert_target"], result)
+                self.assertEqual(result["alert_skip_reason"], "parse_failed")
+                create.assert_not_called()
+                send.assert_not_called()
+
+    def test_live_neo_shaped_detail_is_analyzed_but_still_obeys_price_threshold(self):
+        title = "맥북 네오 512GB 터치아이디 가능 배터리성능 100% 풀박스 급처해요"
+        body = "특S급 맥북 네오 인디고 색상 512GB 판매해요. 네오 512GB라 터치아이디도 됩니다(256GB는 안돼요)"
+        fields = {"CPU종류": "A18", "SSD용량": "512GB", "모델명": "맥북 네오 NEO", "램 용량": "8GB"}
+        for price, expected in ((950000, False), (900000, True), (850000, True)):
+            with self.subTest(price=price):
+                result, create, send = self.analyze(512, price, title=title, body=body,
+                                                   self_check_fields=fields, drop_rate=0)
+                self.assertTrue(result["matched_watch_rule"], result)
+                self.assertEqual(result["target_price_krw"], 900000)
+                self.assertEqual(result["is_alert_target"], expected)
+                if expected:
+                    self.assertEqual(create.call_args.kwargs["parsed_spec"]["chip"], "A18 Pro")
+                    send.assert_called_once()
+                else:
+                    self.assertEqual(result["alert_skip_reason"], "drop_rate_below_threshold")
+                    create.assert_not_called()
+                    send.assert_not_called()
 
 
 if __name__ == "__main__":

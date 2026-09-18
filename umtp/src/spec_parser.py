@@ -7,6 +7,8 @@ try:
         MACBOOK_PRO_PRODUCT_TYPE,
         MACBOOK_NEO_PRODUCT_TYPE,
         VALID_MACBOOK_PRO_UNITS,
+        VALID_MACBOOK_NEO_UNITS,
+        VALID_SILICON_UNITS_BY_PRODUCT,
         SUPPORTED_PRODUCT_TYPES,
         MAC_MINI_PRODUCT_TYPE,
         IMAC_PRODUCT_TYPE,
@@ -21,6 +23,8 @@ except ImportError:
         MACBOOK_PRO_PRODUCT_TYPE,
         MACBOOK_NEO_PRODUCT_TYPE,
         VALID_MACBOOK_PRO_UNITS,
+        VALID_MACBOOK_NEO_UNITS,
+        VALID_SILICON_UNITS_BY_PRODUCT,
         SUPPORTED_PRODUCT_TYPES,
         MAC_MINI_PRODUCT_TYPE,
         IMAC_PRODUCT_TYPE,
@@ -109,6 +113,10 @@ SPEC_CONTEXT_KEYWORDS = [
     "macmini",
     "imac",
     "아이맥",
+    "neo",
+    "네오",
+    "studio",
+    "스튜디오",
     "gb",
     "기가",
     "tb",
@@ -505,12 +513,15 @@ def _extract_chip_candidates_for_product(text, product_type):
         # listings instead of silently reducing them to the supported A18 Pro.
         if not isinstance(text, str):
             return []
-        candidates = _extract_unique_macbook_pro_chip_candidates(text)
-        pattern = r"(?<![a-z0-9])a\s*(\d+)(?:\s*-?\s*(pro|프로))?(?![a-z0-9])"
+        candidates = []
+        pattern = r"(?<![a-z0-9])([am])\s*(\d+)(?:\s*-?\s*(pro|max|ultra|프로|맥스|울트라))?"
         for match in re.finditer(pattern, text.lower()):
-            candidate = f"A{match.group(1)}" + (" Pro" if match.group(2) else "")
+            tier = {"pro": "Pro", "프로": "Pro", "max": "Max", "맥스": "Max", "ultra": "Ultra", "울트라": "Ultra"}.get(match.group(3))
+            candidate = f"{match.group(1).upper()}{match.group(2)}" + (f" {tier}" if tier else "")
             if candidate not in candidates:
                 candidates.append(candidate)
+        if re.search(r"intel|인텔|(?<![a-z0-9])i[3579](?!\d)|xeon|제온|ryzen|라이젠|\bamd\b|core\s*ultra", text, flags=re.IGNORECASE):
+            candidates.append("unsupported CPU")
         return candidates
     if product_type == IMAC_PRODUCT_TYPE:
         if not isinstance(text, str):
@@ -532,6 +543,84 @@ def _extract_chip_candidates_for_product(text, product_type):
     if product_type == MAC_MINI_PRODUCT_TYPE:
         return _extract_unique_mac_mini_chip_candidates(text)
     return _extract_unique_chip_candidates(text)
+
+
+def _can_infer_neo_chip(title, cpu_raw, model_name=None):
+    # Unknown explicit CPU fields are not evidence for the catalog's sole chip.
+    if cpu_raw:
+        return False
+    if not any(MACBOOK_NEO_PRODUCT_TYPE in _detect_product_types(value) for value in (title, model_name)):
+        return False
+    # Keep chip-less accessory/box-only/wanted titles from becoming complete
+    # computer listings solely through catalog defaults.
+    non_computer_title = (
+        r"(?:케이스|파우치|보호필름|거치대|충전기)(?!\s*(?:포함|증정|같이|덤))"
+        r"|(?:박스|상자)\s*만|\b(?:case|sleeve|charger|wtb|wanted)\b|\bbox\s*only\b"
+        r"|구합니다|삽니다|매입|구매\s*(?:희망|원합니다)"
+    )
+    return not re.search(non_computer_title, title, flags=re.IGNORECASE)
+
+
+def _resolve_structured_chip_family(title, body_text, model_name, cpu_raw):
+    context = " ".join((title, body_text or "", model_name or ""))
+    products = _detect_product_types(context)
+    if len(products) != 1:
+        return None
+    product = products[0]
+    if not any(product in _detect_product_types(value) for value in (title, model_name)):
+        return None
+    if product == MACBOOK_NEO_PRODUCT_TYPE and not _can_infer_neo_chip(title, None, model_name):
+        return None
+    family = re.sub(r"\s+", "", cpu_raw or "").upper()
+    if not re.fullmatch(r"[AM]\d+", family):
+        return None
+    catalog = VALID_SILICON_UNITS_BY_PRODUCT.get(product, {})
+    compatible = [chip for chip in catalog if chip.split()[0] == family]
+    explicit = _extract_chip_candidates_for_product(" ".join((title, model_name or "")), product)
+    if len(explicit) == 1 and explicit[0] in compatible and explicit[0] != family:
+        return explicit[0]
+    if not explicit and len(compatible) == 1 and compatible[0] != family:
+        return compatible[0]
+    return None
+
+
+def _strip_storage_comparison_asides(title, body_text, self_check_fields):
+    """Exclude narrowly worded feature comparisons, never contrary sale specs."""
+    if not body_text or not self_check_fields.get("SSD용량"):
+        return body_text, []
+    aside_pattern = re.compile(
+        r"\(\s*(\d+(?:\.\d+)?\s*(?:gb|기가|tb|테라))\s*(?:는|은)\s*"
+        r"(?:(?:터치\s*아이디|touch\s*id)\s*(?:가|는)?\s*)?"
+        r"(?:안\s*(?:돼요|되요|됩니다|됨)|미지원|지원\s*불가)\s*[.!]?\s*\)",
+        flags=re.IGNORECASE,
+    )
+    if not aside_pattern.search(body_text):
+        return body_text, []
+    # Both independent sources must specify the same storage. The recursive
+    # parses have no body, so they cannot enter this comparison filter again.
+    title_spec = parse_listing_title(title)
+    structured_spec = parse_listing_title(title, self_check_fields=self_check_fields)
+    if not title_spec.get("parse_success") or not structured_spec.get("parse_success"):
+        return body_text, []
+    expected_ssd = title_spec.get("ssd_gb")
+    title_ssd_pattern = title_spec.get("detected_patterns", {}).get("ssd_gb", {})
+    structured_ssd_pattern = structured_spec.get("detected_patterns", {}).get("ssd_gb", {})
+    if (
+        expected_ssd != structured_spec.get("ssd_gb")
+        or title_ssd_pattern.get("source") == "fallback_base_model"
+        or structured_ssd_pattern.get("source") != "self_check"
+    ):
+        return body_text, []
+    removed = []
+
+    def replace(match):
+        compared_values = _extract_ssd_gb_candidates_from_text(normalize_for_spec_parsing(match.group(1)))
+        if len(compared_values) != 1 or compared_values[0] == expected_ssd:
+            return match.group(0)
+        removed.append(match.group(0))
+        return " "
+
+    return aside_pattern.sub(replace, body_text), removed
 
 
 def _imac_has_unsupported_explicit_capacity(text, ram_raw, ssd_raw):
@@ -666,6 +755,9 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
     cpu_raw = normalized_self_check.get("CPU종류")
     ram_raw = normalized_self_check.get("램 용량")
     ssd_raw = normalized_self_check.get("SSD용량")
+    inferred_structured_chip = _resolve_structured_chip_family(
+        title, body_text, model_name_raw, cpu_raw,
+    )
 
     self_check_segments = []
     if isinstance(self_check_text, str) and self_check_text.strip():
@@ -677,7 +769,18 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
     ))
 
     combined_text = _normalize_text(" ".join([title, body_text or "", " ".join(self_check_segments)]))
-    normalized_text, removed_noise_fragments = _normalize_for_spec_parsing_with_meta(combined_text)
+    parsing_body, comparison_fragments = _strip_storage_comparison_asides(title, body_text, normalized_self_check)
+    parsing_self_check = dict(normalized_self_check)
+    if inferred_structured_chip is not None:
+        parsing_self_check["CPU종류"] = inferred_structured_chip
+    parsing_segments = [self_check_text] if isinstance(self_check_text, str) and self_check_text.strip() else []
+    parsing_segments.extend(_collect_self_check_spec_segments(
+        parsing_self_check,
+        label_capacities=IMAC_PRODUCT_TYPE in _detect_product_types(title + " " + (model_name_raw or "")),
+    ))
+    parsing_input = _normalize_text(" ".join([title, parsing_body or "", " ".join(parsing_segments)]))
+    normalized_text, removed_noise_fragments = _normalize_for_spec_parsing_with_meta(parsing_input)
+    removed_noise_fragments.extend(comparison_fragments)
     parsing_text = normalized_text or _normalize_text(title.lower())
 
     detected_patterns = {}
@@ -687,6 +790,7 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
     product_type = None
     product_type_ambiguous = False
     chip = None
+    chip_defaulted = inferred_structured_chip is not None
     chip_ambiguous = False
     screen_inch = None
     ram_gb = None
@@ -728,6 +832,7 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
             "parse_success": False,
             "product_type": None,
             "chip": None,
+            "chip_defaulted": False,
             "screen_inch": None,
             "screen_inch_defaulted": False,
             "ram_gb": None,
@@ -757,14 +862,15 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         chip_ambiguous = True
         _record_conflict(detected_conflicts, "chip", "unresolved", None, "self_check", model_chip_candidates)
 
-    cpu_chip_candidates = _extract_chip_candidates_for_product(cpu_raw, product_type)
+    cpu_chip_candidates = _extract_chip_candidates_for_product(inferred_structured_chip or cpu_raw, product_type)
     if len(cpu_chip_candidates) == 1:
         chip_cpu = cpu_chip_candidates[0]
         if chip is not None and chip != chip_cpu:
             chip_ambiguous = True
             _record_conflict(detected_conflicts, "chip", "self_check", chip, "self_check", chip_cpu)
         chip = chip_cpu
-        _record_pattern(detected_patterns, "chip", chip_cpu, "self_check", cpu_raw)
+        chip_source = "inferred_structured_chip_family" if inferred_structured_chip else "self_check"
+        _record_pattern(detected_patterns, "chip", chip_cpu, chip_source, cpu_raw)
     elif len(cpu_chip_candidates) >= 2:
         chip_ambiguous = True
         _record_conflict(detected_conflicts, "chip", "unresolved", None, "self_check", cpu_chip_candidates)
@@ -947,6 +1053,19 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         ssd_ambiguous = True
         _record_conflict(detected_conflicts, "ssd_gb", "unresolved", None, "text", numeric_candidates["ssd_candidates"])
 
+    if (
+        product_type == MACBOOK_NEO_PRODUCT_TYPE
+        and not product_type_ambiguous
+        and chip is None
+        and not chip_ambiguous
+        and len(VALID_MACBOOK_NEO_UNITS) == 1
+        and _can_infer_neo_chip(title, cpu_raw, model_name_raw)
+        and not _extract_chip_candidates_for_product(combined_text, product_type)
+    ):
+        chip = next(iter(VALID_MACBOOK_NEO_UNITS))
+        chip_defaulted = True
+        _record_pattern(detected_patterns, "chip", chip, "inferred_single_product_chip", product_type)
+
     if product_type in (MACBOOK_AIR_PRODUCT_TYPE, MACBOOK_NEO_PRODUCT_TYPE) and screen_inch is None:
         screen_inch = DEFAULT_SCREEN_INCH
         screen_inch_defaulted = True
@@ -991,7 +1110,9 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
                 ram_gb = base_spec.get("ram_gb")
                 if ram_gb is not None:
                     _record_pattern(detected_patterns, "ram_gb", ram_gb, "fallback_base_model", fallback_source)
-            if ssd_gb is None:
+            # A chip-less Neo has one chip/RAM option, but two SSD options.
+            # Require storage evidence or an explicit base-model description.
+            if ssd_gb is None and (product_type != MACBOOK_NEO_PRODUCT_TYPE or not chip_defaulted or has_base_model_keyword):
                 ssd_gb = base_spec.get("ssd_gb")
                 if ssd_gb is not None:
                     _record_pattern(detected_patterns, "ssd_gb", ssd_gb, "fallback_base_model", fallback_source)
@@ -1005,7 +1126,7 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
     if product_type is not None:
         confidence_score += 20
     if chip is not None:
-        confidence_score += 25
+        confidence_score += 10 if chip_defaulted else 25
     if ram_gb is not None:
         confidence_score += 25
     if ssd_gb is not None:
@@ -1065,6 +1186,7 @@ def parse_listing_text(title: str, body_text: Optional[str] = None, self_check_t
         "parse_success": parse_success,
         "product_type": product_type,
         "chip": chip,
+        "chip_defaulted": chip_defaulted,
         "screen_inch": screen_inch,
         "screen_inch_defaulted": screen_inch_defaulted,
         "ram_gb": ram_gb,

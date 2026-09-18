@@ -74,6 +74,11 @@ class SpecParserIMacTest(unittest.TestCase):
         self.assert_spec("iMac M4 24인치 memory 24GB storage 512GB", "M4", 24, 512)
         self.assert_spec("iMac M4", "M4", 24, 512, self_check_fields={"램 용량": "24", "SSD용량": "512"})
 
+    def test_structured_base_chip_needs_no_refinement_and_other_generation_conflicts(self):
+        parsed = self.assert_spec("iMac M1 8GB 512GB", "M1", 8, 512, self_check_fields={"CPU종류": "M1"})
+        self.assertFalse(parsed["chip_defaulted"])
+        self.assertFalse(parse_listing_text("iMac M1 8GB 512GB", self_check_fields={"CPU종류": "M3"})["parse_success"])
+
     def test_unsupported_models_and_unseeded_options_are_rejected(self):
         for text in (
             "아이맥 Intel i5 27인치 8GB 256GB", "iMac M1 Intel 24인치 8GB 256GB",

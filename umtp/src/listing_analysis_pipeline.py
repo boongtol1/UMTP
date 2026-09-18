@@ -39,7 +39,7 @@ try:
     from src.search_result_enrichment import (
         persist_latest_search_result_enrichment,
     )
-    from src.spec_parser import parse_listing_title
+    from src.spec_parser import parse_listing_text, parse_listing_title
     from src.user_fair_price import (
         is_user_fair_price_target_enabled,
         resolve_fair_price_for_user,
@@ -81,7 +81,7 @@ except ModuleNotFoundError:
     from search_result_enrichment import (
         persist_latest_search_result_enrichment,
     )
-    from spec_parser import parse_listing_title
+    from spec_parser import parse_listing_text, parse_listing_title
     from user_fair_price import (
         is_user_fair_price_target_enabled,
         resolve_fair_price_for_user,
@@ -1513,7 +1513,9 @@ def analyze_listing_once(job, cursor):
             self_check_fields = page.get("self_check_fields") or {}
             parse_text = f"{title or ''} {description or ''}".strip()
             try:
-                parsed_spec = parse_listing_title(parse_text, self_check_fields=self_check_fields) if parse_text else _build_parse_failure_result("detail_parse_empty")
+                parsed_spec = parse_listing_text(
+                    title=title, body_text=description, self_check_fields=self_check_fields,
+                ) if parse_text else _build_parse_failure_result("detail_parse_empty")
             except Exception:
                 parsed_spec = _build_parse_failure_result("detail_parse_exception")
         except Exception as exc:

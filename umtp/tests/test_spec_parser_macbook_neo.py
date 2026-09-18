@@ -38,7 +38,86 @@ class SpecParserMacBookNeoTest(unittest.TestCase):
         self.assertTrue(parsed["screen_inch_defaulted"])
         self.assertEqual(parsed["detected_patterns"]["ram_gb"]["source"], "fallback_base_model")
         self.assert_neo("MacBook Neo A18 Pro 8GB")
-        self.assertFalse(parse_listing_title("맥북네오 8GB 256GB")["parse_success"])
+        self.assert_neo("맥북네오 8GB 256GB")
+
+    def test_missing_chip_is_inferred_from_unique_neo_catalog_chip(self):
+        for name in ("맥북네오", "맥북 네오", "MacBook Neo", "macbookneo"):
+            for ssd in (256, 512):
+                for capacity in (str(ssd), f"{ssd}GB", f"8/{ssd}"):
+                    with self.subTest(name=name, capacity=capacity):
+                        parsed = self.assert_neo(f"{name} {capacity} 미개봉", ssd)
+                        self.assertTrue(parsed["chip_defaulted"])
+                        self.assertEqual(parsed["detected_patterns"]["chip"]["source"], "inferred_single_product_chip")
+                        explicit = parse_listing_title(f"{name} A18 Pro {capacity} 미개봉")
+                        self.assertFalse(explicit["chip_defaulted"])
+                        self.assertLess(parsed["confidence_score"], explicit["confidence_score"])
+
+    def test_missing_chip_inference_uses_storage_in_body_or_structured_fields(self):
+        for kwargs in ({"body_text": "512GB 모델 판매합니다"},
+                       {"self_check_fields": {"모델명": "MacBook Neo", "SSD용량": "512GB"}}):
+            with self.subTest(kwargs=kwargs):
+                parsed = parse_listing_text("맥북 네오 판매", **kwargs)
+                self.assertTrue(parsed["parse_success"], parsed)
+                self.assertEqual((parsed["chip"], parsed["ram_gb"], parsed["ssd_gb"]), ("A18 Pro", 8, 512))
+                self.assertTrue(parsed["chip_defaulted"])
+
+    def test_structured_neo_cpu_family_has_a_unique_catalog_refinement(self):
+        parsed = parse_listing_text("맥북 네오 512GB 판매", self_check_fields={
+            "모델명": "맥북 네오 NEO", "CPU종류": "A18", "램 용량": "8GB", "SSD용량": "512GB",
+        })
+        self.assertTrue(parsed["parse_success"], parsed)
+        self.assertEqual(parsed["chip"], "A18 Pro")
+        self.assertTrue(parsed["chip_defaulted"])
+        self.assertEqual(parsed["detected_patterns"]["chip"], {
+            "value": "A18 Pro", "source": "inferred_structured_chip_family", "raw": "A18",
+        })
+        self.assertTrue(parsed["original_text"].endswith("A18"), parsed["original_text"])
+        for text in ("맥북 네오 A18 8GB 512GB", "맥북 네오 M1 8GB 512GB"):
+            parsed = parse_listing_text(text, self_check_fields={"CPU종류": "A18"})
+            self.assertFalse(parsed["parse_success"], parsed)
+
+    def test_body_only_neo_mention_cannot_infer_chip_for_another_listing(self):
+        for title in ("아이폰 256GB 판매", "노트북 256GB 판매"):
+            parsed = parse_listing_text(title, body_text="맥북 네오도 쓰고 있어요")
+            self.assertFalse(parsed["parse_success"], parsed)
+            self.assertFalse(parsed["chip_defaulted"])
+        parsed = parse_listing_text("노트북 512GB 판매", self_check_fields={"모델명": "MacBook Neo"})
+        self.assertTrue(parsed["parse_success"], parsed)
+
+    def test_inferred_chip_does_not_guess_between_storage_options(self):
+        for title in ("맥북 네오 판매", "맥북 네오 8GB", "맥북 네오 13인치"):
+            with self.subTest(title=title):
+                parsed = parse_listing_title(title)
+                self.assertFalse(parsed["parse_success"])
+                self.assertIn("ssd_gb", parsed["missing_fields"])
+        self.assert_neo("맥북 네오 기본형")
+
+    def test_chip_inference_does_not_override_unsupported_or_ambiguous_hardware(self):
+        for detail in ("A18", "A18 Max", "A19 Pro", "M1", "M6", "M10", "Intel", "i7", "Ryzen",
+                       "A18 Pro M6", "A18 Pro Intel", "MacBook Air", "iMac", "Mac Studio"):
+            with self.subTest(detail=detail):
+                parsed = parse_listing_title(f"맥북 네오 {detail} 8GB 256GB")
+                self.assertFalse(parsed["parse_success"], parsed)
+                self.assertFalse(parsed["chip_defaulted"])
+        for cpu in ("Intel", "M6", "unknown processor"):
+            parsed = parse_listing_text("맥북 네오 256GB", self_check_fields={"CPU종류": cpu})
+            self.assertFalse(parsed["parse_success"], parsed)
+        for title in ("MacBook Neo A19Pro256GB", "맥북네오 M6max256GB"):
+            parsed = parse_listing_title(title)
+            self.assertFalse(parsed["parse_success"], parsed)
+            self.assertFalse(parsed["chip_defaulted"])
+        for detail in ("16GB 256GB", "8GB 1TB", "14인치 8GB 256GB", "8GB 256GB 512GB"):
+            self.assertFalse(parse_listing_title("맥북 네오 " + detail)["parse_success"])
+
+    def test_chipless_accessory_box_only_and_wanted_titles_are_not_inferred(self):
+        for title in ("맥북 네오 256GB 케이스", "맥북네오 512GB 파우치 판매", "맥북 네오 256 박스만",
+                      "맥북네오 256GB 구합니다", "맥북네오 512GB 삽니다", "MacBook Neo 256GB case",
+                      "MacBook Neo 512GB box only", "WTB MacBook Neo 256GB"):
+            with self.subTest(title=title):
+                parsed = parse_listing_title(title)
+                self.assertFalse(parsed["parse_success"], parsed)
+                self.assertFalse(parsed["chip_defaulted"])
+        self.assert_neo("맥북 네오 256GB 케이스 포함 판매")
 
     def test_self_check_preserves_a18_pro_and_storage(self):
         parsed = parse_listing_text("맥북 네오 판매", self_check_fields={

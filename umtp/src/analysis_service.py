@@ -10,7 +10,7 @@ from src.alert_price_direction import (
 from src.db import get_connection
 from src.listing_page_parser import fetch_html, parse_joongna_listing_page
 from src.risk_analyzer import analyze_risk
-from src.spec_parser import parse_listing_title
+from src.spec_parser import parse_listing_text
 from src.telegram_notifier import send_telegram_alert
 from src.url_history import find_existing_url_record, save_duplicate_url_record
 from src.user_alert_settings import resolve_user_alert_delivery_policy
@@ -380,7 +380,7 @@ def analyze_url_for_user(
 
         parsing_source_text = f"{title} {description}"
         risk_result = analyze_risk(parsing_source_text, self_check_fields=self_check_fields)
-        parsed_spec = parse_listing_title(parsing_source_text, self_check_fields=self_check_fields)
+        parsed_spec = parse_listing_text(title, body_text=description, self_check_fields=self_check_fields)
 
         if not parsed_spec.get("parse_success", False):
             return fail(_build_parse_failure_reason(parsed_spec), source=SOURCE_NAME)

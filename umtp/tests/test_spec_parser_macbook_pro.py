@@ -107,6 +107,17 @@ class SpecParserMacBookProTest(unittest.TestCase):
         self.assertEqual(parsed["ssd_gb"], 8192)
         self.assertEqual(parsed["ram_gb"], 128)
 
+    def test_broad_structured_chip_family_requires_explicit_compatible_tier(self):
+        title = "MacBook Pro M1 Pro 14인치 16GB 512GB"
+        parsed = parse_listing_text(title, self_check_fields={"CPU종류": "M1"})
+        self.assertTrue(parsed["parse_success"], parsed)
+        self.assertEqual(parsed["chip"], "M1 Pro")
+        self.assertEqual(parsed["detected_patterns"]["chip"]["source"], "inferred_structured_chip_family")
+        for title, cpu in ((title, "M2"), (title, "M1 Max"),
+                           ("MacBook Pro 14인치 18GB 512GB", "M3")):
+            with self.subTest(title=title, cpu=cpu):
+                self.assertFalse(parse_listing_text(title, self_check_fields={"CPU종류": cpu})["parse_success"])
+
     def test_unsupported_combinations_are_rejected(self):
         for text in (
             "맥북프로 M1 14인치 8GB 256GB",

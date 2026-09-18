@@ -87,7 +87,7 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
 
     def _mock_parsing(self):
         return patch(
-            "src.listing_analysis_pipeline.parse_listing_title",
+            "src.listing_analysis_pipeline.parse_listing_text",
             return_value={
                 "parse_success": True,
                 "product_type": "MacBook Air",
@@ -323,7 +323,7 @@ class ListingAnalysisPipelineTest(unittest.TestCase):
                 },
             ):
                 with patch(
-                    "src.listing_analysis_pipeline.parse_listing_title",
+                    "src.listing_analysis_pipeline.parse_listing_text",
                     return_value={
                         "parse_success": True,
                         "product_type": "MacBook Air",

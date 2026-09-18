@@ -77,7 +77,7 @@ class ListingAnalysisGroupsTest(unittest.TestCase):
             "title": "맥북에어 M2 8GB 256GB", "description": "정상 작동", "listing_price_krw": 600000,
             "self_check_fields": {},
         })
-        self.spec = self.mock("parse_listing_title", return_value=SPEC)
+        self.spec = self.mock("parse_listing_text", return_value=SPEC)
         self.risk = self.mock("analyze_risk", return_value={"risk_score": 0, "risk_level": "LOW"})
         self.snapshot = self.mock("update_seen_product_content_snapshot")
         self.enrichment = self.mock("persist_latest_search_result_enrichment")

@@ -1,6 +1,6 @@
 from db import get_connection
 from listing_page_parser import fetch_html, parse_joongna_listing_page
-from spec_parser import parse_listing_title
+from spec_parser import parse_listing_text
 
 
 FIELD_LABELS = {
@@ -136,8 +136,7 @@ def main():
         print(f"{listing_price_krw}원")
         print()
 
-        parsing_source_text = f"{title} {description}"
-        parsed_spec = parse_listing_title(parsing_source_text, self_check_fields=self_check_fields)
+        parsed_spec = parse_listing_text(title, body_text=description, self_check_fields=self_check_fields)
         missing_fields = find_missing_spec_fields(parsed_spec)
         if missing_fields:
             missing_labels = [FIELD_LABELS[field] for field in missing_fields]
