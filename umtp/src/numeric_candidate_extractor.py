@@ -134,3 +134,76 @@ def extract_numeric_candidates(text, screen_values=SCREEN_VALUES):
                 _add_candidate(result, field, value, match.group())
 
     return result
+
+
+def extract_studio_numeric_candidates(text):
+    """Resolve Studio's overlapping 256/512GB RAM and SSD by role, then order.
+
+    Keep these capacities separate from the laptop/Mini extractor: their 512GB
+    storage must never become RAM. Explicit labels own their entire token, while
+    a pair such as 512/16TB or 512GB 16384GB means RAM followed by storage.
+    """
+    result = {"screen_candidates": [], "ram_candidates": [], "ssd_candidates": [],
+              "screen_ram_ambiguous": False, "detected_patterns": {}}
+    if not isinstance(text, str):
+        return result
+    ram_values = RAM_VALUES + (192, 256, 512)
+    ssd_values = SSD_VALUES + (16384,)
+    ram_pattern = "|".join(map(str, ram_values))
+    ssd_pattern = "|".join(map(str, ssd_values))
+    capacity_pattern = rf"(?:\d+\s*(?:tb|t|테라|gb|g|기가)|(?:{ssd_pattern}|{ram_pattern}))"
+    occupied = []
+
+    def overlaps(match):
+        return any(match.start() < end and start < match.end() for start, end in occupied)
+
+    def capacity(token):
+        match = re.match(r"(\d+)\s*(tb|t|테라)?", token, re.IGNORECASE)
+        return int(match.group(1)) * (1024 if match.group(2) else 1)
+
+    for match in re.finditer(rf"(?<![\d.])(\d+(?:\.\d+)?)(?:\s*{SCREEN_UNIT_PATTERN}|-inch)", text, re.IGNORECASE):
+        _add_candidate(result, "screen_inch", int(float(match.group(1))), match.group())
+        occupied.append(match.span())
+
+    explicit_capacity = r"\d+(?:\s*(?:tb|t|테라|gb|g|기가))?"
+    for field, label in (
+        ("ram_gb", r"(?:램(?:\s*용량)?|ram|메모리|memory)"),
+        ("ssd_gb", r"(?:ssd(?:\s*용량)?|저장\s*용량|스토리지|storage)"),
+    ):
+        for pattern in (
+            rf"{label}\s*[:=]?\s*({explicit_capacity})(?![a-z0-9])",
+            rf"(?<![a-z0-9])({explicit_capacity})\s*{label}(?![a-z])",
+        ):
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                if overlaps(match):
+                    continue
+                value = capacity(match.group(1))
+                # Preserve explicit but unsupported capacities for validation;
+                # they must not quietly fall back to the base specification.
+                _add_candidate(result, field, value, match.group())
+                occupied.append(match.span())
+
+    for match in re.finditer(rf"(?<![a-z0-9])({ram_pattern})\s*/\s*({capacity_pattern})(?![a-z0-9])", text, re.IGNORECASE):
+        if overlaps(match):
+            continue
+        _add_candidate(result, "ram_gb", int(match.group(1)), match.group())
+        _add_candidate(result, "ssd_gb", capacity(match.group(2)), match.group())
+        occupied.append(match.span())
+
+    tokens = [match for match in re.finditer(rf"(?<![a-z0-9.])({capacity_pattern})(?![a-z0-9.])", text, re.IGNORECASE) if not overlaps(match)]
+    for index, match in enumerate(tokens):
+        value = capacity(match.group(1))
+        if re.search(r"(?:tb|t|테라)", match.group(1), re.IGNORECASE):
+            _add_candidate(result, "ssd_gb", value, match.group())
+            continue
+        is_shared = value in ram_values and value in ssd_values
+        later_storage = any(capacity(other.group(1)) in ssd_values for other in tokens[index + 1:])
+        if value in ram_values and (
+            not is_shared or (not result["ram_candidates"] and (later_storage or result["ssd_candidates"]))
+        ):
+            _add_candidate(result, "ram_gb", value, match.group())
+        elif value in ssd_values:
+            _add_candidate(result, "ssd_gb", value, match.group())
+        else:
+            _add_candidate(result, "ram_gb" if value < 512 else "ssd_gb", value, match.group())
+    return result
