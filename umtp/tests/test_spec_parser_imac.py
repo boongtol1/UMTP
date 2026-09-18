@@ -85,12 +85,14 @@ class SpecParserIMacTest(unittest.TestCase):
             "iMac M4 24인치 RAM12GB SSD256GB", "iMac M4 24인치 RAM16GB SSD128GB",
             "iMac M4 24인치 12GB 256GB", "iMac M3 24인치 16GB 1.5TB",
             "iMac M4 24인치 RAM12 SSD256", "iMac M3 24인치 16GB 250GB",
+            "iMac M4 12/256", "iMac M4 16/250", "iMac M4 16/1.5TB",
+            "아이맥 M4 12GB판매 256GB", "아이맥 M4 12기가판매 256기가",
         ):
             with self.subTest(text=text):
                 self.assertFalse(parse_listing_title(text)["parse_success"])
 
     def test_unseeded_structured_capacity_cannot_fall_back_to_base(self):
-        for ram, ssd in (("12", "256"), ("16", "128"), ("12GB", "256GB"), ("16", "1.5TB")):
+        for ram, ssd in (("12", "256"), ("16", "128"), ("12GB", "256GB"), ("16", "1.5TB"), ("256GB", "512GB"), ("16GB", "24GB")):
             parsed = parse_listing_text("아이맥 M4", self_check_fields={"램 용량": ram, "SSD용량": ssd})
             self.assertFalse(parsed["parse_success"], parsed)
 

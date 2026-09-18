@@ -517,9 +517,15 @@ def _imac_has_unsupported_explicit_capacity(text, ram_raw, ssd_raw):
     ram_values, ssd_values = {8, 16, 24, 32}, {256, 512, 1024, 2048}
     number = r"(\d+(?:\.\d+)?)"
     for raw, allowed in ((ram_raw, ram_values), (ssd_raw, ssd_values)):
-        if isinstance(raw, str) and re.fullmatch(number, raw.strip()):
-            if float(raw) not in allowed:
+        if isinstance(raw, str):
+            match = re.search(rf"(?<![\d.]){number}\s*(tb|테라|t)?", raw, flags=re.IGNORECASE)
+            if match and float(match.group(1)) * (1024 if match.group(2) else 1) not in allowed:
                 return True
+    for match in re.finditer(rf"(?<![\d.]){number}\s*/\s*{number}\s*(tb|테라|t)?(?!\d)", text, flags=re.IGNORECASE):
+        ram = float(match.group(1))
+        ssd = float(match.group(2)) * (1024 if match.group(3) else 1)
+        if ram not in ram_values or ssd not in ssd_values:
+            return True
     for match in re.finditer(rf"(?:램|ram|메모리|memory)\s*(?:용량\s*)?{number}|(?<![a-z가-힣\d.]){number}\s*(?:램|ram)(?![a-z]|\s*\d)", text, flags=re.IGNORECASE):
         if float(match.group(1) or match.group(2)) not in ram_values:
             return True
@@ -527,7 +533,7 @@ def _imac_has_unsupported_explicit_capacity(text, ram_raw, ssd_raw):
         value = float(match.group(1) or match.group(3)) * (1024 if match.group(2) else 1)
         if value not in ssd_values:
             return True
-    for match in re.finditer(rf"(?<![\d.]){number}\s*(gb|기가|g|tb|테라|t)(?![a-z0-9가-힣])", text, flags=re.IGNORECASE):
+    for match in re.finditer(rf"(?<![\d.]){number}\s*(gb|기가|g|tb|테라|t)(?![a-z0-9])", text, flags=re.IGNORECASE):
         value = float(match.group(1))
         if match.group(2).lower() in ("tb", "테라", "t"):
             if value * 1024 not in ssd_values:
